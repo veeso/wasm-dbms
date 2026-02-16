@@ -6,7 +6,8 @@ use std::cell::RefCell;
 
 use candid::{CandidType, Deserialize, Principal};
 use ic_dbms_api::prelude::{
-    DeleteBehavior, Filter, IcDbmsResult, Query, Table, Text, TransactionId, Uint32,
+    CandidColumnDef, DeleteBehavior, Filter, IcDbmsResult, Query, Table, Text, TransactionId,
+    Uint32, Value,
 };
 use ic_dbms_client::prelude::{Client as _, IcDbmsCanisterClient};
 
@@ -94,6 +95,18 @@ pub async fn select(
     let client = new_client();
     client
         .select::<User>("users", query, transaction_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[ic_cdk::update]
+pub async fn select_raw(
+    query: Query,
+    transaction_id: Option<TransactionId>,
+) -> Result<IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>>, String> {
+    let client = new_client();
+    client
+        .select_raw("users", query, transaction_id)
         .await
         .map_err(|e| e.to_string())
 }

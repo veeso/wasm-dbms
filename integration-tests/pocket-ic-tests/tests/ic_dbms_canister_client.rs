@@ -1,6 +1,8 @@
 use candid::{Encode, Principal};
-use ic_dbms_api::prelude::{DeleteBehavior, Filter, IcDbmsResult, Query, TransactionId, Value};
-use pocket_ic_tests::table::{User, UserInsertRequest, UserRecord, UserUpdateRequest};
+use ic_dbms_api::prelude::{
+    CandidColumnDef, DeleteBehavior, Filter, IcDbmsResult, Query, TransactionId, Value,
+};
+use pocket_ic_tests::table::{UserInsertRequest, UserRecord, UserUpdateRequest};
 use pocket_ic_tests::{PocketIcClient, TestEnv};
 
 #[pocket_ic_tests_macro::test]
@@ -168,6 +170,16 @@ async fn test_should_insert_select_update_delete(env: PocketIcTestEnv) {
         records[0].email.as_ref().unwrap(),
         &"alice@example.com".into()
     );
+
+    // select raw
+    let res: Result<IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>>, String> = client
+        .update(
+            "select_raw",
+            Encode!(&query, &transaction_id).expect("Failed to encode"),
+        )
+        .await
+        .expect("Can't query");
+    assert!(res.is_ok());
 
     // Update the record
     let update_request = UserUpdateRequest {

@@ -2,7 +2,7 @@ use candid::{CandidType, Decode, Encode, Principal};
 use ic_dbms_api::prelude::IcDbmsResult;
 use pocket_ic::nonblocking::PocketIc;
 
-use crate::client::Client;
+use crate::client::{Client, RawRecords};
 use crate::errors::{IcDbmsCanisterClientResult, PocketIcError};
 
 /// IC DBMS Canister client implementation for pocket-ic.
@@ -167,6 +167,21 @@ impl Client for IcDbmsPocketIcClient<'_> {
             self.caller,
             &crate::utils::table_method(table, "select"),
             Encode!(&query, &transaction_id).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn select_raw(
+        &self,
+        table: &str,
+        query: ic_dbms_api::prelude::Query,
+        transaction_id: Option<ic_dbms_api::prelude::TransactionId>,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<RawRecords>> {
+        self.query(
+            self.principal,
+            self.caller,
+            "select",
+            Encode!(&table, &query, &transaction_id).map_err(PocketIcError::Candid)?,
         )
         .await
     }

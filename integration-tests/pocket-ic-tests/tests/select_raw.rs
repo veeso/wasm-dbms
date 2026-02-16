@@ -27,11 +27,8 @@ async fn test_should_select_raw_all_columns(env: PocketIcTestEnv) {
         .and_where(Filter::eq("id", Value::Uint32(100.into())))
         .build();
 
-    let payload =
-        Encode!(&"users".to_string(), &query, &None::<u64>).expect("failed to encode payload");
-
-    let result: IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> = env
-        .query(env.dbms_canister(), env.admin(), "select", payload)
+    let result = client
+        .select_raw("users", query, None)
         .await
         .expect("failed to call canister");
 

@@ -11,7 +11,7 @@ use ic_dbms_api::prelude::{
     UpdateRecord,
 };
 
-use crate::client::Client;
+use crate::client::{Client, RawRecords};
 use crate::errors::{IcAgentError, IcDbmCanisterClientError, IcDbmsCanisterClientResult};
 
 /// Client to interact with an IC DBMS Canister using ic-agent.
@@ -131,6 +131,15 @@ impl Client for IcDbmsAgentClient<'_> {
             (query, transaction_id),
         )
         .await
+    }
+
+    async fn select_raw(
+        &self,
+        table: &str,
+        query: Query,
+        transaction_id: Option<TransactionId>,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<RawRecords>> {
+        self.query("select", (table, query, transaction_id)).await
     }
 
     async fn insert<T>(

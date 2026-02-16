@@ -9,8 +9,8 @@ mod types;
 
 use candid::Principal;
 use ic_dbms_api::prelude::{
-    DeleteBehavior, Filter, IcDbmsResult, InsertRecord, Query, TableSchema, TransactionId,
-    UpdateRecord,
+    CandidColumnDef, DeleteBehavior, Filter, IcDbmsResult, InsertRecord, Query, TableSchema,
+    TransactionId, UpdateRecord, Value,
 };
 
 #[cfg(feature = "ic-agent")]
@@ -21,6 +21,8 @@ pub use self::ic::IcDbmsCanisterClient;
 #[cfg_attr(docsrs, doc(cfg(feature = "pocket-ic")))]
 pub use self::pocket_ic::IcDbmsPocketIcClient;
 use crate::prelude::IcDbmsCanisterClientResult;
+
+type RawRecords = Vec<Vec<(CandidColumnDef, Value)>>;
 
 /// Trait for implementing a ic-dbms-client.
 ///
@@ -72,6 +74,14 @@ pub trait Client {
     ) -> impl Future<Output = IcDbmsCanisterClientResult<IcDbmsResult<Vec<T::Record>>>>
     where
         T: TableSchema;
+
+    /// Executes a `SELECT` query on the IC DBMS Canister and returns raw records (without deserialization).
+    fn select_raw(
+        &self,
+        table: &str,
+        query: Query,
+        transaction_id: Option<TransactionId>,
+    ) -> impl Future<Output = IcDbmsCanisterClientResult<IcDbmsResult<RawRecords>>>;
 
     /// Executes an `INSERT` query on the IC DBMS Canister.
     fn insert<T>(
