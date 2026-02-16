@@ -136,8 +136,8 @@ fn impl_table_api(table: &TableMetadata) -> TokenStream2 {
 
     quote::quote! {
         #[::ic_cdk::query]
-        fn #select_fn_name(query: ::ic_dbms_api::prelude::Query<#entity>, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<#record>> {
-            ::ic_dbms_canister::api::select(query, transaction_id, CanisterDatabaseSchema)
+        fn #select_fn_name(query: ::ic_dbms_api::prelude::Query, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<#record>> {
+            ::ic_dbms_canister::api::select::<#entity>(query, transaction_id, CanisterDatabaseSchema)
         }
 
         #[::ic_cdk::update]

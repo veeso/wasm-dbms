@@ -88,7 +88,7 @@ pub async fn rollback(
 
 #[ic_cdk::update]
 pub async fn select(
-    query: Query<User>,
+    query: Query,
     transaction_id: Option<TransactionId>,
 ) -> Result<IcDbmsResult<Vec<UserRecord>>, String> {
     let client = new_client();

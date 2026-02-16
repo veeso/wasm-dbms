@@ -160,7 +160,7 @@ impl IcDbmsDatabase {
     fn select_queried_fields<T>(
         &self,
         mut record_values: Vec<(ColumnDef, Value)>,
-        query: &Query<T>,
+        query: &Query,
     ) -> IcDbmsResult<TableColumns>
     where
         T: TableSchema,
@@ -211,7 +211,8 @@ impl IcDbmsDatabase {
             queried_fields.extend(vec![(ValuesSource::This, record_values)]);
             return Ok(queried_fields);
         }
-        record_values.retain(|(col_def, _)| query.columns().contains(&col_def.name.to_string()));
+        record_values
+            .retain(|(col_def, _)| query.columns::<T>().contains(&col_def.name.to_string()));
         queried_fields.extend(vec![(ValuesSource::This, record_values)]);
         Ok(queried_fields)
     }
@@ -227,8 +228,8 @@ impl IcDbmsDatabase {
         T: TableSchema,
     {
         let pk = T::primary_key();
-        let query = Query::<T>::builder().field(pk).filter(filter).build();
-        let fields = self.select(query)?;
+        let query = Query::builder().field(pk).filter(filter).build();
+        let fields = self.select::<T>(query)?;
         let pks = fields
             .into_iter()
             .map(|record| {
@@ -419,7 +420,7 @@ impl Database for IcDbmsDatabase {
     /// # Returns
     ///
     /// The returned results are a vector of [`table::TableRecord`] matching the query.
-    fn select<T>(&self, query: Query<T>) -> IcDbmsResult<Vec<T::Record>>
+    fn select<T>(&self, query: Query) -> IcDbmsResult<Vec<T::Record>>
     where
         T: TableSchema,
     {

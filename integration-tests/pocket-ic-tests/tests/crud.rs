@@ -19,7 +19,7 @@ async fn test_should_insert_and_query_data(env: PocketIcTestEnv) {
         .expect("failed to insert user");
 
     // query user
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(1.into())))
         .build();
@@ -96,7 +96,7 @@ async fn test_should_update_a_user(env: PocketIcTestEnv) {
         .expect("failed to update user");
 
     // select
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(3.into())))
         .build();

@@ -4,8 +4,6 @@ mod builder;
 mod delete;
 mod filter;
 
-use std::marker::PhantomData;
-
 use candid::CandidType;
 use candid::types::{Compound, Type, TypeInner};
 use serde::{Deserialize, Serialize};
@@ -97,10 +95,7 @@ pub enum OrderDirection {
 
 /// A struct representing a query in the DBMS.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Query<T>
-where
-    T: TableSchema,
-{
+pub struct Query {
     /// Fields to select in the query.
     columns: Select,
     /// Relations to eagerly load with the main records.
@@ -113,12 +108,9 @@ where
     pub limit: Option<usize>,
     /// Offset for pagination.
     pub offset: Option<usize>,
-    /// Marker for the table schema type.
-    #[serde(skip)]
-    _marker: PhantomData<T>,
 }
 
-impl<T: TableSchema> CandidType for Query<T> {
+impl CandidType for Query {
     fn _ty() -> Type {
         let mut fields = vec![
             candid::field! { columns: Select::_ty() },
@@ -152,10 +144,7 @@ impl<T: TableSchema> CandidType for Query<T> {
     }
 }
 
-impl<T> Default for Query<T>
-where
-    T: TableSchema,
-{
+impl Default for Query {
     fn default() -> Self {
         Self {
             columns: Select::All,
@@ -164,17 +153,13 @@ where
             order_by: Vec::new(),
             limit: None,
             offset: None,
-            _marker: PhantomData,
         }
     }
 }
 
-impl<T> Query<T>
-where
-    T: TableSchema,
-{
+impl Query {
     /// Creates a new [`QueryBuilder`] for building a query.
-    pub fn builder() -> QueryBuilder<T> {
+    pub fn builder() -> QueryBuilder {
         QueryBuilder::default()
     }
 
@@ -184,7 +169,10 @@ where
     }
 
     /// Returns the list of columns to be selected in the query.
-    pub fn columns(&self) -> Vec<String> {
+    pub fn columns<T>(&self) -> Vec<String>
+    where
+        T: TableSchema,
+    {
         match &self.columns {
             Select::All => T::columns()
                 .iter()
@@ -203,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_should_build_default_query() {
-        let query: Query<User> = Query::default();
+        let query = Query::default();
         assert!(matches!(query.columns, Select::All));
         assert!(query.eager_relations.is_empty());
         assert!(query.filter.is_none());
@@ -214,28 +202,28 @@ mod tests {
 
     #[test]
     fn test_should_get_columns() {
-        let query = Query::<User>::default();
-        let columns = query.columns();
+        let query = Query::default();
+        let columns = query.columns::<User>();
         assert_eq!(columns, vec!["id", "name",]);
 
-        let query = Query::<User> {
+        let query = Query {
             columns: Select::Columns(vec!["id".to_string()]),
             ..Default::default()
         };
 
-        let columns = query.columns();
+        let columns = query.columns::<User>();
         assert_eq!(columns, vec!["id"]);
     }
 
     #[test]
     fn test_should_check_all_selected() {
-        let query = Query::<User>::default();
+        let query = Query::default();
         assert!(query.all_selected());
     }
 
     #[test]
     fn test_should_encode_decode_query_candid() {
-        let query: Query<User> = Query::builder()
+        let query = Query::builder()
             .field("id")
             .with("posts")
             .and_where(Filter::eq("name", Value::Text("Alice".into())))
@@ -244,7 +232,7 @@ mod tests {
             .offset(5)
             .build();
         let encoded = candid::encode_one(&query).unwrap();
-        let decoded: Query<User> = candid::decode_one(&encoded).unwrap();
+        let decoded: Query = candid::decode_one(&encoded).unwrap();
         assert_eq!(query, decoded);
     }
 }

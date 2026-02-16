@@ -193,8 +193,10 @@ fn bench_read_table(c: &mut Criterion) {
         // run batch
         group.bench_with_input(label, &database, |b, database| {
             b.iter(|| {
-                let query = Query::<User>::builder().all().build();
-                database.select(query).expect("failed to select user");
+                let query = Query::builder().all().build();
+                database
+                    .select::<User>(query)
+                    .expect("failed to select user");
             });
         });
 

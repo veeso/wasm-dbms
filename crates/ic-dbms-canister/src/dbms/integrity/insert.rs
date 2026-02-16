@@ -54,7 +54,10 @@ where
     /// Checks for primary key conflicts.
     ///
     /// For inserts, *any* existing record with the same PK is a conflict.
-    fn check_primary_key_conflict(&self, record_values: &[(ColumnDef, Value)]) -> IcDbmsResult<()> {
+    fn check_primary_key_conflict(&self, record_values: &[(ColumnDef, Value)]) -> IcDbmsResult<()>
+    where
+        T: TableSchema,
+    {
         let pk_name = T::primary_key();
         let pk = record_values
             .iter()
@@ -64,12 +67,12 @@ where
                 pk_name.to_string(),
             )))?;
 
-        let query: Query<T> = Query::builder()
+        let query: Query = Query::builder()
             .field(pk_name)
             .and_where(Filter::Eq(pk_name.to_string(), pk))
             .build();
 
-        let res = self.database.select(query)?;
+        let res = self.database.select::<T>(query)?;
         if res.is_empty() {
             Ok(())
         } else {

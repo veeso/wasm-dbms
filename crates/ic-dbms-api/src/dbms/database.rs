@@ -13,7 +13,7 @@ pub trait Database {
     /// # Returns
     ///
     /// The returned results are a vector of [`table::TableRecord`] matching the query.
-    fn select<T>(&self, query: Query<T>) -> IcDbmsResult<Vec<T::Record>>
+    fn select<T>(&self, query: Query) -> IcDbmsResult<Vec<T::Record>>
     where
         T: TableSchema;
 

@@ -81,12 +81,12 @@ where
             )))?;
 
         // query for records with the new PK value
-        let query: Query<T> = Query::builder()
+        let query = Query::builder()
             .field(pk_name)
             .and_where(Filter::Eq(pk_name.to_string(), new_pk.clone()))
             .build();
 
-        let res = self.database.select(query)?;
+        let res = self.database.select::<T>(query)?;
         match res.len() {
             0 => Ok(()),
             1 => {

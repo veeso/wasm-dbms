@@ -120,7 +120,7 @@ impl Client for IcDbmsAgentClient<'_> {
     async fn select<T>(
         &self,
         table: &str,
-        query: Query<T>,
+        query: Query,
         transaction_id: Option<TransactionId>,
     ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<T::Record>>>
     where

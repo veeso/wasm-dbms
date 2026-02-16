@@ -1,36 +1,14 @@
-use std::marker::PhantomData;
-
 use crate::dbms::query::{Filter, OrderDirection, Query};
-use crate::dbms::table::TableSchema;
 
 /// A builder for constructing database [`Query`]es.
-#[derive(Debug, Clone)]
-pub struct QueryBuilder<T>
-where
-    T: TableSchema,
-{
-    query: Query<T>,
-    _marker: PhantomData<T>,
+#[derive(Debug, Default, Clone)]
+pub struct QueryBuilder {
+    query: Query,
 }
 
-impl<T> Default for QueryBuilder<T>
-where
-    T: TableSchema,
-{
-    fn default() -> Self {
-        Self {
-            query: Query::default(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T> QueryBuilder<T>
-where
-    T: TableSchema,
-{
+impl QueryBuilder {
     /// Builds and returns a [`Query`] object based on the current state of the [`QueryBuilder`].
-    pub fn build(self) -> Query<T> {
+    pub fn build(self) -> Query {
         self.query
     }
 
@@ -137,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_default_query_builder() {
-        let query_builder = QueryBuilder::<User>::default();
+        let query_builder = QueryBuilder::default();
         let query = query_builder.build();
         assert!(matches!(query.columns, crate::dbms::query::Select::All));
         assert!(query.eager_relations.is_empty());
@@ -149,23 +127,23 @@ mod tests {
 
     #[test]
     fn test_should_add_field_to_query_builder() {
-        let query_builder = QueryBuilder::<User>::default().field("id").field("name");
+        let query_builder = QueryBuilder::default().field("id").field("name");
 
         let query = query_builder.build();
-        assert_eq!(query.columns(), vec!["id", "name"]);
+        assert_eq!(query.columns::<User>(), vec!["id", "name"]);
     }
 
     #[test]
     fn test_should_set_fields() {
-        let query_builder = QueryBuilder::<User>::default().fields(["id", "email"]);
+        let query_builder = QueryBuilder::default().fields(["id", "email"]);
 
         let query = query_builder.build();
-        assert_eq!(query.columns(), vec!["id", "email"]);
+        assert_eq!(query.columns::<User>(), vec!["id", "email"]);
     }
 
     #[test]
     fn test_should_set_all_fields() {
-        let query_builder = QueryBuilder::<User>::default().field("id").all();
+        let query_builder = QueryBuilder::default().field("id").all();
 
         let query = query_builder.build();
         assert!(matches!(query.columns, crate::dbms::query::Select::All));
@@ -173,21 +151,21 @@ mod tests {
 
     #[test]
     fn test_should_add_eager_relation() {
-        let query_builder = QueryBuilder::<User>::default().with("posts");
+        let query_builder = QueryBuilder::default().with("posts");
         let query = query_builder.build();
         assert_eq!(query.eager_relations, vec!["posts"]);
     }
 
     #[test]
     fn test_should_not_duplicate_eager_relation() {
-        let query_builder = QueryBuilder::<User>::default().with("posts").with("posts");
+        let query_builder = QueryBuilder::default().with("posts").with("posts");
         let query = query_builder.build();
         assert_eq!(query.eager_relations, vec!["posts"]);
     }
 
     #[test]
     fn test_should_add_order_by_clauses() {
-        let query_builder = QueryBuilder::<User>::default()
+        let query_builder = QueryBuilder::default()
             .order_by_asc("name")
             .order_by_desc("created_at");
         let query = query_builder.build();
@@ -202,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_should_set_limit_and_offset() {
-        let query_builder = QueryBuilder::<User>::default().limit(10).offset(5);
+        let query_builder = QueryBuilder::default().limit(10).offset(5);
         let query = query_builder.build();
         assert_eq!(query.limit, Some(10));
         assert_eq!(query.offset, Some(5));
@@ -210,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_should_create_filters() {
-        let query = QueryBuilder::<User>::default()
+        let query = QueryBuilder::default()
             .all()
             .and_where(Filter::eq("id", Value::Uint32(1u32.into())))
             .or_where(Filter::like("name", "John%"))

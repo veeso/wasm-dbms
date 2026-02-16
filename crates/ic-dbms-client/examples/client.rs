@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await??;
 
     // select users
-    let query: Query<User> = Query::builder().all().build();
+    let query = Query::builder().all().build();
     let users = client
         .select::<User>(User::table_name(), query, None)
         .await??;

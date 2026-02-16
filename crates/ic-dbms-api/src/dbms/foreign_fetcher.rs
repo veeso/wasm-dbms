@@ -63,7 +63,7 @@ mod tests {
     struct MockDatabase;
 
     impl Database for MockDatabase {
-        fn select<T>(&self, _query: crate::prelude::Query<T>) -> IcDbmsResult<Vec<T::Record>>
+        fn select<T>(&self, _query: crate::prelude::Query) -> IcDbmsResult<Vec<T::Record>>
         where
             T: crate::prelude::TableSchema,
         {

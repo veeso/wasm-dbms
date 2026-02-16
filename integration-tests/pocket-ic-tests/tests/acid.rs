@@ -53,7 +53,7 @@ async fn test_should_operate_on_a_transaction(env: PocketIcTestEnv) {
         .expect("failed to commit transaction");
 
     // search
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(5.into())))
         .build();
@@ -68,7 +68,7 @@ async fn test_should_operate_on_a_transaction(env: PocketIcTestEnv) {
     assert_eq!(user.name.as_ref().unwrap(), &Text::from("Frank"));
 
     // verify post
-    let query = Query::<Post>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("user", Value::Uint32(5.into())))
         .build();
@@ -132,7 +132,7 @@ async fn test_should_rollback_transaction(env: PocketIcTestEnv) {
         .expect("failed to rollback transaction");
 
     // search
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(6.into())))
         .build();
@@ -144,7 +144,7 @@ async fn test_should_rollback_transaction(env: PocketIcTestEnv) {
     assert!(users.is_empty());
 
     // verify post
-    let query = Query::<Post>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("user", Value::Uint32(6.into())))
         .build();

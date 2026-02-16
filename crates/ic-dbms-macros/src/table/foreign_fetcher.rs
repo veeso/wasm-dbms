@@ -29,8 +29,8 @@ fn impl_fetch(metadata: &TableMetadata) -> TokenStream2 {
 
         match_arms.push(quote::quote! {
             #table_name => {
-                let mut results = database.select(
-                    ::ic_dbms_api::prelude::Query::<#entity_to_query>::builder()
+                let mut results = database.select::<#entity_to_query>(
+                    ::ic_dbms_api::prelude::Query::builder()
                         .all()
                         .limit(1)
                         .and_where(::ic_dbms_api::prelude::Filter::Eq(#pk_call.to_string(), pk_value.clone()))

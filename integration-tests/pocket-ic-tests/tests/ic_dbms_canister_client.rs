@@ -145,7 +145,7 @@ async fn test_should_insert_select_update_delete(env: PocketIcTestEnv) {
     res.expect("Client error").expect("Failed to insert record");
 
     // Select the record
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(1.into())))
         .build();

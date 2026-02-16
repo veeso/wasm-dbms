@@ -96,7 +96,7 @@ async fn test_agent_client_should_insert_and_select(env: PocketIcTestEnv) {
         .expect("failed to insert user");
 
     // Query the inserted user
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(100.into())))
         .build();
@@ -150,7 +150,7 @@ async fn test_agent_client_should_update(env: PocketIcTestEnv) {
         .expect("failed to update user");
 
     // Verify the update
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(101.into())))
         .build();
@@ -197,7 +197,7 @@ async fn test_agent_client_should_delete(env: PocketIcTestEnv) {
         .expect("failed to delete user");
 
     // Verify deletion
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(102.into())))
         .build();
@@ -265,7 +265,7 @@ async fn test_agent_client_should_begin_transaction_and_commit(env: PocketIcTest
         .expect("failed to commit transaction");
 
     // Verify user was committed
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(103.into())))
         .build();
@@ -279,7 +279,7 @@ async fn test_agent_client_should_begin_transaction_and_commit(env: PocketIcTest
     assert_eq!(users[0].name.as_ref().unwrap(), &Text::from("AgentDave"));
 
     // Verify post was committed
-    let query = Query::<Post>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("user", Value::Uint32(103.into())))
         .build();
@@ -331,7 +331,7 @@ async fn test_agent_client_should_rollback_transaction(env: PocketIcTestEnv) {
         .expect("failed to rollback transaction");
 
     // Verify user was NOT committed
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::eq("id", Value::Uint32(104.into())))
         .build();

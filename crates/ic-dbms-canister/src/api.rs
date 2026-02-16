@@ -65,7 +65,7 @@ pub fn rollback(
 
 /// Executes a select query against the database schema, optionally within a transaction.
 pub fn select<T>(
-    query: Query<T>,
+    query: Query,
     transaction_id: Option<TransactionId>,
     database_schema: impl DatabaseSchema + 'static,
 ) -> IcDbmsResult<Vec<T::Record>>
@@ -75,7 +75,7 @@ where
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
     let database = database(transaction_id, database_schema);
-    database.select(query)
+    database.select::<T>(query)
 }
 
 /// Executes an insert query against the database schema, optionally within a transaction.
@@ -260,10 +260,7 @@ mod tests {
         init_acl();
         load_fixtures();
         // select record
-        let query = Query::<crate::tests::User>::builder()
-            .all()
-            .limit(10)
-            .build();
+        let query = Query::builder().all().limit(10).build();
         let res = select::<crate::tests::User>(query, None, crate::tests::TestDatabaseSchema);
         assert!(res.is_ok());
         let records = res.unwrap();

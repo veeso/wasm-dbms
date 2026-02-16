@@ -67,7 +67,7 @@ pub trait Client {
     fn select<T>(
         &self,
         table: &str,
-        query: Query<T>,
+        query: Query,
         transaction_id: Option<TransactionId>,
     ) -> impl Future<Output = IcDbmsCanisterClientResult<IcDbmsResult<Vec<T::Record>>>>
     where

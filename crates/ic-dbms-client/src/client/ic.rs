@@ -100,7 +100,7 @@ impl Client for IcDbmsCanisterClient {
     async fn select<T>(
         &self,
         table: &str,
-        query: ic_dbms_api::prelude::Query<T>,
+        query: ic_dbms_api::prelude::Query,
         transaction_id: Option<ic_dbms_api::prelude::TransactionId>,
     ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<T::Record>>>
     where

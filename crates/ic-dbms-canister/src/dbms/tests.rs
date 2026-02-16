@@ -20,8 +20,8 @@ fn test_should_init_dbms() {
 fn test_should_select_all_users() {
     load_fixtures();
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder().all().build();
-    let users = dbms.select(query).expect("failed to select users");
+    let query = Query::builder().all().build();
+    let users = dbms.select::<User>(query).expect("failed to select users");
 
     assert_eq!(users.len(), USERS_FIXTURES.len());
     // check if all users all loaded
@@ -73,10 +73,10 @@ fn test_should_select_user_in_overlay() {
 
     // select by pk
     let dbms = IcDbmsDatabase::from_transaction(TestDatabaseSchema, transaction_id);
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(999.into())))
         .build();
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
 
     assert_eq!(users.len(), 1);
     let user = &users[0];
@@ -91,8 +91,8 @@ fn test_should_select_user_in_overlay() {
 fn test_should_select_users_with_offset_and_limit() {
     load_fixtures();
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder().offset(2).limit(3).build();
-    let users = dbms.select(query).expect("failed to select users");
+    let query = Query::builder().offset(2).limit(3).build();
+    let users = dbms.select::<User>(query).expect("failed to select users");
 
     assert_eq!(users.len(), 3);
     // check if correct users are loaded
@@ -110,11 +110,11 @@ fn test_should_select_users_with_offset_and_limit() {
 fn test_should_select_users_with_offset_and_filter() {
     load_fixtures();
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .offset(1)
         .and_where(Filter::gt("id", Value::Uint32(4.into())))
         .build();
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
 
     assert_eq!(users.len(), 4);
     // check if correct users are loaded
@@ -132,11 +132,8 @@ fn test_should_select_users_with_offset_and_filter() {
 fn test_should_select_post_with_relation() {
     load_fixtures();
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<Post>::builder()
-        .all()
-        .with(User::table_name())
-        .build();
-    let posts = dbms.select(query).expect("failed to select posts");
+    let query = Query::builder().all().with(User::table_name()).build();
+    let posts = dbms.select::<Post>(query).expect("failed to select posts");
     assert_eq!(posts.len(), POSTS_FIXTURES.len());
 
     for (id, post) in posts.into_iter().enumerate() {
@@ -150,11 +147,11 @@ fn test_should_select_post_with_relation() {
             post.content.as_ref().expect("should have content").0,
             *expected_content
         );
-        let user_query = Query::<User>::builder()
+        let user_query = Query::builder()
             .and_where(Filter::eq("id", Value::Uint32((*expected_user_id).into())))
             .build();
         let author = dbms
-            .select(user_query)
+            .select::<User>(user_query)
             .expect("failed to load user")
             .pop()
             .expect("should have user");
@@ -168,8 +165,8 @@ fn test_should_select_post_with_relation() {
 #[test]
 fn test_should_fail_loading_unexisting_column_on_select() {
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder().field("unexisting_column").build();
-    let result = dbms.select(query);
+    let query = Query::builder().field("unexisting_column").build();
+    let result = dbms.select::<User>(query);
     assert!(result.is_err());
 }
 
@@ -186,7 +183,7 @@ fn test_should_select_queried_fields() {
         ])
         .collect::<Vec<(ColumnDef, Value)>>();
 
-    let query: Query<User> = Query::builder().field("name").build();
+    let query = Query::builder().field("name").build();
     let selected_fields = dbms
         .select_queried_fields::<User>(record_values, &query)
         .expect("failed to select queried fields");
@@ -217,7 +214,7 @@ fn test_should_select_queried_fields_with_relations() {
         ])
         .collect::<Vec<(ColumnDef, Value)>>();
 
-    let query: Query<Post> = Query::builder()
+    let query: Query = Query::builder()
         .field("title")
         .with(User::table_name())
         .build();
@@ -273,14 +270,16 @@ fn test_should_select_queried_fields_with_relations() {
 fn test_should_select_with_two_fk_on_the_same_table() {
     load_fixtures();
 
-    let query: Query<Message> = Query::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::Eq("id".to_string(), Value::Uint32(0.into())))
         .with("users")
         .build();
 
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let messages = dbms.select(query).expect("failed to select messages");
+    let messages = dbms
+        .select::<Message>(query)
+        .expect("failed to select messages");
     assert_eq!(messages.len(), 1);
     let message = &messages[0];
     assert_eq!(message.id.expect("should have id").0, 0);
@@ -312,8 +311,8 @@ fn test_should_select_with_two_fk_on_the_same_table() {
 fn test_should_select_users_sorted_by_name_descending() {
     load_fixtures();
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder().all().order_by_desc("name").build();
-    let users = dbms.select(query).expect("failed to select users");
+    let query = Query::builder().all().order_by_desc("name").build();
+    let users = dbms.select::<User>(query).expect("failed to select users");
 
     let mut sorted_usernames = USERS_FIXTURES.to_vec();
     sorted_usernames.sort_by(|a, b| b.cmp(a)); // descending
@@ -350,13 +349,13 @@ fn test_should_select_users_sorted_by_multiple_columns() {
     }
 
     // Sort by name ASC, age DESC — primary key is name, secondary is age descending.
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::ge("id", Value::Uint32(500.into())))
         .order_by_asc("name")
         .order_by_desc("age")
         .build();
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
 
     assert_eq!(users.len(), 4);
 
@@ -397,11 +396,11 @@ fn test_should_select_many_entries() {
     }
 
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .all()
         .and_where(Filter::ge("id", Value::Uint32(1001.into())))
         .build();
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), COUNT as usize);
 }
 
@@ -420,7 +419,7 @@ fn test_should_fail_loading_unexisting_relation() {
         ])
         .collect::<Vec<(ColumnDef, Value)>>();
 
-    let query: Query<Post> = Query::builder()
+    let query = Query::builder()
         .field("title")
         .with("unexisting_relation")
         .build();
@@ -479,10 +478,10 @@ fn test_should_insert_record_without_transaction() {
     assert!(result.is_ok());
 
     // find user
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(100u32.into())))
         .build();
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), 1);
     let user = &users[0];
     assert_eq!(user.id.expect("should have id").0, 100);
@@ -529,11 +528,11 @@ fn test_should_insert_within_a_transaction() {
 
     // user should not be visible outside the transaction
     let oneshot_dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(200u32.into())))
         .build();
     let users = oneshot_dbms
-        .select(query.clone())
+        .select::<User>(query.clone())
         .expect("failed to select users");
     assert_eq!(users.len(), 0);
 
@@ -542,7 +541,9 @@ fn test_should_insert_within_a_transaction() {
     assert!(commit_result.is_ok());
 
     // now user should be visible
-    let users_after_commit = oneshot_dbms.select(query).expect("failed to select users");
+    let users_after_commit = oneshot_dbms
+        .select::<User>(query)
+        .expect("failed to select users");
     assert_eq!(users_after_commit.len(), 1);
 
     let user = &users_after_commit[0];
@@ -582,10 +583,12 @@ fn test_should_rollback_transaction() {
 
     // user should not be visible
     let oneshot_dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(300u32.into())))
         .build();
-    let users = oneshot_dbms.select(query).expect("failed to select users");
+    let users = oneshot_dbms
+        .select::<User>(query)
+        .expect("failed to select users");
     assert_eq!(users.len(), 0);
 
     // transaction should have been removed
@@ -611,10 +614,10 @@ fn test_should_sanitize_insert_data() {
     assert!(result.is_ok());
 
     // find user
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(100u32.into())))
         .build();
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), 1);
     let user = &users[0];
     assert_eq!(user.id.expect("should have id").0, 100);
@@ -639,7 +642,7 @@ fn test_should_delete_one_shot() {
     );
 
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(100u32.into())))
         .build();
     let delete_count = dbms
@@ -651,7 +654,7 @@ fn test_should_delete_one_shot() {
     assert_eq!(delete_count, 1);
 
     // verify user is deleted
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), 0);
 }
 
@@ -752,26 +755,28 @@ fn test_should_delete_with_fk_cascade() {
     assert!(delete_count > 1); // at least user + posts + messages
 
     // verify user is deleted
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(1u32.into())))
         .build();
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), 0);
 
     // check posts are deleted (post ID 2)
-    let post_query = Query::<Post>::builder()
+    let post_query = Query::builder()
         .and_where(Filter::eq("user_id", Value::Uint32(1u32.into())))
         .build();
-    let posts = dbms.select(post_query).expect("failed to select posts");
+    let posts = dbms
+        .select::<Post>(post_query)
+        .expect("failed to select posts");
     assert_eq!(posts.len(), 0);
 
     // check messages are deleted (message ID 1)
-    let message_query = Query::<Message>::builder()
+    let message_query = Query::builder()
         .and_where(Filter::eq("sender_id", Value::Uint32(1u32.into())))
         .or_where(Filter::eq("recipient_id", Value::Uint32(1u32.into())))
         .build();
     let messages = dbms
-        .select(message_query)
+        .select::<Message>(message_query)
         .expect("failed to select messages");
     assert_eq!(messages.len(), 0);
 }
@@ -795,11 +800,11 @@ fn test_should_delete_within_transaction() {
 
     // user should not be visible outside the transaction
     let oneshot_dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(2u32.into())))
         .build();
     let users = oneshot_dbms
-        .select(query.clone())
+        .select::<User>(query.clone())
         .expect("failed to select users");
     assert_eq!(users.len(), 1);
 
@@ -808,25 +813,27 @@ fn test_should_delete_within_transaction() {
     assert!(commit_result.is_ok());
 
     // now user should be deleted
-    let users_after_commit = oneshot_dbms.select(query).expect("failed to select users");
+    let users_after_commit = oneshot_dbms
+        .select::<User>(query)
+        .expect("failed to select users");
     assert_eq!(users_after_commit.len(), 0);
 
     // check posts are deleted
-    let post_query = Query::<Post>::builder()
+    let post_query = Query::builder()
         .and_where(Filter::eq("user_id", Value::Uint32(2u32.into())))
         .build();
     let posts = oneshot_dbms
-        .select(post_query)
+        .select::<Post>(post_query)
         .expect("failed to select posts");
     assert_eq!(posts.len(), 0);
 
     // check messages are deleted
-    let message_query = Query::<Message>::builder()
+    let message_query = Query::builder()
         .and_where(Filter::eq("sender_id", Value::Uint32(2u32.into())))
         .or_where(Filter::eq("recipient_id", Value::Uint32(2u32.into())))
         .build();
     let messages = oneshot_dbms
-        .select(message_query)
+        .select::<Message>(message_query)
         .expect("failed to select messages");
     assert_eq!(messages.len(), 0);
 
@@ -856,8 +863,8 @@ fn test_should_update_one_shot() {
     assert_eq!(update_count, 1);
 
     // verify user is updated
-    let query = Query::<User>::builder().and_where(filter).build();
-    let users = dbms.select(query).expect("failed to select users");
+    let query = Query::builder().and_where(filter).build();
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), 1);
     let user = &users[0];
     assert_eq!(user.id.expect("should have id").0, 3);
@@ -890,9 +897,9 @@ fn test_should_update_within_transaction() {
 
     // user should not be visible outside the transaction
     let oneshot_dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder().and_where(filter.clone()).build();
+    let query = Query::builder().and_where(filter.clone()).build();
     let users = oneshot_dbms
-        .select(query.clone())
+        .select::<User>(query.clone())
         .expect("failed to select users");
     let user = &users[0];
     assert_eq!(
@@ -905,7 +912,9 @@ fn test_should_update_within_transaction() {
     assert!(commit_result.is_ok());
 
     // now user should be updated
-    let users_after_commit = oneshot_dbms.select(query).expect("failed to select users");
+    let users_after_commit = oneshot_dbms
+        .select::<User>(query)
+        .expect("failed to select users");
     assert_eq!(users_after_commit.len(), 1);
     let user = &users_after_commit[0];
     assert_eq!(
@@ -962,22 +971,22 @@ fn test_should_update_fk_in_table_referencing_another_oneshot() {
     assert_eq!(update_count, 5); // 2 posts + 1 user + 2 messages
 
     // verify user is updated
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(1_000u32.into())))
         .build();
-    let users = dbms.select(query).expect("failed to select users");
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), 1);
     let user = &users[0];
     assert_eq!(user.id.expect("should have id").0, 1_000);
 
     // get messages where sender_id or recipient_id is 1_000
-    let message_query = Query::<Message>::builder()
+    let message_query = Query::builder()
         .with("users")
         .and_where(Filter::eq("sender", Value::Uint32(1_000u32.into())))
         .or_where(Filter::eq("recipient", Value::Uint32(1_000u32.into())))
         .build();
     let messages = dbms
-        .select(message_query)
+        .select::<Message>(message_query)
         .expect("failed to select messages");
     assert_eq!(messages.len(), 2);
     for message in messages {
@@ -999,11 +1008,13 @@ fn test_should_update_fk_in_table_referencing_another_oneshot() {
     }
 
     // check posts where user_id is 1_000
-    let post_query = Query::<Post>::builder()
+    let post_query = Query::builder()
         .with("users")
         .and_where(Filter::eq("user", Value::Uint32(1_000u32.into())))
         .build();
-    let posts = dbms.select(post_query).expect("failed to select posts");
+    let posts = dbms
+        .select::<Post>(post_query)
+        .expect("failed to select posts");
     assert_eq!(posts.len(), 2);
     for post in posts {
         let user_id = post
@@ -1035,8 +1046,8 @@ fn test_should_sanitize_update() {
     assert_eq!(update_count, 1);
 
     // verify user is updated
-    let query = Query::<User>::builder().and_where(filter).build();
-    let users = dbms.select(query).expect("failed to select users");
+    let query = Query::builder().and_where(filter).build();
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), 1);
     let user = &users[0];
     assert_eq!(user.id.expect("should have id").0, 3);
@@ -1063,8 +1074,8 @@ fn test_should_update_multiple_records_at_once() {
     assert_eq!(update_count, 4); // users 6, 7, 8, 9
 
     // verify all matched users were updated
-    let query = Query::<User>::builder().and_where(filter).build();
-    let users = dbms.select(query).expect("failed to select users");
+    let query = Query::builder().and_where(filter).build();
+    let users = dbms.select::<User>(query).expect("failed to select users");
     assert_eq!(users.len(), 4);
     for user in &users {
         assert_eq!(
@@ -1074,11 +1085,11 @@ fn test_should_update_multiple_records_at_once() {
     }
 
     // verify users with id <= 5 were NOT updated
-    let unaffected_query = Query::<User>::builder()
+    let unaffected_query = Query::builder()
         .and_where(Filter::le("id", Value::Uint32(5u32.into())))
         .build();
     let unaffected_users = dbms
-        .select(unaffected_query)
+        .select::<User>(unaffected_query)
         .expect("failed to select users");
     for user in &unaffected_users {
         assert_ne!(
@@ -1135,10 +1146,12 @@ fn test_should_update_pk_with_fk_cascade_in_transaction() {
 
     // outside the transaction, user 0 should still exist
     let oneshot_dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
-    let query = Query::<User>::builder()
+    let query = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(0u32.into())))
         .build();
-    let users = oneshot_dbms.select(query).expect("failed to select users");
+    let users = oneshot_dbms
+        .select::<User>(query)
+        .expect("failed to select users");
     assert_eq!(users.len(), 1);
 
     // commit transaction
@@ -1146,37 +1159,37 @@ fn test_should_update_pk_with_fk_cascade_in_transaction() {
     assert!(commit_result.is_ok());
 
     // now user 0 should be gone, user 5000 should exist
-    let query_old = Query::<User>::builder()
+    let query_old = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(0u32.into())))
         .build();
     let users_old = oneshot_dbms
-        .select(query_old)
+        .select::<User>(query_old)
         .expect("failed to select users");
     assert_eq!(users_old.len(), 0);
 
-    let query_new = Query::<User>::builder()
+    let query_new = Query::builder()
         .and_where(Filter::eq("id", Value::Uint32(5000u32.into())))
         .build();
     let users_new = oneshot_dbms
-        .select(query_new)
+        .select::<User>(query_new)
         .expect("failed to select users");
     assert_eq!(users_new.len(), 1);
 
     // verify FK cascade: posts that referenced user 0 now reference user 5000
-    let post_query = Query::<Post>::builder()
+    let post_query = Query::builder()
         .and_where(Filter::eq("user", Value::Uint32(5000u32.into())))
         .build();
     let posts = oneshot_dbms
-        .select(post_query)
+        .select::<Post>(post_query)
         .expect("failed to select posts");
     assert_eq!(posts.len(), 2); // user 0 had 2 posts
 
     // verify no posts reference user 0 anymore
-    let old_post_query = Query::<Post>::builder()
+    let old_post_query = Query::builder()
         .and_where(Filter::eq("user", Value::Uint32(0u32.into())))
         .build();
     let old_posts = oneshot_dbms
-        .select(old_post_query)
+        .select::<Post>(old_post_query)
         .expect("failed to select posts");
     assert_eq!(old_posts.len(), 0);
 }
