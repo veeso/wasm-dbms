@@ -12,6 +12,11 @@
 Released on 2026-02-06
 
 - New features:
+  - [Issue 10](https://github.com/veeso/ic-dbms/issues/10): Added a generic (untyped) `select` canister endpoint that returns `Vec<Vec<(CandidColumnDef, Value)>>` instead of typed records.
+    - Enables querying tables by name without requiring compile-time type information.
+    - Extracted shared `select_columns` core from the typed `select` path.
+    - Added `select_raw` method to the `Database` trait and `flatten_table_columns` utility.
+    - Extended `DatabaseSchema` trait and `#[derive(DbmsCanister)]` macro to generate dispatch logic and the new `select` endpoint.
   - [Issue 13](https://github.com/veeso/ic-dbms/issues/13): Added JSON filtering capabilities for querying JSON columns.
     - `JsonFilter::Contains` for PostgreSQL `@>` style structural containment checks
     - `JsonFilter::Extract` for extracting values at JSON paths with comparison operations

@@ -4,7 +4,7 @@ use candid::CandidType;
 use criterion::{Criterion, criterion_group, criterion_main};
 use ic_dbms_api::prelude::{
     ColumnDef, Database, DeleteBehavior, Filter, InsertRecord, Query, QueryError, TableSchema,
-    UpdateRecord, Value,
+    UpdateRecord, Value, flatten_table_columns,
 };
 use ic_dbms_canister::prelude::{
     DatabaseSchema, IcDbmsDatabase, InsertIntegrityValidator, SCHEMA_REGISTRY, Table, Text, Uint64,
@@ -24,6 +24,22 @@ pub struct User {
 pub struct TestDatabaseSchema;
 
 impl DatabaseSchema for TestDatabaseSchema {
+    fn select(
+        &self,
+        dbms: &IcDbmsDatabase,
+        table_name: &str,
+        query: Query,
+    ) -> ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
+        if table_name == User::table_name() {
+            let results = dbms.select_columns::<User>(query)?;
+            Ok(flatten_table_columns(results))
+        } else {
+            Err(ic_dbms_api::prelude::IcDbmsError::Query(
+                QueryError::TableNotFound(table_name.to_string()),
+            ))
+        }
+    }
+
     fn referenced_tables(&self, table: &'static str) -> Vec<(&'static str, Vec<&'static str>)> {
         let tables = &[(User::table_name(), User::columns())];
         get_referenced_tables(table, tables)

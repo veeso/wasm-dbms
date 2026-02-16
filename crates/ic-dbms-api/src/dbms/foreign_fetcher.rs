@@ -86,6 +86,14 @@ mod tests {
             unimplemented!()
         }
 
+        fn select_raw(
+            &self,
+            _table: &str,
+            _query: crate::prelude::Query,
+        ) -> IcDbmsResult<Vec<Vec<(crate::prelude::ColumnDef, crate::prelude::Value)>>> {
+            unimplemented!()
+        }
+
         fn delete<T>(
             &self,
             _behaviour: crate::prelude::DeleteBehavior,

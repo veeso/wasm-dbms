@@ -1194,6 +1194,204 @@ fn test_should_update_pk_with_fk_cascade_in_transaction() {
     assert_eq!(old_posts.len(), 0);
 }
 
+#[test]
+fn test_should_select_raw_all_users() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+    let query = Query::builder().all().build();
+    let rows = dbms
+        .select_raw("users", query)
+        .expect("failed to select_raw users");
+
+    assert_eq!(rows.len(), USERS_FIXTURES.len());
+    for (i, row) in rows.iter().enumerate() {
+        // find id column
+        let id_col = row
+            .iter()
+            .find(|(col, _)| col.name == "id")
+            .expect("should have id column");
+        assert_eq!(id_col.1, Value::Uint32((i as u32).into()));
+
+        // find name column
+        let name_col = row
+            .iter()
+            .find(|(col, _)| col.name == "name")
+            .expect("should have name column");
+        assert_eq!(
+            name_col.1,
+            Value::Text(USERS_FIXTURES[i].to_string().into())
+        );
+    }
+}
+
+#[test]
+fn test_should_select_raw_specific_columns() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+    let query = Query::builder().field("name").build();
+    let rows = dbms
+        .select_raw("users", query)
+        .expect("failed to select_raw users");
+
+    assert_eq!(rows.len(), USERS_FIXTURES.len());
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row.len(), 1, "expected exactly 1 column per row");
+        assert_eq!(row[0].0.name, "name");
+        assert_eq!(row[0].1, Value::Text(USERS_FIXTURES[i].to_string().into()));
+    }
+}
+
+#[test]
+fn test_should_select_raw_with_filter() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+    let query = Query::builder()
+        .and_where(Filter::eq("id", Value::Uint32(0.into())))
+        .build();
+    let rows = dbms
+        .select_raw("users", query)
+        .expect("failed to select_raw users");
+
+    assert_eq!(rows.len(), 1);
+    let id_col = rows[0]
+        .iter()
+        .find(|(col, _)| col.name == "id")
+        .expect("should have id column");
+    assert_eq!(id_col.1, Value::Uint32(0.into()));
+}
+
+#[test]
+fn test_should_select_raw_with_limit_and_offset() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+    let query = Query::builder().offset(2).limit(3).build();
+    let rows = dbms
+        .select_raw("users", query)
+        .expect("failed to select_raw users");
+
+    assert_eq!(rows.len(), 3);
+    for (i, row) in rows.iter().enumerate() {
+        let expected_id = (i + 2) as u32;
+        let id_col = row
+            .iter()
+            .find(|(col, _)| col.name == "id")
+            .expect("should have id column");
+        assert_eq!(id_col.1, Value::Uint32(expected_id.into()));
+    }
+}
+
+#[test]
+fn test_should_select_raw_with_ordering() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+    let query = Query::builder().all().order_by_desc("name").build();
+    let rows = dbms
+        .select_raw("users", query)
+        .expect("failed to select_raw users");
+
+    let mut sorted_names: Vec<&str> = USERS_FIXTURES.to_vec();
+    sorted_names.sort_by(|a, b| b.cmp(a)); // descending
+
+    assert_eq!(rows.len(), sorted_names.len());
+    for (i, row) in rows.iter().enumerate() {
+        let name_col = row
+            .iter()
+            .find(|(col, _)| col.name == "name")
+            .expect("should have name column");
+        assert_eq!(name_col.1, Value::Text(sorted_names[i].to_string().into()));
+    }
+}
+
+#[test]
+fn test_should_fail_select_raw_unknown_table() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+    let query = Query::builder().all().build();
+    let result = dbms.select_raw("nonexistent_table", query);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_should_select_raw_in_transaction() {
+    load_fixtures();
+    // create a transaction
+    let transaction_id =
+        TRANSACTION_SESSION.with_borrow_mut(|ts| ts.begin_transaction(Principal::anonymous()));
+    // insert a user via the overlay
+    TRANSACTION_SESSION.with_borrow_mut(|ts| {
+        let tx = ts
+            .get_transaction_mut(&transaction_id)
+            .expect("should have tx");
+        tx.overlay_mut()
+            .insert::<User>(vec![
+                (
+                    ColumnDef {
+                        name: "id",
+                        data_type: ic_dbms_api::prelude::DataTypeKind::Uint32,
+                        nullable: false,
+                        primary_key: true,
+                        foreign_key: None,
+                    },
+                    Value::Uint32(999.into()),
+                ),
+                (
+                    ColumnDef {
+                        name: "name",
+                        data_type: ic_dbms_api::prelude::DataTypeKind::Text,
+                        nullable: false,
+                        primary_key: false,
+                        foreign_key: None,
+                    },
+                    Value::Text("OverlayRawUser".to_string().into()),
+                ),
+                (
+                    ColumnDef {
+                        name: "email",
+                        data_type: ic_dbms_api::prelude::DataTypeKind::Text,
+                        nullable: false,
+                        primary_key: false,
+                        foreign_key: None,
+                    },
+                    Value::Text("overlay@example.com".to_string().into()),
+                ),
+                (
+                    ColumnDef {
+                        name: "age",
+                        data_type: ic_dbms_api::prelude::DataTypeKind::Uint32,
+                        nullable: false,
+                        primary_key: false,
+                        foreign_key: None,
+                    },
+                    Value::Uint32(42.into()),
+                ),
+            ])
+            .expect("failed to insert into overlay");
+    });
+
+    // select_raw within the transaction, filtering by the overlay user's id
+    let dbms = IcDbmsDatabase::from_transaction(TestDatabaseSchema, transaction_id);
+    let query = Query::builder()
+        .and_where(Filter::eq("id", Value::Uint32(999.into())))
+        .build();
+    let rows = dbms
+        .select_raw("users", query)
+        .expect("failed to select_raw in transaction");
+
+    assert_eq!(rows.len(), 1);
+    let id_col = rows[0]
+        .iter()
+        .find(|(col, _)| col.name == "id")
+        .expect("should have id column");
+    assert_eq!(id_col.1, Value::Uint32(999.into()));
+
+    let name_col = rows[0]
+        .iter()
+        .find(|(col, _)| col.name == "name")
+        .expect("should have name column");
+    assert_eq!(name_col.1, Value::Text("OverlayRawUser".to_string().into()));
+}
+
 fn init_user_table() {
     SCHEMA_REGISTRY
         .with_borrow_mut(|sr| sr.register_table::<User>())

@@ -14,6 +14,7 @@ pub fn dbms_canister(input: DeriveInput) -> syn::Result<TokenStream2> {
     let acl_api = impl_acl_api();
     let transaction_api = impl_transaction_api();
     let tables_api = impl_tables_api(&metadata.tables);
+    let select_raw_api = impl_select_raw_api();
     let database_schema_impl = impl_database_schema(&metadata.tables);
 
     Ok(quote::quote! {
@@ -23,6 +24,7 @@ pub fn dbms_canister(input: DeriveInput) -> syn::Result<TokenStream2> {
         #acl_api
         #transaction_api
         #tables_api
+        #select_raw_api
     })
 }
 
@@ -123,6 +125,28 @@ fn impl_transaction_api() -> TokenStream2 {
     }
 }
 
+fn impl_select_raw_api() -> TokenStream2 {
+    quote::quote! {
+        #[::ic_cdk::query]
+        fn select(
+            table: String,
+            query: ::ic_dbms_api::prelude::Query,
+            transaction_id: Option<::ic_dbms_api::prelude::TransactionId>,
+        ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(::ic_dbms_api::prelude::CandidColumnDef, ::ic_dbms_api::prelude::Value)>>> {
+            ::ic_dbms_canister::api::select_raw(&table, query, transaction_id, CanisterDatabaseSchema)
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|row| {
+                            row.into_iter()
+                                .map(|(col, val)| (::ic_dbms_api::prelude::CandidColumnDef::from(col), val))
+                                .collect()
+                        })
+                        .collect()
+                })
+        }
+    }
+}
+
 fn impl_table_api(table: &TableMetadata) -> TokenStream2 {
     let table_name = &table.name;
     let entity = &table.table;
@@ -168,6 +192,35 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
             )
         });
     }
+
+    let mut select_match_arms = vec![];
+    for table in tables {
+        let table_name = &table.table;
+        select_match_arms.push(quote::quote! {
+            name if name == #table_name::table_name() => {
+                let results = dbms.select_columns::<#table_name>(query)?;
+                Ok(::ic_dbms_api::prelude::flatten_table_columns(results))
+            }
+        });
+    }
+
+    let select_fn = quote::quote! {
+        fn select(
+            &self,
+            dbms: &::ic_dbms_canister::prelude::IcDbmsDatabase,
+            table_name: &str,
+            query: ::ic_dbms_api::prelude::Query,
+        ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)>>> {
+            use ::ic_dbms_api::prelude::TableSchema as _;
+
+            match table_name {
+                #(#select_match_arms)*
+                _ => Err(::ic_dbms_api::prelude::IcDbmsError::Query(
+                    ::ic_dbms_api::prelude::QueryError::TableNotFound(table_name.to_string()),
+                )),
+            }
+        }
+    };
 
     let referenced_tables_fn = quote::quote! {
         fn referenced_tables(
@@ -335,6 +388,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
         pub struct CanisterDatabaseSchema;
 
         impl ::ic_dbms_canister::prelude::DatabaseSchema for CanisterDatabaseSchema {
+            #select_fn
             #referenced_tables_fn
             #insert_tables_fn
             #delete_tables_fn

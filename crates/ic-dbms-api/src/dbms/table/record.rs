@@ -6,6 +6,21 @@ use crate::prelude::{Filter, IcDbmsResult};
 
 pub type TableColumns = Vec<(ValuesSource, Vec<(ColumnDef, Value)>)>;
 
+/// Flattens [`TableColumns`] rows into flat column-value pairs.
+///
+/// Only includes columns whose source is [`ValuesSource::This`],
+/// discarding any foreign or eager-loaded columns.
+pub fn flatten_table_columns(rows: Vec<TableColumns>) -> Vec<Vec<(ColumnDef, Value)>> {
+    rows.into_iter()
+        .map(|row| {
+            row.into_iter()
+                .filter(|(source, _)| *source == ValuesSource::This)
+                .flat_map(|(_, cols)| cols)
+                .collect()
+        })
+        .collect()
+}
+
 /// Indicates the source of the column values.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ValuesSource {

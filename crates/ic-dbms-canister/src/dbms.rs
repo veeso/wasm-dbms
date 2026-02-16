@@ -208,12 +208,12 @@ impl IcDbmsDatabase {
 
         // short-circuit if all selected
         if query.all_selected() {
-            queried_fields.extend(vec![(ValuesSource::This, record_values)]);
+            queried_fields.push((ValuesSource::This, record_values));
             return Ok(queried_fields);
         }
-        record_values
-            .retain(|(col_def, _)| query.columns::<T>().contains(&col_def.name.to_string()));
-        queried_fields.extend(vec![(ValuesSource::This, record_values)]);
+        let selected_columns = query.columns::<T>();
+        record_values.retain(|(col_def, _)| selected_columns.contains(&col_def.name.to_string()));
+        queried_fields.push((ValuesSource::This, record_values));
         Ok(queried_fields)
     }
 
@@ -296,6 +296,69 @@ impl IcDbmsDatabase {
                 (None, None) => std::cmp::Ordering::Equal,
             }
         });
+    }
+
+    /// Core select logic shared between typed `select::<T>` and generic `select_raw`.
+    ///
+    /// Returns the intermediate [`TableColumns`] representation before
+    /// converting to `T::Record`. Each entry is a row with columns
+    /// grouped by source.
+    ///
+    /// This method is public for use by generated [`DatabaseSchema`] implementations.
+    #[doc(hidden)]
+    pub fn select_columns<T>(&self, query: Query) -> IcDbmsResult<Vec<TableColumns>>
+    where
+        T: TableSchema,
+    {
+        // load table registry
+        let table_registry = self.load_table_registry::<T>()?;
+        // read table
+        let table_reader = table_registry.read::<T>();
+        // get database overlay
+        let mut table_overlay = if self.transaction.is_some() {
+            self.overlay()?
+        } else {
+            DatabaseOverlay::default()
+        };
+        // overlay table reader
+        let mut table_reader = table_overlay.reader(table_reader);
+
+        // prepare results vector
+        let mut results = Vec::with_capacity(query.limit.unwrap_or(DEFAULT_SELECT_CAPACITY));
+        // iter and select
+        let mut count = 0;
+
+        while let Some(values) = table_reader.try_next()? {
+            // check whether it matches the filter
+            if let Some(filter) = &query.filter {
+                if !self.record_matches_filter(&values, filter)? {
+                    continue;
+                }
+            }
+            // filter matched, check limit and offset
+            count += 1;
+            // check whether is before offset
+            if query.offset.is_some_and(|offset| count <= offset) {
+                continue;
+            }
+            // get queried fields
+            let values = self.select_queried_fields::<T>(values, &query)?;
+            // push to results
+            results.push(values);
+            // check whether reached limit
+            if query.limit.is_some_and(|limit| results.len() >= limit) {
+                break;
+            }
+        }
+
+        // Sort results if needed, applying in reverse order so the primary sort key
+        // (first in the list) is applied last. Since `sort_by` is a stable sort,
+        // this produces correct multi-column ordering.
+        for (column, direction) in query.order_by.into_iter().rev() {
+            self.sort_query_results(&mut results, &column, direction);
+        }
+
+        Ok(results)
     }
 
     /// Update the primary key value in the tables referencing the updated table.
@@ -411,68 +474,16 @@ where
 }
 
 impl Database for IcDbmsDatabase {
-    /// Executes a SELECT query and returns the results.
-    ///
-    /// # Arguments
-    ///
-    /// - `query` - The SELECT [`Query`] to be executed.
-    ///
-    /// # Returns
-    ///
-    /// The returned results are a vector of [`table::TableRecord`] matching the query.
     fn select<T>(&self, query: Query) -> IcDbmsResult<Vec<T::Record>>
     where
         T: TableSchema,
     {
-        // load table registry
-        let table_registry = self.load_table_registry::<T>()?;
-        // read table
-        let table_reader = table_registry.read::<T>();
-        // get database overlay
-        let mut table_overlay = if self.transaction.is_some() {
-            self.overlay()?
-        } else {
-            DatabaseOverlay::default()
-        };
-        // overlay table reader
-        let mut table_reader = table_overlay.reader(table_reader);
-
-        // prepare results vector
-        let mut results = Vec::with_capacity(query.limit.unwrap_or(DEFAULT_SELECT_CAPACITY));
-        // iter and select
-        let mut count = 0;
-
-        while let Some(values) = table_reader.try_next()? {
-            // check whether it matches the filter
-            if let Some(filter) = &query.filter {
-                if !self.record_matches_filter(&values, filter)? {
-                    continue;
-                }
-            }
-            // filter matched, check limit and offset
-            count += 1;
-            // check whether is before offset
-            if query.offset.is_some_and(|offset| count <= offset) {
-                continue;
-            }
-            // get queried fields
-            let values = self.select_queried_fields::<T>(values, &query)?;
-            // push to results
-            results.push(values);
-            // check whether reached limit
-            if query.limit.is_some_and(|limit| results.len() >= limit) {
-                break;
-            }
-        }
-
-        // Sort results if needed, applying in reverse order so the primary sort key
-        // (first in the list) is applied last. Since `sort_by` is a stable sort,
-        // this produces correct multi-column ordering.
-        for (column, direction) in query.order_by.into_iter().rev() {
-            self.sort_query_results(&mut results, &column, direction);
-        }
-
+        let results = self.select_columns::<T>(query)?;
         Ok(results.into_iter().map(T::Record::from_values).collect())
+    }
+
+    fn select_raw(&self, table: &str, query: Query) -> IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
+        self.schema.select(self, table, query)
     }
 
     /// Executes an INSERT query.

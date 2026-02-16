@@ -119,7 +119,6 @@ impl CandidType for Query {
             candid::field! { order_by: <Vec<(String, OrderDirection)>>::_ty() },
             candid::field! { limit: <Option<usize>>::_ty() },
             candid::field! { offset: <Option<usize>>::_ty() },
-            // We do not include _marker in the Candid type representation
         ];
 
         fields.sort_by_key(|f| f.id.clone());

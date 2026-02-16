@@ -1,5 +1,6 @@
 use crate::prelude::{
-    DeleteBehavior, Filter, IcDbmsResult, InsertRecord, Query, TableSchema, UpdateRecord,
+    ColumnDef, DeleteBehavior, Filter, IcDbmsResult, InsertRecord, Query, TableSchema,
+    UpdateRecord, Value,
 };
 
 /// This module defines the Database trait and related database functionalities.
@@ -16,6 +17,12 @@ pub trait Database {
     fn select<T>(&self, query: Query) -> IcDbmsResult<Vec<T::Record>>
     where
         T: TableSchema;
+
+    /// Executes a generic SELECT and returns raw column-value pairs.
+    ///
+    /// Unlike [`Database::select`], this method does not require a concrete
+    /// table type. It takes a table name and dispatches internally.
+    fn select_raw(&self, table: &str, query: Query) -> IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>>;
 
     /// Executes an INSERT query.
     ///

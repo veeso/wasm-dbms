@@ -1,3 +1,6 @@
+use candid::CandidType;
+use serde::{Deserialize, Serialize};
+
 use crate::dbms::types::DataTypeKind;
 
 /// Defines a column in a database table.
@@ -24,6 +27,60 @@ pub struct ForeignKeyDef {
     pub foreign_table: &'static str,
     /// Name of the foreign column that the FK points to (e.g., "id")
     pub foreign_column: &'static str,
+}
+
+/// Candid-serializable column definition for canister API boundaries.
+///
+/// This type mirrors [`ColumnDef`] but uses owned `String` fields instead
+/// of `&'static str`, making it compatible with `CandidType` serialization.
+#[derive(Clone, Debug, PartialEq, Eq, CandidType, Serialize, Deserialize)]
+pub struct CandidColumnDef {
+    /// The name of the column.
+    pub name: String,
+    /// The data type of the column.
+    pub data_type: DataTypeKind,
+    /// Indicates if this column can contain NULL values.
+    pub nullable: bool,
+    /// Indicates if this column is part of the primary key.
+    pub primary_key: bool,
+    /// Foreign key definition, if any.
+    pub foreign_key: Option<CandidForeignKeyDef>,
+}
+
+/// Candid-serializable foreign key definition for canister API boundaries.
+///
+/// This type mirrors [`ForeignKeyDef`] but uses owned `String` fields instead
+/// of `&'static str`, making it compatible with `CandidType` serialization.
+#[derive(Clone, Debug, PartialEq, Eq, CandidType, Serialize, Deserialize)]
+pub struct CandidForeignKeyDef {
+    /// Name of the local column that holds the foreign key (e.g., "user_id").
+    pub local_column: String,
+    /// Name of the foreign table (e.g., "users").
+    pub foreign_table: String,
+    /// Name of the foreign column that the FK points to (e.g., "id").
+    pub foreign_column: String,
+}
+
+impl From<ColumnDef> for CandidColumnDef {
+    fn from(def: ColumnDef) -> Self {
+        Self {
+            name: def.name.to_string(),
+            data_type: def.data_type,
+            nullable: def.nullable,
+            primary_key: def.primary_key,
+            foreign_key: def.foreign_key.map(CandidForeignKeyDef::from),
+        }
+    }
+}
+
+impl From<ForeignKeyDef> for CandidForeignKeyDef {
+    fn from(def: ForeignKeyDef) -> Self {
+        Self {
+            local_column: def.local_column.to_string(),
+            foreign_table: def.foreign_table.to_string(),
+            foreign_column: def.foreign_column.to_string(),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -5,8 +5,8 @@ mod post;
 mod user;
 
 use ic_dbms_api::prelude::{
-    ColumnDef, Database as _, InsertRecord as _, QueryError, TableSchema as _, UpdateRecord as _,
-    Value,
+    ColumnDef, Database as _, InsertRecord as _, Query, QueryError, TableSchema as _,
+    UpdateRecord as _, Value, flatten_table_columns,
 };
 
 #[allow(unused_imports)]
@@ -36,6 +36,28 @@ pub fn load_fixtures() {
 pub struct TestDatabaseSchema;
 
 impl DatabaseSchema for TestDatabaseSchema {
+    fn select(
+        &self,
+        dbms: &IcDbmsDatabase,
+        table_name: &str,
+        query: Query,
+    ) -> ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
+        if table_name == User::table_name() {
+            let results = dbms.select_columns::<User>(query)?;
+            Ok(flatten_table_columns(results))
+        } else if table_name == Post::table_name() {
+            let results = dbms.select_columns::<Post>(query)?;
+            Ok(flatten_table_columns(results))
+        } else if table_name == Message::table_name() {
+            let results = dbms.select_columns::<Message>(query)?;
+            Ok(flatten_table_columns(results))
+        } else {
+            Err(ic_dbms_api::prelude::IcDbmsError::Query(
+                QueryError::TableNotFound(table_name.to_string()),
+            ))
+        }
+    }
+
     fn referenced_tables(&self, table: &'static str) -> Vec<(&'static str, Vec<&'static str>)> {
         let tables = &[
             (User::table_name(), User::columns()),

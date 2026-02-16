@@ -4,8 +4,8 @@ mod inspect;
 
 use candid::Principal;
 use ic_dbms_api::prelude::{
-    Database as _, DeleteBehavior, Filter, IcDbmsError, IcDbmsResult, InsertRecord, Query,
-    TableSchema, TransactionId, UpdateRecord,
+    ColumnDef, Database as _, DeleteBehavior, Filter, IcDbmsError, IcDbmsResult, InsertRecord,
+    Query, TableSchema, TransactionId, UpdateRecord, Value,
 };
 
 pub use self::inspect::inspect;
@@ -76,6 +76,27 @@ where
     assert_caller_owns_transaction(transaction_id.as_ref());
     let database = database(transaction_id, database_schema);
     database.select::<T>(query)
+}
+
+/// Executes a generic select query by table name, optionally within a transaction.
+///
+/// Unlike [`select`], this method does not require a concrete table type.
+/// It takes a table name as a string and dispatches internally, returning
+/// rows as column-value pairs.
+///
+/// # Errors
+///
+/// Returns an error if the table does not exist or the query is invalid.
+pub fn select_raw(
+    table: &str,
+    query: Query,
+    transaction_id: Option<TransactionId>,
+    database_schema: impl DatabaseSchema + 'static,
+) -> IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
+    assert_caller_is_allowed();
+    assert_caller_owns_transaction(transaction_id.as_ref());
+    let database = database(transaction_id, database_schema);
+    database.select_raw(table, query)
 }
 
 /// Executes an insert query against the database schema, optionally within a transaction.
@@ -300,6 +321,30 @@ mod tests {
             crate::tests::TestDatabaseSchema,
         );
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_should_select_raw_record() {
+        init_acl();
+        load_fixtures();
+        let query = Query::builder().all().limit(10).build();
+        let res = select_raw("users", query, None, crate::tests::TestDatabaseSchema);
+        assert!(res.is_ok());
+        let rows = res.unwrap();
+        assert!(!rows.is_empty());
+        for row in &rows {
+            assert!(row.iter().any(|(col, _)| col.name == "id"));
+            assert!(row.iter().any(|(col, _)| col.name == "name"));
+        }
+    }
+
+    #[test]
+    fn test_should_fail_select_raw_unknown_table() {
+        init_acl();
+        load_fixtures();
+        let query = Query::builder().all().build();
+        let res = select_raw("nonexistent", query, None, crate::tests::TestDatabaseSchema);
+        assert!(res.is_err());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use ic_dbms_api::prelude::{ColumnDef, DeleteBehavior, Filter, IcDbmsResult, Value};
+use ic_dbms_api::prelude::{ColumnDef, DeleteBehavior, Filter, IcDbmsResult, Query, Value};
 
 use crate::dbms::IcDbmsDatabase;
 
@@ -9,6 +9,16 @@ use crate::dbms::IcDbmsDatabase;
 /// This is required because all of the [`Database`] operations rely on `T`, a [`crate::prelude::TableSchema`], but we can't store them inside
 /// of transactions without knowing the concrete type at compile time.
 pub trait DatabaseSchema {
+    /// Performs a generic select for the given table name and query.
+    ///
+    /// Returns raw column-value pairs instead of typed records.
+    fn select(
+        &self,
+        dbms: &IcDbmsDatabase,
+        table_name: &str,
+        query: Query,
+    ) -> IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>>;
+
     /// Returns the foreign key definitions referencing other tables for the given table name.
     ///
     /// So if a table `Post` has a foreign key referencing the `User` table, calling

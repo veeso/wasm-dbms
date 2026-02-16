@@ -56,7 +56,7 @@ pub trait DataType:
 }
 
 /// An enumeration of all supported data type kinds in the DBMS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CandidType, Serialize, Deserialize)]
 pub enum DataTypeKind {
     Blob,
     Boolean,
