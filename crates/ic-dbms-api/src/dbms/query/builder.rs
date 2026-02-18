@@ -1,4 +1,5 @@
 use crate::dbms::query::{Filter, OrderDirection, Query};
+use crate::prelude::{Join, JoinType};
 
 /// A builder for constructing database [`Query`]es.
 #[derive(Debug, Default, Clone)]
@@ -53,6 +54,26 @@ impl QueryBuilder {
         self
     }
 
+    /// Adds an INNER JOIN operation to this query
+    pub fn inner_join(self, table: &str, left_col: &str, right_col: &str) -> Self {
+        self.join(JoinType::Inner, table, left_col, right_col)
+    }
+
+    /// Adds a LEFT JOIN operation to this query
+    pub fn left_join(self, table: &str, left_col: &str, right_col: &str) -> Self {
+        self.join(JoinType::Left, table, left_col, right_col)
+    }
+
+    /// Adds a RIGHT JOIN operation to this query
+    pub fn right_join(self, table: &str, left_col: &str, right_col: &str) -> Self {
+        self.join(JoinType::Right, table, left_col, right_col)
+    }
+
+    /// Adds a FULL JOIN operation to this query
+    pub fn full_join(self, table: &str, left_col: &str, right_col: &str) -> Self {
+        self.join(JoinType::Full, table, left_col, right_col)
+    }
+
     /// Adds an ascending order by clause for the specified field.
     pub fn order_by_asc(mut self, field: &str) -> Self {
         self.query
@@ -102,6 +123,17 @@ impl QueryBuilder {
             Some(existing_filter) => Some(existing_filter.or(filter)),
             None => Some(filter),
         };
+        self
+    }
+
+    /// Add a [`Join`] to the current query from the given parameters.
+    fn join(mut self, join_type: JoinType, table: &str, left_col: &str, right_col: &str) -> Self {
+        self.query.joins.push(Join {
+            join_type,
+            table: table.to_string(),
+            left_column: left_col.to_string(),
+            right_column: right_col.to_string(),
+        });
         self
     }
 }
@@ -201,5 +233,61 @@ mod tests {
         } else {
             panic!("Expected OR filter at the top level");
         }
+    }
+
+    #[test]
+    fn test_should_add_inner_join() {
+        let query = QueryBuilder::default()
+            .all()
+            .inner_join("posts", "id", "user")
+            .build();
+        assert_eq!(query.joins.len(), 1);
+        assert_eq!(
+            query.joins[0].join_type,
+            crate::dbms::query::JoinType::Inner
+        );
+        assert_eq!(query.joins[0].table, "posts");
+        assert_eq!(query.joins[0].left_column, "id");
+        assert_eq!(query.joins[0].right_column, "user");
+    }
+
+    #[test]
+    fn test_should_add_left_join() {
+        let query = QueryBuilder::default()
+            .all()
+            .left_join("posts", "id", "user")
+            .build();
+        assert_eq!(query.joins[0].join_type, crate::dbms::query::JoinType::Left);
+    }
+
+    #[test]
+    fn test_should_add_right_join() {
+        let query = QueryBuilder::default()
+            .all()
+            .right_join("posts", "id", "user")
+            .build();
+        assert_eq!(
+            query.joins[0].join_type,
+            crate::dbms::query::JoinType::Right
+        );
+    }
+
+    #[test]
+    fn test_should_add_full_join() {
+        let query = QueryBuilder::default()
+            .all()
+            .full_join("posts", "id", "user")
+            .build();
+        assert_eq!(query.joins[0].join_type, crate::dbms::query::JoinType::Full);
+    }
+
+    #[test]
+    fn test_should_chain_multiple_joins() {
+        let query = QueryBuilder::default()
+            .all()
+            .inner_join("posts", "id", "user")
+            .left_join("comments", "posts.id", "post_id")
+            .build();
+        assert_eq!(query.joins.len(), 2);
     }
 }

@@ -132,7 +132,7 @@ See the [ic-dbms-client](./ic-dbms-client/README.md) for more information on how
 - [x] Transactions with commit and rollback
 - [x] Access Control Lists (ACL) to restrict access to the database
 - [x] Validation, Sanitizers and constraints on table columns
-- [ ] JOIN operations between tables
+- [x] JOIN operations between tables
 - [ ] Indexes for faster queries
 - [ ] Custom data types
 - [ ] Migrations to update the database schema on canister upgrades
@@ -140,7 +140,7 @@ See the [ic-dbms-client](./ic-dbms-client/README.md) for more information on how
 
 ## Documentation
 
-- [Memory Management](https://veeso.github.io/ic-dbms/docs/memory.html)
+Read the documentation at <https://veeso.github.io/ic-dbms>
 
 ## License
 

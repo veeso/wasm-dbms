@@ -133,16 +133,20 @@ fn impl_select_raw_api() -> TokenStream2 {
             query: ::ic_dbms_api::prelude::Query,
             transaction_id: Option<::ic_dbms_api::prelude::TransactionId>,
         ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(::ic_dbms_api::prelude::CandidColumnDef, ::ic_dbms_api::prelude::Value)>>> {
-            ::ic_dbms_canister::api::select_raw(&table, query, transaction_id, CanisterDatabaseSchema)
-                .map(|rows| {
-                    rows.into_iter()
-                        .map(|row| {
-                            row.into_iter()
-                                .map(|(col, val)| (::ic_dbms_api::prelude::CandidColumnDef::from(col), val))
-                                .collect()
-                        })
-                        .collect()
-                })
+            if query.has_joins() {
+                ::ic_dbms_canister::api::select_join(&table, query, transaction_id, CanisterDatabaseSchema)
+            } else {
+                ::ic_dbms_canister::api::select_raw(&table, query, transaction_id, CanisterDatabaseSchema)
+                    .map(|rows| {
+                        rows.into_iter()
+                            .map(|row| {
+                                row.into_iter()
+                                    .map(|(col, val)| (::ic_dbms_api::prelude::CandidColumnDef::from(col), val))
+                                    .collect()
+                            })
+                            .collect()
+                    })
+            }
         }
     }
 }

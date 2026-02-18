@@ -105,6 +105,129 @@ impl Filter {
         Filter::Not(Box::new(self))
     }
 
+    /// Checks if the given joined row values match the filter.
+    ///
+    /// Each element in `table_groups` is a `(table_name, columns)` pair.
+    /// Column references can be qualified ("table.column") or unqualified ("column").
+    /// Unqualified names that exist in multiple tables produce an error.
+    pub fn matches_joined_row(
+        &self,
+        table_groups: &[(&str, Vec<(ColumnDef, Value)>)],
+    ) -> QueryResult<bool> {
+        let res = match self {
+            Filter::Eq(field, value) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| v == value)
+            }
+            Filter::Ne(field, value) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| v != value)
+            }
+            Filter::Gt(field, value) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| v > value)
+            }
+            Filter::Lt(field, value) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| v < value)
+            }
+            Filter::Ge(field, value) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| v >= value)
+            }
+            Filter::Le(field, value) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| v <= value)
+            }
+            Filter::In(field, list) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| list.iter().any(|item| item == v))
+            }
+            Filter::Json(field, json_filter) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                let json = col_value.and_then(|v| v.as_json()).ok_or_else(|| {
+                    QueryError::InvalidQuery(format!("Column '{field}' is not a Json type"))
+                })?;
+                return json_filter.matches(json);
+            }
+            Filter::Like(field, pattern) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                if let Some(Value::Text(Text(text))) = col_value {
+                    return Ok(like::Like::parse(pattern)
+                        .map_err(|e| {
+                            QueryError::InvalidQuery(format!("Invalid LIKE pattern {pattern}: {e}"))
+                        })?
+                        .matches(text));
+                }
+                if col_value.is_some() {
+                    return Err(QueryError::InvalidQuery(
+                        "LIKE operator can only be applied to Text values".to_string(),
+                    ));
+                }
+                false
+            }
+            Filter::NotNull(field) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| !v.is_null())
+            }
+            Filter::IsNull(field) => {
+                let col_value = Self::resolve_joined_column(field, table_groups)?;
+                col_value.is_some_and(|v| v.is_null())
+            }
+            Filter::And(left, right) => {
+                left.matches_joined_row(table_groups)? && right.matches_joined_row(table_groups)?
+            }
+            Filter::Or(left, right) => {
+                left.matches_joined_row(table_groups)? || right.matches_joined_row(table_groups)?
+            }
+            Filter::Not(inner) => !inner.matches_joined_row(table_groups)?,
+        };
+
+        Ok(res)
+    }
+
+    /// Resolves a column reference against joined table groups.
+    ///
+    /// Qualified names ("table.column") are resolved directly.
+    /// Unqualified names are searched across all groups; if found in
+    /// more than one table, an ambiguity error is returned.
+    fn resolve_joined_column<'a>(
+        field: &str,
+        table_groups: &'a [(&str, Vec<(ColumnDef, Value)>)],
+    ) -> QueryResult<Option<&'a Value>> {
+        if let Some((table, column)) = field.split_once('.') {
+            // Qualified name: "table.column"
+            let group = table_groups
+                .iter()
+                .find(|(t, _)| *t == table)
+                .ok_or_else(|| {
+                    QueryError::InvalidQuery(format!("Table '{table}' not in query scope"))
+                })?;
+            Ok(group
+                .1
+                .iter()
+                .find(|(c, _)| c.name == column)
+                .map(|(_, v)| v))
+        } else {
+            // Unqualified name: search all groups
+            let mut found: Vec<&Value> = Vec::new();
+            for (_, cols) in table_groups {
+                for (col, val) in cols {
+                    if col.name == field {
+                        found.push(val);
+                    }
+                }
+            }
+            match found.len() {
+                0 => Ok(None),
+                1 => Ok(Some(found[0])),
+                _ => Err(QueryError::InvalidQuery(format!(
+                    "Ambiguous column '{field}': exists in multiple joined tables, qualify with table name"
+                ))),
+            }
+        }
+    }
+
     /// Checks if the given values match the filter.
     pub fn matches(&self, values: &[(ColumnDef, Value)]) -> QueryResult<bool> {
         let res = match self {
@@ -968,5 +1091,131 @@ mod tests {
 
         let result = filter.matches(&values).unwrap();
         assert!(!result);
+    }
+
+    // === matches_joined_row tests ===
+
+    #[test]
+    fn test_should_match_qualified_column_name() {
+        let filter = Filter::eq("users.id", Value::Int32(1.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(1.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_unqualified_column_in_joined_row() {
+        let filter = Filter::eq("title", Value::Text(Text("Hello".to_string())));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![
+            (
+                "users",
+                vec![(
+                    ColumnDef {
+                        name: "id",
+                        data_type: DataTypeKind::Int32,
+                        nullable: false,
+                        primary_key: true,
+                        foreign_key: None,
+                    },
+                    Value::Int32(1.into()),
+                )],
+            ),
+            (
+                "posts",
+                vec![(
+                    ColumnDef {
+                        name: "title",
+                        data_type: DataTypeKind::Text,
+                        nullable: false,
+                        primary_key: false,
+                        foreign_key: None,
+                    },
+                    Value::Text(Text("Hello".to_string())),
+                )],
+            ),
+        ];
+        assert!(filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_error_on_ambiguous_column_in_joined_row() {
+        let filter = Filter::eq("id", Value::Int32(1.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![
+            (
+                "users",
+                vec![(
+                    ColumnDef {
+                        name: "id",
+                        data_type: DataTypeKind::Int32,
+                        nullable: false,
+                        primary_key: true,
+                        foreign_key: None,
+                    },
+                    Value::Int32(1.into()),
+                )],
+            ),
+            (
+                "posts",
+                vec![(
+                    ColumnDef {
+                        name: "id",
+                        data_type: DataTypeKind::Int32,
+                        nullable: false,
+                        primary_key: true,
+                        foreign_key: None,
+                    },
+                    Value::Int32(2.into()),
+                )],
+            ),
+        ];
+        assert!(filter.matches_joined_row(&values).is_err());
+    }
+
+    #[test]
+    fn test_should_match_and_filter_on_joined_row() {
+        let filter = Filter::eq("users.id", Value::Int32(1.into())).and(Filter::eq(
+            "posts.title",
+            Value::Text(Text("Hello".to_string())),
+        ));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![
+            (
+                "users",
+                vec![(
+                    ColumnDef {
+                        name: "id",
+                        data_type: DataTypeKind::Int32,
+                        nullable: false,
+                        primary_key: true,
+                        foreign_key: None,
+                    },
+                    Value::Int32(1.into()),
+                )],
+            ),
+            (
+                "posts",
+                vec![(
+                    ColumnDef {
+                        name: "title",
+                        data_type: DataTypeKind::Text,
+                        nullable: false,
+                        primary_key: false,
+                        foreign_key: None,
+                    },
+                    Value::Text(Text("Hello".to_string())),
+                )],
+            ),
+        ];
+        assert!(filter.matches_joined_row(&values).unwrap());
     }
 }

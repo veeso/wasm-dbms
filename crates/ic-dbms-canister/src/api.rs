@@ -4,8 +4,8 @@ mod inspect;
 
 use candid::Principal;
 use ic_dbms_api::prelude::{
-    ColumnDef, Database as _, DeleteBehavior, Filter, IcDbmsError, IcDbmsResult, InsertRecord,
-    Query, TableSchema, TransactionId, UpdateRecord, Value,
+    CandidColumnDef, ColumnDef, Database as _, DeleteBehavior, Filter, IcDbmsError, IcDbmsResult,
+    InsertRecord, Query, TableSchema, TransactionId, UpdateRecord, Value,
 };
 
 pub use self::inspect::inspect;
@@ -97,6 +97,21 @@ pub fn select_raw(
     assert_caller_owns_transaction(transaction_id.as_ref());
     let database = database(transaction_id, database_schema);
     database.select_raw(table, query)
+}
+
+/// Executes a join query through the raw/untyped select path.
+///
+/// Returns rows with [`CandidColumnDef`] that include the source table name.
+pub fn select_join(
+    table: &str,
+    query: Query,
+    transaction_id: Option<TransactionId>,
+    database_schema: impl DatabaseSchema + 'static,
+) -> IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
+    assert_caller_is_allowed();
+    assert_caller_owns_transaction(transaction_id.as_ref());
+    let db = database(transaction_id, database_schema);
+    db.select_join(table, query)
 }
 
 /// Executes an insert query against the database schema, optionally within a transaction.

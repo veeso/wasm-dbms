@@ -199,6 +199,22 @@ fn test_should_select_queried_fields() {
 }
 
 #[test]
+fn test_should_not_allow_joins_on_typed_select() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    let query = Query::builder()
+        .all()
+        .left_join("posts", "user", "user")
+        .build();
+    let result = dbms.select::<Message>(query);
+    assert!(matches!(
+        result,
+        Err(IcDbmsError::Query(QueryError::JoinInsideTypedSelect))
+    ));
+}
+
+#[test]
 fn test_should_select_queried_fields_with_relations() {
     load_fixtures();
     let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
@@ -1390,6 +1406,345 @@ fn test_should_select_raw_in_transaction() {
         .find(|(col, _)| col.name == "name")
         .expect("should have name column");
     assert_eq!(name_col.1, Value::Text("OverlayRawUser".to_string().into()));
+}
+
+#[test]
+fn test_should_sort_values_with_direction() {
+    let a = Value::Uint32(1.into());
+    let b = Value::Uint32(2.into());
+
+    // ascending: a < b
+    assert_eq!(
+        IcDbmsDatabase::sort_values_with_direction(Some(&a), Some(&b), OrderDirection::Ascending),
+        Ordering::Less
+    );
+    // descending: a > b (reversed)
+    assert_eq!(
+        IcDbmsDatabase::sort_values_with_direction(Some(&a), Some(&b), OrderDirection::Descending),
+        Ordering::Greater
+    );
+    // equal values
+    assert_eq!(
+        IcDbmsDatabase::sort_values_with_direction(Some(&a), Some(&a), OrderDirection::Ascending),
+        Ordering::Equal
+    );
+    // Some vs None => Greater
+    assert_eq!(
+        IcDbmsDatabase::sort_values_with_direction(Some(&a), None, OrderDirection::Ascending),
+        Ordering::Greater
+    );
+    // None vs Some => Less
+    assert_eq!(
+        IcDbmsDatabase::sort_values_with_direction(None, Some(&a), OrderDirection::Ascending),
+        Ordering::Less
+    );
+    // None vs None => Equal
+    assert_eq!(
+        IcDbmsDatabase::sort_values_with_direction(None, None, OrderDirection::Ascending),
+        Ordering::Equal
+    );
+}
+
+// -- JOIN tests ----------------------------------------------------------
+
+#[test]
+fn test_should_inner_join_users_and_posts() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // INNER JOIN: users.id = posts.user_id
+    // 10 users * 2 posts each = 20 matched rows.
+    let query = Query::builder()
+        .all()
+        .inner_join("posts", "id", "user")
+        .build();
+    let rows = dbms
+        .select_join("users", query)
+        .expect("failed to inner join");
+
+    assert_eq!(rows.len(), 20);
+
+    // Every row must contain columns from both tables.
+    for row in &rows {
+        assert!(
+            row.iter()
+                .any(|(col, _)| col.table.as_deref() == Some("users") && col.name == "id")
+        );
+        assert!(
+            row.iter()
+                .any(|(col, _)| col.table.as_deref() == Some("posts") && col.name == "title")
+        );
+    }
+}
+
+#[test]
+fn test_should_inner_join_return_empty_when_no_matches() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // Join on columns that will never match: users.name vs posts.title.
+    let query = Query::builder()
+        .all()
+        .inner_join("posts", "name", "title")
+        .build();
+    let rows = dbms
+        .select_join("users", query)
+        .expect("failed to inner join");
+
+    assert_eq!(rows.len(), 0);
+}
+
+#[test]
+fn test_should_left_join_preserve_unmatched_left_rows() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // Insert a user with no posts.
+    let loner = UserInsertRequest {
+        id: Uint32(999),
+        name: Text("Loner".to_string()),
+        email: "loner@example.com".into(),
+        age: 99.into(),
+    };
+    dbms.insert::<User>(loner).expect("failed to insert user");
+
+    // LEFT JOIN: every left row (user) is preserved even if no right match.
+    // 10 original users * 2 posts = 20 matched + 1 unmatched (Loner) = 21.
+    let query = Query::builder()
+        .all()
+        .left_join("posts", "id", "user")
+        .build();
+    let rows = dbms
+        .select_join("users", query)
+        .expect("failed to left join");
+
+    assert_eq!(rows.len(), 21);
+
+    // The unmatched row for user 999 must have NULL-padded post columns.
+    let loner_row = rows
+        .iter()
+        .find(|row| {
+            row.iter().any(|(col, val)| {
+                col.table.as_deref() == Some("users")
+                    && col.name == "id"
+                    && *val == Value::Uint32(999.into())
+            })
+        })
+        .expect("should have loner row");
+
+    let post_title = loner_row
+        .iter()
+        .find(|(col, _)| col.table.as_deref() == Some("posts") && col.name == "title")
+        .expect("should have posts.title column");
+    assert_eq!(post_title.1, Value::Null);
+}
+
+#[test]
+fn test_should_right_join_preserve_unmatched_right_rows() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // RIGHT JOIN messages → users ON messages.sender = users.id.
+    // Messages: sender 0 (1 msg), sender 1 (2 msgs) → 3 matched rows.
+    // Users 2..9 have no messages as sender → 8 unmatched right rows.
+    // Total = 3 + 8 = 11.
+    let query = Query::builder()
+        .all()
+        .right_join("users", "sender", "id")
+        .build();
+    let rows = dbms
+        .select_join("messages", query)
+        .expect("failed to right join");
+
+    assert_eq!(rows.len(), 11);
+
+    // User 2 has no messages as sender, so message columns must be NULL.
+    let user_2_row = rows
+        .iter()
+        .find(|row| {
+            row.iter().any(|(col, val)| {
+                col.table.as_deref() == Some("users")
+                    && col.name == "id"
+                    && *val == Value::Uint32(2.into())
+            })
+        })
+        .expect("should have user 2 row");
+
+    let msg_text = user_2_row
+        .iter()
+        .find(|(col, _)| col.table.as_deref() == Some("messages") && col.name == "text")
+        .expect("should have messages.text column");
+    assert_eq!(msg_text.1, Value::Null);
+}
+
+#[test]
+fn test_should_full_join_preserve_both_unmatched_sides() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // FULL JOIN on columns that never match: users.name vs posts.title.
+    // All 10 users are unmatched left, all 20 posts are unmatched right → 30 rows.
+    let query = Query::builder()
+        .all()
+        .full_join("posts", "name", "title")
+        .build();
+    let rows = dbms
+        .select_join("users", query)
+        .expect("failed to full join");
+
+    assert_eq!(rows.len(), 30);
+
+    // First 10 rows come from unmatched left (users): posts columns are NULL.
+    let user_rows: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            row.iter().any(|(col, val)| {
+                col.table.as_deref() == Some("users") && col.name == "id" && *val != Value::Null
+            })
+        })
+        .collect();
+    assert_eq!(user_rows.len(), 10);
+
+    // Remaining 20 rows come from unmatched right (posts): users columns are NULL.
+    let post_rows: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            row.iter().any(|(col, val)| {
+                col.table.as_deref() == Some("posts") && col.name == "id" && *val != Value::Null
+            })
+        })
+        .collect();
+    assert_eq!(post_rows.len(), 20);
+}
+
+#[test]
+fn test_should_filter_joined_results_on_qualified_column() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // INNER JOIN users → posts, then filter by posts.title = "First Post".
+    let query = Query::builder()
+        .all()
+        .inner_join("posts", "id", "user")
+        .and_where(Filter::eq("posts.title", Value::Text("First Post".into())))
+        .build();
+    let rows = dbms
+        .select_join("users", query)
+        .expect("failed to join with filter");
+
+    assert_eq!(rows.len(), 1);
+    let title_col = rows[0]
+        .iter()
+        .find(|(col, _)| col.table.as_deref() == Some("posts") && col.name == "title")
+        .expect("should have posts.title");
+    assert_eq!(title_col.1, Value::Text("First Post".into()));
+}
+
+#[test]
+fn test_should_order_joined_results() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // INNER JOIN users → posts ordered by posts.title descending.
+    let query = Query::builder()
+        .all()
+        .inner_join("posts", "id", "user")
+        .order_by_desc("posts.title")
+        .build();
+    let rows = dbms
+        .select_join("users", query)
+        .expect("failed to join with ordering");
+
+    assert_eq!(rows.len(), 20);
+
+    // Collect all titles and verify they are sorted descending.
+    let titles: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .find(|(col, _)| col.table.as_deref() == Some("posts") && col.name == "title")
+                .map(|(_, val)| match val {
+                    Value::Text(t) => t.0.clone(),
+                    _ => panic!("expected text"),
+                })
+                .expect("should have title")
+        })
+        .collect();
+
+    let mut sorted = titles.clone();
+    sorted.sort_by(|a, b| b.cmp(a));
+    assert_eq!(titles, sorted);
+}
+
+#[test]
+fn test_should_limit_and_offset_joined_results() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // INNER JOIN users → posts, ordered by posts.id ascending, offset 5, limit 3.
+    let query = Query::builder()
+        .all()
+        .inner_join("posts", "id", "user")
+        .order_by_asc("posts.id")
+        .offset(5)
+        .limit(3)
+        .build();
+    let rows = dbms
+        .select_join("users", query)
+        .expect("failed to join with limit/offset");
+
+    assert_eq!(rows.len(), 3);
+
+    // After sorting by posts.id ascending and skipping 5, we expect post ids 5, 6, 7.
+    for (i, row) in rows.iter().enumerate() {
+        let post_id = row
+            .iter()
+            .find(|(col, _)| col.table.as_deref() == Some("posts") && col.name == "id")
+            .expect("should have posts.id");
+        assert_eq!(post_id.1, Value::Uint32(((5 + i) as u32).into()));
+    }
+}
+
+#[test]
+fn test_should_fail_join_with_unknown_table() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    let query = Query::builder()
+        .all()
+        .inner_join("nonexistent_table", "id", "id")
+        .build();
+    let result = dbms.select_join("users", query);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_should_select_specific_columns_from_join() {
+    load_fixtures();
+    let dbms = IcDbmsDatabase::oneshot(TestDatabaseSchema);
+
+    // Select only users.name and posts.title from the join.
+    let query = Query::builder()
+        .field("users.name")
+        .field("posts.title")
+        .inner_join("posts", "id", "user")
+        .build();
+    let rows = dbms
+        .select_join("users", query)
+        .expect("failed to join with column selection");
+
+    assert_eq!(rows.len(), 20);
+    for row in &rows {
+        // Only the two selected columns must be present.
+        assert_eq!(row.len(), 2);
+        let col_names: Vec<String> = row
+            .iter()
+            .map(|(col, _)| format!("{}.{}", col.table.as_deref().unwrap_or("?"), col.name))
+            .collect();
+        assert!(col_names.contains(&"users.name".to_string()));
+        assert!(col_names.contains(&"posts.title".to_string()));
+    }
 }
 
 fn init_user_table() {

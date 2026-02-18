@@ -35,6 +35,8 @@ pub struct ForeignKeyDef {
 /// of `&'static str`, making it compatible with `CandidType` serialization.
 #[derive(Clone, Debug, PartialEq, Eq, CandidType, Serialize, Deserialize)]
 pub struct CandidColumnDef {
+    /// The source table name. `Some` for join results, `None` for single-table queries.
+    pub table: Option<String>,
     /// The name of the column.
     pub name: String,
     /// The data type of the column.
@@ -64,6 +66,7 @@ pub struct CandidForeignKeyDef {
 impl From<ColumnDef> for CandidColumnDef {
     fn from(def: ColumnDef) -> Self {
         Self {
+            table: None,
             name: def.name.to_string(),
             data_type: def.data_type,
             nullable: def.nullable,
@@ -223,5 +226,32 @@ mod test {
 
         assert_eq!(fk1, fk2);
         assert_ne!(fk1, fk3);
+    }
+
+    #[test]
+    fn test_should_create_candid_column_def_with_table() {
+        let col = CandidColumnDef {
+            table: Some("users".to_string()),
+            name: "id".to_string(),
+            data_type: DataTypeKind::Uint32,
+            nullable: false,
+            primary_key: true,
+            foreign_key: None,
+        };
+        assert_eq!(col.table, Some("users".to_string()));
+    }
+
+    #[test]
+    fn test_should_convert_column_def_to_candid_with_none_table() {
+        let col = ColumnDef {
+            name: "id",
+            data_type: DataTypeKind::Uint32,
+            nullable: false,
+            primary_key: true,
+            foreign_key: None,
+        };
+        let candid_col = CandidColumnDef::from(col);
+        assert_eq!(candid_col.table, None);
+        assert_eq!(candid_col.name, "id");
     }
 }

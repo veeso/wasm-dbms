@@ -1,4 +1,6 @@
-use ic_dbms_api::prelude::{ColumnDef, DeleteBehavior, Filter, IcDbmsResult, Query, Value};
+use ic_dbms_api::prelude::{
+    CandidColumnDef, ColumnDef, DeleteBehavior, Filter, IcDbmsResult, Query, Value,
+};
 
 use crate::dbms::IcDbmsDatabase;
 
@@ -18,6 +20,16 @@ pub trait DatabaseSchema {
         table_name: &str,
         query: Query,
     ) -> IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>>;
+
+    /// Performs a join query, returning results with [`CandidColumnDef`] (which includes table names).
+    fn select_join(
+        &self,
+        dbms: &IcDbmsDatabase,
+        from_table: &str,
+        query: Query,
+    ) -> IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
+        crate::dbms::join::JoinEngine::new(self).join(dbms, from_table, query)
+    }
 
     /// Returns the foreign key definitions referencing other tables for the given table name.
     ///

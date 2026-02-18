@@ -1,11 +1,14 @@
 //! This module exposes all the types related to the DBMS engine.
 
 pub mod integrity;
+pub mod join;
 pub mod referenced_tables;
 pub mod schema;
 #[cfg(test)]
 mod tests;
 pub mod transaction;
+
+use std::cmp::Ordering;
 
 use ic_dbms_api::prelude::{
     ColumnDef, DataTypeKind, Database, DeleteBehavior, Filter, ForeignFetcher, ForeignKeyDef,
@@ -286,16 +289,25 @@ impl IcDbmsDatabase {
             let a_value = get_value(a, column);
             let b_value = get_value(b, column);
 
-            match (a_value, b_value) {
-                (Some(a_val), Some(b_val)) => match direction {
-                    OrderDirection::Ascending => a_val.cmp(b_val),
-                    OrderDirection::Descending => b_val.cmp(a_val),
-                },
-                (Some(_), None) => std::cmp::Ordering::Greater,
-                (None, Some(_)) => std::cmp::Ordering::Less,
-                (None, None) => std::cmp::Ordering::Equal,
-            }
+            Self::sort_values_with_direction(a_value, b_value, direction)
         });
+    }
+
+    /// Provide the [`Ordering`] to apply to two [`Value`]s by the given [`OrderDirection`].
+    fn sort_values_with_direction(
+        a: Option<&Value>,
+        b: Option<&Value>,
+        direction: OrderDirection,
+    ) -> Ordering {
+        match (a, b) {
+            (Some(a_val), Some(b_val)) => match direction {
+                OrderDirection::Ascending => a_val.cmp(b_val),
+                OrderDirection::Descending => b_val.cmp(a_val),
+            },
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
     }
 
     /// Core select logic shared between typed `select::<T>` and generic `select_raw`.
@@ -359,6 +371,18 @@ impl IcDbmsDatabase {
         }
 
         Ok(results)
+    }
+
+    /// Executes a join query, returning results with [`CandidColumnDef`] (which includes table names).
+    ///
+    /// This method is public for use by the generated canister API.
+    #[doc(hidden)]
+    pub fn select_join(
+        &self,
+        table: &str,
+        query: Query,
+    ) -> IcDbmsResult<Vec<Vec<(ic_dbms_api::prelude::CandidColumnDef, Value)>>> {
+        self.schema.select_join(self, table, query)
     }
 
     /// Update the primary key value in the tables referencing the updated table.
@@ -478,6 +502,10 @@ impl Database for IcDbmsDatabase {
     where
         T: TableSchema,
     {
+        // do not allow joins in typed select
+        if !query.joins.is_empty() {
+            return Err(IcDbmsError::Query(QueryError::JoinInsideTypedSelect));
+        }
         let results = self.select_columns::<T>(query)?;
         Ok(results.into_iter().map(T::Record::from_values).collect())
     }
