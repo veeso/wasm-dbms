@@ -1218,4 +1218,425 @@ mod tests {
         ];
         assert!(filter.matches_joined_row(&values).unwrap());
     }
+
+    #[test]
+    fn test_should_error_on_unknown_table_in_joined_row() {
+        let filter = Filter::eq("unknown.id", Value::Int32(1.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(1.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).is_err());
+    }
+
+    #[test]
+    fn test_should_match_ne_filter_on_joined_row() {
+        let filter = Filter::ne("users.id", Value::Int32(99.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(1.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_gt_filter_on_joined_row() {
+        let filter = Filter::gt("users.age", Value::Int32(18.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "age",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Int32(25.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let filter = Filter::gt("users.age", Value::Int32(30.into()));
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_lt_filter_on_joined_row() {
+        let filter = Filter::lt("users.age", Value::Int32(30.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "age",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Int32(25.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let filter = Filter::lt("users.age", Value::Int32(20.into()));
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_ge_filter_on_joined_row() {
+        let filter = Filter::ge("users.age", Value::Int32(25.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "age",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Int32(25.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let filter = Filter::ge("users.age", Value::Int32(26.into()));
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_le_filter_on_joined_row() {
+        let filter = Filter::le("users.age", Value::Int32(25.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "age",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Int32(25.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let filter = Filter::le("users.age", Value::Int32(24.into()));
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_in_filter_on_joined_row() {
+        let filter = Filter::in_list(
+            "users.id",
+            vec![
+                Value::Int32(1.into()),
+                Value::Int32(2.into()),
+                Value::Int32(3.into()),
+            ],
+        );
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(2.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let filter = Filter::in_list(
+            "users.id",
+            vec![Value::Int32(10.into()), Value::Int32(20.into())],
+        );
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_like_filter_on_joined_row() {
+        let filter = Filter::like("posts.title", "%ello%");
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "posts",
+            vec![(
+                ColumnDef {
+                    name: "title",
+                    data_type: DataTypeKind::Text,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Text(Text("Hello World".to_string())),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let filter = Filter::like("posts.title", "%xyz%");
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_error_like_on_non_text_in_joined_row() {
+        let filter = Filter::like("users.id", "%1%");
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(1.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).is_err());
+    }
+
+    #[test]
+    fn test_should_match_not_null_filter_on_joined_row() {
+        let filter = Filter::not_null("users.name");
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "name",
+                    data_type: DataTypeKind::Text,
+                    nullable: true,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Text(Text("Alice".to_string())),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "name",
+                    data_type: DataTypeKind::Text,
+                    nullable: true,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Null,
+            )],
+        )];
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_is_null_filter_on_joined_row() {
+        let filter = Filter::is_null("users.name");
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "name",
+                    data_type: DataTypeKind::Text,
+                    nullable: true,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Null,
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "name",
+                    data_type: DataTypeKind::Text,
+                    nullable: true,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Text(Text("Alice".to_string())),
+            )],
+        )];
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_or_filter_on_joined_row() {
+        let filter = Filter::eq("users.id", Value::Int32(1.into()))
+            .or(Filter::eq("users.id", Value::Int32(2.into())));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(2.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(99.into()),
+            )],
+        )];
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_not_filter_on_joined_row() {
+        let filter = Filter::eq("users.id", Value::Int32(1.into())).not();
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(99.into()),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(1.into()),
+            )],
+        )];
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_match_json_filter_on_joined_row() {
+        use std::str::FromStr;
+
+        use crate::dbms::types::Json;
+
+        let json_value = Json::from_str(r#"{"user": {"name": "Alice", "age": 30}}"#).unwrap();
+        let filter = Filter::json(
+            "posts.data",
+            JsonFilter::extract_eq("user.name", Value::Text("Alice".into())),
+        );
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "posts",
+            vec![(
+                ColumnDef {
+                    name: "data",
+                    data_type: DataTypeKind::Json,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Json(json_value),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_error_json_filter_on_non_json_in_joined_row() {
+        let filter = Filter::json("users.name", JsonFilter::has_key("email"));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "name",
+                    data_type: DataTypeKind::Text,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Text(Text("Alice".to_string())),
+            )],
+        )];
+        assert!(filter.matches_joined_row(&values).is_err());
+    }
+
+    #[test]
+    fn test_should_return_false_for_missing_column_in_joined_row() {
+        let filter = Filter::eq("users.nonexistent", Value::Int32(1.into()));
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Int32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                Value::Int32(1.into()),
+            )],
+        )];
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_return_false_like_on_missing_column_in_joined_row() {
+        let filter = Filter::like("users.nonexistent", "%test%");
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(
+                ColumnDef {
+                    name: "name",
+                    data_type: DataTypeKind::Text,
+                    nullable: true,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Text(Text("hello".to_string())),
+            )],
+        )];
+        // LIKE on a missing column returns false
+        assert!(!filter.matches_joined_row(&values).unwrap());
+    }
 }
