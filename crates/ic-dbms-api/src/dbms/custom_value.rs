@@ -154,16 +154,27 @@ mod test {
 
     #[test]
     fn test_should_derive_custom_data_type() {
-        use crate::memory::{self, DataSize, MSize, MemoryResult, PageOffset};
-        use crate::prelude::*;
-        use candid::CandidType;
-        use serde::{Deserialize, Serialize};
         use std::borrow::Cow;
         use std::fmt;
 
+        use candid::CandidType;
+        use serde::{Deserialize, Serialize};
+
+        use crate::memory::{self, DataSize, MSize, MemoryResult, PageOffset};
+        use crate::prelude::*;
+
         #[derive(
-            Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, CandidType, Serialize,
-            Deserialize, CustomDataType,
+            Clone,
+            Debug,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            CandidType,
+            Serialize,
+            Deserialize,
+            CustomDataType,
         )]
         #[type_tag = "test_status"]
         pub enum TestStatus {

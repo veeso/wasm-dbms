@@ -124,7 +124,10 @@ fn to_values(fields: &[Field]) -> TokenStream2 {
 
         if field.custom_type {
             // Custom type handling — use the inner type ident (Nullable stripped) for trait lookups
-            let custom_ident = field.custom_type_ident.as_ref().expect("custom_type field must have custom_type_ident");
+            let custom_ident = field
+                .custom_type_ident
+                .as_ref()
+                .expect("custom_type field must have custom_type_ident");
             if field.nullable {
                 columns.push(quote::quote! {
                     (Self::columns()[#index], match #self_field {
@@ -151,7 +154,10 @@ fn to_values(fields: &[Field]) -> TokenStream2 {
             }
         } else {
             // Built-in type handling
-            let value_type = field.value_type.as_ref().expect("built-in field must have value_type");
+            let value_type = field
+                .value_type
+                .as_ref()
+                .expect("built-in field must have value_type");
 
             // For nullable we need to match whether it's Null.
             // If it's null we return `Value::Null`, otherwise we wrap the inner value.

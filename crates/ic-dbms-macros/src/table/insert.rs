@@ -149,7 +149,10 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         let field_name_str = field.name.to_string();
 
         if field.custom_type {
-            let custom_ident = field.custom_type_ident.as_ref().expect("custom_type field must have custom_type_ident");
+            let custom_ident = field
+                .custom_type_ident
+                .as_ref()
+                .expect("custom_type field must have custom_type_ident");
             if field.nullable {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
@@ -178,7 +181,10 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                 });
             }
         } else {
-            let value_type = field.value_type.as_ref().expect("built-in field must have value_type");
+            let value_type = field
+                .value_type
+                .as_ref()
+                .expect("built-in field must have value_type");
 
             if field.nullable {
                 match_arms.push(quote::quote! {

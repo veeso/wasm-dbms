@@ -307,13 +307,24 @@ mod custom_type_tests {
     use crate::dbms::table::{ColumnDef, TableColumns, TableRecord, TableSchema, ValuesSource};
     use crate::dbms::types::{CustomDataType, DataTypeKind, Nullable, Text, Uint32};
     use crate::dbms::value::Value;
-    use crate::memory::{DataSize, Encode, MSize, MemoryResult, PageOffset, DEFAULT_ALIGNMENT};
-    use crate::prelude::{DecodeError, MemoryError};
-    use crate::prelude::{InsertRecord, UpdateRecord};
+    use crate::memory::{DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, PageOffset};
+    use crate::prelude::{DecodeError, InsertRecord, MemoryError, UpdateRecord};
 
     /// A simple custom data type for testing: Priority
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    #[derive(candid::CandidType, serde::Serialize, serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        PartialOrd,
+        Ord,
+        Hash,
+        Default,
+        candid::CandidType,
+        serde::Serialize,
+        serde::Deserialize,
+    )]
     pub enum Priority {
         #[default]
         Low,
@@ -351,11 +362,9 @@ mod custom_type_tests {
                 0 => Ok(Priority::Low),
                 1 => Ok(Priority::Medium),
                 2 => Ok(Priority::High),
-                other => Err(MemoryError::DecodeError(
-                    DecodeError::TryFromSliceError(format!(
-                        "invalid Priority byte: {other}"
-                    )),
-                )),
+                other => Err(MemoryError::DecodeError(DecodeError::TryFromSliceError(
+                    format!("invalid Priority byte: {other}"),
+                ))),
             }
         }
 
@@ -381,8 +390,9 @@ mod custom_type_tests {
     }
 
     /// A table with a custom type field, using the Table derive macro
-    #[derive(Debug, Clone, PartialEq, Eq, candid::CandidType, serde::Deserialize)]
-    #[derive(crate::prelude::Table)]
+    #[derive(
+        Debug, Clone, PartialEq, Eq, candid::CandidType, serde::Deserialize, crate::prelude::Table,
+    )]
     #[table = "tasks"]
     pub struct Task {
         #[primary_key]
@@ -456,10 +466,7 @@ mod custom_type_tests {
     #[test]
     fn test_insert_request_from_values() {
         let values: Vec<(ColumnDef, Value)> = vec![
-            (
-                Task::columns()[0],
-                Value::Uint32(10u32.into()),
-            ),
+            (Task::columns()[0], Value::Uint32(10u32.into())),
             (
                 Task::columns()[1],
                 Value::Custom(CustomValue {
@@ -496,8 +503,9 @@ mod custom_type_tests {
     }
 
     /// A table with a nullable custom type field, using the Table derive macro
-    #[derive(Debug, Clone, PartialEq, Eq, candid::CandidType, serde::Deserialize)]
-    #[derive(crate::prelude::Table)]
+    #[derive(
+        Debug, Clone, PartialEq, Eq, candid::CandidType, serde::Deserialize, crate::prelude::Table,
+    )]
     #[table = "tasks_with_nullable"]
     pub struct TaskWithNullable {
         #[primary_key]
