@@ -145,26 +145,58 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
     for field in &metadata.fields {
         let field_name = &field.name;
         let field_name_str = field.name.to_string();
-        let value_type = &field.value_type;
 
-        if field.nullable {
-            match_arms.push(quote::quote! {
-                #field_name_str => {
-                    if let #value_type(v) = value {
-                        #field_name = Some(::ic_dbms_api::prelude::Nullable::Value(v.clone()));
-                    } else if let ::ic_dbms_api::prelude::Value::Null = value {
-                        #field_name = Some(::ic_dbms_api::prelude::Nullable::Null);
+        if field.custom_type {
+            let field_type = &field.ty;
+            if field.nullable {
+                match_arms.push(quote::quote! {
+                    #field_name_str => {
+                        if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
+                            #field_name = Some(::ic_dbms_api::prelude::Nullable::Value(
+                                <#field_type as ::ic_dbms_api::prelude::Encode>::decode(
+                                    std::borrow::Cow::Borrowed(&cv.encoded)
+                                ).expect("failed to decode custom type")
+                            ));
+                        } else if let ::ic_dbms_api::prelude::Value::Null = value {
+                            #field_name = Some(::ic_dbms_api::prelude::Nullable::Null);
+                        }
                     }
-                }
-            })
+                })
+            } else {
+                match_arms.push(quote::quote! {
+                    #field_name_str => {
+                        if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
+                            #field_name = Some(
+                                <#field_type as ::ic_dbms_api::prelude::Encode>::decode(
+                                    std::borrow::Cow::Borrowed(&cv.encoded)
+                                ).expect("failed to decode custom type")
+                            );
+                        }
+                    }
+                })
+            }
         } else {
-            match_arms.push(quote::quote! {
-                #field_name_str => {
-                    if let #value_type(v) = value {
-                        #field_name = Some(v.clone());
+            let value_type = field.value_type.as_ref().expect("built-in field must have value_type");
+
+            if field.nullable {
+                match_arms.push(quote::quote! {
+                    #field_name_str => {
+                        if let #value_type(v) = value {
+                            #field_name = Some(::ic_dbms_api::prelude::Nullable::Value(v.clone()));
+                        } else if let ::ic_dbms_api::prelude::Value::Null = value {
+                            #field_name = Some(::ic_dbms_api::prelude::Nullable::Null);
+                        }
                     }
-                }
-            })
+                })
+            } else {
+                match_arms.push(quote::quote! {
+                    #field_name_str => {
+                        if let #value_type(v) = value {
+                            #field_name = Some(v.clone());
+                        }
+                    }
+                })
+            }
         }
     }
 

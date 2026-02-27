@@ -34,20 +34,22 @@ pub struct Field {
     pub name: Ident,
     /// Type of the field
     pub ty: syn::Path,
-    /// Data type kind of the field; e.g. `DataTypeKind::Int32`
-    pub data_type_kind: syn::Path,
+    /// Data type kind of the field; e.g. `DataTypeKind::Int32` or `DataTypeKind::Custom("tag")`
+    pub data_type_kind: syn::Expr,
     /// Whether the field is a foreign key
     pub is_fk: bool,
     /// Whether the field is nullable
     pub nullable: bool,
     /// Whether the field is a primary key
     pub primary_key: bool,
+    /// Whether the field uses `#[custom_type]`
+    pub custom_type: bool,
     /// Sanitize struct to use for this field
     pub sanitize: Option<Sanitizer>,
     /// Validate struct to use for this field
     pub validate: Option<Validator>,
-    /// Value type of the field; e.g. `Value::Int32`
-    pub value_type: syn::Path,
+    /// Value type of the field; e.g. `Value::Int32`. `None` for custom types.
+    pub value_type: Option<syn::Path>,
 }
 
 /// Validator metadata
@@ -492,15 +494,33 @@ fn get_fields(
             #field_type
         };
 
-        // Step 2: converti stringa → Ident
-        let field_type_ident = syn::Ident::new(&field_type_name_str, Span::call_site());
+        // Step 2: detect custom_type attribute
+        let custom_type = is_custom_type(field);
 
-        // Step 3: costruisci un Path valido
-        let data_type_kind: syn::Path = syn::parse_quote! {
-            ::ic_dbms_api::prelude::DataTypeKind::#field_type_ident
-        };
-        let value_type: syn::Path = syn::parse_quote! {
-            ::ic_dbms_api::prelude::Value::#field_type_ident
+        // Step 3: build data_type_kind and value_type
+        let (data_type_kind, value_type): (syn::Expr, Option<syn::Path>) = if custom_type {
+            let dtk: syn::Expr = syn::parse_quote! {
+                ::ic_dbms_api::prelude::DataTypeKind::Custom(
+                    <#field_type_name as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG
+                )
+            };
+            (dtk, None)
+        } else {
+            let field_type_ident = syn::Ident::new(&field_type_name_str, Span::call_site());
+            let dtk: syn::Path = syn::parse_quote! {
+                ::ic_dbms_api::prelude::DataTypeKind::#field_type_ident
+            };
+            let vt: syn::Path = syn::parse_quote! {
+                ::ic_dbms_api::prelude::Value::#field_type_ident
+            };
+            (
+                syn::Expr::Path(syn::ExprPath {
+                    attrs: vec![],
+                    qself: None,
+                    path: dtk,
+                }),
+                Some(vt),
+            )
         };
 
         fields.push(Field {
@@ -510,6 +530,7 @@ fn get_fields(
             data_type_kind,
             nullable,
             primary_key,
+            custom_type,
             sanitize,
             validate,
             value_type,
@@ -524,4 +545,12 @@ fn nullable(field: &syn::Field) -> bool {
     let field_type = &field.ty;
     let field_type_name = field_type.to_token_stream();
     field_type_name.to_string().starts_with("Nullable <")
+}
+
+/// Returns `true` if the field has a `#[custom_type]` attribute.
+fn is_custom_type(field: &syn::Field) -> bool {
+    field
+        .attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("custom_type"))
 }

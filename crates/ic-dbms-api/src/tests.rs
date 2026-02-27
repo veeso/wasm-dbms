@@ -297,3 +297,201 @@ mod tests {
         assert_ne!(fingerprint, 0);
     }
 }
+
+#[cfg(test)]
+mod custom_type_tests {
+    use std::borrow::Cow;
+    use std::fmt;
+
+    use crate::dbms::custom_value::CustomValue;
+    use crate::dbms::table::{ColumnDef, TableColumns, TableRecord, TableSchema, ValuesSource};
+    use crate::dbms::types::{CustomDataType, DataTypeKind, Uint32};
+    use crate::dbms::value::Value;
+    use crate::memory::{DataSize, Encode, MSize, MemoryResult, PageOffset, DEFAULT_ALIGNMENT};
+    use crate::prelude::{DecodeError, MemoryError};
+    use crate::prelude::{InsertRecord, UpdateRecord};
+
+    /// A simple custom data type for testing: Priority
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+    #[derive(candid::CandidType, serde::Serialize, serde::Deserialize)]
+    pub enum Priority {
+        #[default]
+        Low,
+        Medium,
+        High,
+    }
+
+    impl fmt::Display for Priority {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Priority::Low => write!(f, "low"),
+                Priority::Medium => write!(f, "medium"),
+                Priority::High => write!(f, "high"),
+            }
+        }
+    }
+
+    impl Encode for Priority {
+        const SIZE: DataSize = DataSize::Fixed(1);
+        const ALIGNMENT: PageOffset = DEFAULT_ALIGNMENT;
+
+        fn encode(&self) -> Cow<'_, [u8]> {
+            Cow::Owned(vec![match self {
+                Priority::Low => 0,
+                Priority::Medium => 1,
+                Priority::High => 2,
+            }])
+        }
+
+        fn decode(data: Cow<[u8]>) -> MemoryResult<Self>
+        where
+            Self: Sized,
+        {
+            match data[0] {
+                0 => Ok(Priority::Low),
+                1 => Ok(Priority::Medium),
+                2 => Ok(Priority::High),
+                other => Err(MemoryError::DecodeError(
+                    DecodeError::TryFromSliceError(format!(
+                        "invalid Priority byte: {other}"
+                    )),
+                )),
+            }
+        }
+
+        fn size(&self) -> MSize {
+            1
+        }
+    }
+
+    impl From<Priority> for Value {
+        fn from(val: Priority) -> Value {
+            Value::Custom(CustomValue {
+                type_tag: <Priority as CustomDataType>::TYPE_TAG.to_string(),
+                encoded: Encode::encode(&val).into_owned(),
+                display: val.to_string(),
+            })
+        }
+    }
+
+    impl crate::dbms::types::DataType for Priority {}
+
+    impl CustomDataType for Priority {
+        const TYPE_TAG: &'static str = "priority";
+    }
+
+    /// A table with a custom type field, using the Table derive macro
+    #[derive(Debug, Clone, PartialEq, Eq, candid::CandidType, serde::Deserialize)]
+    #[derive(crate::prelude::Table)]
+    #[table = "tasks"]
+    pub struct Task {
+        #[primary_key]
+        pub id: Uint32,
+        #[custom_type]
+        pub priority: Priority,
+    }
+
+    #[test]
+    fn test_columns_has_custom_data_type_kind() {
+        let columns = Task::columns();
+        assert_eq!(columns.len(), 2);
+        assert_eq!(columns[0].name, "id");
+        assert_eq!(columns[0].data_type, DataTypeKind::Uint32);
+        assert_eq!(columns[1].name, "priority");
+        assert_eq!(columns[1].data_type, DataTypeKind::Custom("priority"));
+    }
+
+    #[test]
+    fn test_to_values_produces_custom_value() {
+        let task = Task {
+            id: 1u32.into(),
+            priority: Priority::High,
+        };
+        let values = task.to_values();
+        assert_eq!(values.len(), 2);
+
+        // First is Uint32
+        assert!(matches!(values[0].1, Value::Uint32(_)));
+
+        // Second is Custom
+        match &values[1].1 {
+            Value::Custom(cv) => {
+                assert_eq!(cv.type_tag, "priority");
+                assert_eq!(cv.display, "high");
+                // Verify the encoded bytes decode correctly
+                let decoded =
+                    Priority::decode(Cow::Borrowed(&cv.encoded)).expect("decode should succeed");
+                assert_eq!(decoded, Priority::High);
+            }
+            other => panic!("expected Value::Custom, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_table_schema_round_trip() {
+        let task = Task {
+            id: 42u32.into(),
+            priority: Priority::Medium,
+        };
+
+        // Convert to values
+        let values = task.clone().to_values();
+
+        // Build TableColumns for Record::from_values
+        let table_columns: TableColumns = vec![(ValuesSource::This, values.clone())];
+
+        // Create record from values
+        let record = TaskRecord::from_values(table_columns);
+        assert_eq!(record.id, Some(42u32.into()));
+        assert_eq!(record.priority, Some(Priority::Medium));
+
+        // Round-trip record: to_values → from_values
+        let record_values = record.to_values();
+        let table_columns2: TableColumns = vec![(ValuesSource::This, record_values)];
+        let record2 = TaskRecord::from_values(table_columns2);
+        assert_eq!(record2.id, Some(42u32.into()));
+        assert_eq!(record2.priority, Some(Priority::Medium));
+    }
+
+    #[test]
+    fn test_insert_request_from_values() {
+        let values: Vec<(ColumnDef, Value)> = vec![
+            (
+                Task::columns()[0],
+                Value::Uint32(10u32.into()),
+            ),
+            (
+                Task::columns()[1],
+                Value::Custom(CustomValue {
+                    type_tag: "priority".to_string(),
+                    encoded: Encode::encode(&Priority::Low).into_owned(),
+                    display: "low".to_string(),
+                }),
+            ),
+        ];
+
+        let insert = TaskInsertRequest::from_values(&values).expect("from_values should succeed");
+        assert_eq!(insert.id, 10u32.into());
+        assert_eq!(insert.priority, Priority::Low);
+
+        // into_record
+        let task = insert.into_record();
+        assert_eq!(task.id, 10u32.into());
+        assert_eq!(task.priority, Priority::Low);
+    }
+
+    #[test]
+    fn test_update_request_from_values() {
+        let values: Vec<(ColumnDef, Value)> = vec![(
+            Task::columns()[1],
+            Value::Custom(CustomValue {
+                type_tag: "priority".to_string(),
+                encoded: Encode::encode(&Priority::High).into_owned(),
+                display: "high".to_string(),
+            }),
+        )];
+
+        let update = TaskUpdateRequest::from_values(&values, None);
+        assert_eq!(update.priority, Some(Priority::High));
+    }
+}

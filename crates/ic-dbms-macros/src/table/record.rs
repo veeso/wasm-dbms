@@ -117,35 +117,67 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
     for field in metadata.fields.iter().filter(|f| !f.is_fk) {
         let field_ident = &field.name;
         let field_name = field.name.to_string();
-        let value_type = &field.value_type;
 
-        // if is nullable, behaviour is different
-        if field.nullable {
-            field_matches.push(quote::quote! {
-                #field_name => {
-                    if let #value_type(value) = value {
-                        #field_ident = Some(::ic_dbms_api::prelude::Nullable::Value(value.clone()));
-                    } else if let ::ic_dbms_api::prelude::Value::Null = value {
-                        #field_ident = Some(::ic_dbms_api::prelude::Nullable::Null);
+        if field.custom_type {
+            let field_type = &field.ty;
+            if field.nullable {
+                field_matches.push(quote::quote! {
+                    #field_name => {
+                        if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
+                            #field_ident = Some(::ic_dbms_api::prelude::Nullable::Value(
+                                <#field_type as ::ic_dbms_api::prelude::Encode>::decode(
+                                    std::borrow::Cow::Borrowed(&cv.encoded)
+                                ).expect("failed to decode custom type")
+                            ));
+                        } else if let ::ic_dbms_api::prelude::Value::Null = value {
+                            #field_ident = Some(::ic_dbms_api::prelude::Nullable::Null);
+                        }
                     }
-                }
-            });
-        } else if field.is_fk {
-            field_matches.push(quote::quote! {
-                #field_name => {
-                    if let #value_type(value) = value {
-                        #field_ident = Some(Box::new(value.clone()));
+                });
+            } else {
+                field_matches.push(quote::quote! {
+                    #field_name => {
+                        if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
+                            #field_ident = Some(
+                                <#field_type as ::ic_dbms_api::prelude::Encode>::decode(
+                                    std::borrow::Cow::Borrowed(&cv.encoded)
+                                ).expect("failed to decode custom type")
+                            );
+                        }
                     }
-                }
-            });
+                });
+            }
         } else {
-            field_matches.push(quote::quote! {
-                #field_name => {
-                    if let #value_type(value) = value {
-                        #field_ident = Some(value.clone());
+            let value_type = field.value_type.as_ref().expect("built-in field must have value_type");
+
+            // if is nullable, behaviour is different
+            if field.nullable {
+                field_matches.push(quote::quote! {
+                    #field_name => {
+                        if let #value_type(value) = value {
+                            #field_ident = Some(::ic_dbms_api::prelude::Nullable::Value(value.clone()));
+                        } else if let ::ic_dbms_api::prelude::Value::Null = value {
+                            #field_ident = Some(::ic_dbms_api::prelude::Nullable::Null);
+                        }
                     }
-                }
-            });
+                });
+            } else if field.is_fk {
+                field_matches.push(quote::quote! {
+                    #field_name => {
+                        if let #value_type(value) = value {
+                            #field_ident = Some(Box::new(value.clone()));
+                        }
+                    }
+                });
+            } else {
+                field_matches.push(quote::quote! {
+                    #field_name => {
+                        if let #value_type(value) = value {
+                            #field_ident = Some(value.clone());
+                        }
+                    }
+                });
+            }
         }
     }
 
@@ -216,27 +248,59 @@ fn impl_to_values(metadata: &TableMetadata) -> TokenStream2 {
 
     for field in &metadata.fields {
         let field_name = &field.name;
-        let value_type = &field.value_type;
         let self_field_name = quote::quote! { &self.#field_name };
 
-        // handle nullable
-        if field.nullable {
-            field_match.push(quote::quote! {
-                match #self_field_name {
-                    Some(::ic_dbms_api::prelude::Nullable::Value(value)) => #value_type(value.clone()),
-                    Some(::ic_dbms_api::prelude::Nullable::Null) | None => ::ic_dbms_api::prelude::Value::Null,
-                }
-            });
-        } else if field.is_fk {
-            // do not push fk fields
-            continue;
+        if field.custom_type {
+            let field_type = &field.ty;
+            if field.nullable {
+                field_match.push(quote::quote! {
+                    match #self_field_name {
+                        Some(::ic_dbms_api::prelude::Nullable::Value(ref value)) => {
+                            ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
+                                type_tag: <#field_type as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
+                                encoded: ::ic_dbms_api::prelude::Encode::encode(value).into_owned(),
+                                display: ::std::string::ToString::to_string(value),
+                            })
+                        }
+                        Some(::ic_dbms_api::prelude::Nullable::Null) | None => ::ic_dbms_api::prelude::Value::Null,
+                    }
+                });
+            } else if field.is_fk {
+                continue;
+            } else {
+                field_match.push(quote::quote! {
+                    match #self_field_name {
+                        Some(value) => ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
+                            type_tag: <#field_type as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
+                            encoded: ::ic_dbms_api::prelude::Encode::encode(value).into_owned(),
+                            display: ::std::string::ToString::to_string(value),
+                        }),
+                        None => ::ic_dbms_api::prelude::Value::Null,
+                    }
+                });
+            }
         } else {
-            field_match.push(quote::quote! {
-                match #self_field_name {
-                    Some(value) => #value_type(value.clone()),
-                    None => ::ic_dbms_api::prelude::Value::Null,
-                }
-            });
+            let value_type = field.value_type.as_ref().expect("built-in field must have value_type");
+
+            // handle nullable
+            if field.nullable {
+                field_match.push(quote::quote! {
+                    match #self_field_name {
+                        Some(::ic_dbms_api::prelude::Nullable::Value(value)) => #value_type(value.clone()),
+                        Some(::ic_dbms_api::prelude::Nullable::Null) | None => ::ic_dbms_api::prelude::Value::Null,
+                    }
+                });
+            } else if field.is_fk {
+                // do not push fk fields
+                continue;
+            } else {
+                field_match.push(quote::quote! {
+                    match #self_field_name {
+                        Some(value) => #value_type(value.clone()),
+                        None => ::ic_dbms_api::prelude::Value::Null,
+                    }
+                });
+            }
         }
     }
 

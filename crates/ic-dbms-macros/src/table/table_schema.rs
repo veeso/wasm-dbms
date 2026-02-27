@@ -121,23 +121,53 @@ fn to_values(fields: &[Field]) -> TokenStream2 {
         let self_field: syn::Expr = syn::parse_quote! {
             self.#field_ident
         };
-        let value_type = &field.value_type;
 
-        // For nullable we need to match whether it's Null.
-        // If it's null we return `Value::Null`, otherwise we wrap the inner value.
-        if field.nullable {
-            columns.push(quote::quote! {
-                (Self::columns()[#index], match #self_field {
-                    ::ic_dbms_api::prelude::Nullable::Null => ::ic_dbms_api::prelude::Value::Null,
-                    ::ic_dbms_api::prelude::Nullable::Value(inner) => #value_type(inner),
-                })
-            });
-            continue;
+        if field.custom_type {
+            // Custom type handling
+            let field_type = &field.ty;
+            if field.nullable {
+                columns.push(quote::quote! {
+                    (Self::columns()[#index], match #self_field {
+                        ::ic_dbms_api::prelude::Nullable::Null => ::ic_dbms_api::prelude::Value::Null,
+                        ::ic_dbms_api::prelude::Nullable::Value(ref inner) => {
+                            ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
+                                type_tag: <#field_type as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
+                                encoded: ::ic_dbms_api::prelude::Encode::encode(inner).into_owned(),
+                                display: ::std::string::ToString::to_string(inner),
+                            })
+                        }
+                    })
+                });
+            } else {
+                columns.push(quote::quote! {
+                    (Self::columns()[#index], ::ic_dbms_api::prelude::Value::Custom(
+                        ::ic_dbms_api::prelude::CustomValue {
+                            type_tag: <#field_type as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
+                            encoded: ::ic_dbms_api::prelude::Encode::encode(&#self_field).into_owned(),
+                            display: ::std::string::ToString::to_string(&#self_field),
+                        }
+                    ))
+                });
+            }
+        } else {
+            // Built-in type handling
+            let value_type = field.value_type.as_ref().expect("built-in field must have value_type");
+
+            // For nullable we need to match whether it's Null.
+            // If it's null we return `Value::Null`, otherwise we wrap the inner value.
+            if field.nullable {
+                columns.push(quote::quote! {
+                    (Self::columns()[#index], match #self_field {
+                        ::ic_dbms_api::prelude::Nullable::Null => ::ic_dbms_api::prelude::Value::Null,
+                        ::ic_dbms_api::prelude::Nullable::Value(inner) => #value_type(inner),
+                    })
+                });
+            } else {
+                columns.push(quote::quote! {
+                    (Self::columns()[#index], #value_type(#self_field))
+                });
+            }
         }
-
-        columns.push(quote::quote! {
-            (Self::columns()[#index], #value_type(#self_field))
-        })
     }
 
     quote::quote! {
