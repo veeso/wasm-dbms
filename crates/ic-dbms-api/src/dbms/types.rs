@@ -73,7 +73,7 @@ pub trait CustomDataType: DataType {
 }
 
 /// An enumeration of all supported data type kinds in the DBMS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CandidType, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataTypeKind {
     Blob,
     Boolean,
@@ -88,6 +88,7 @@ pub enum DataTypeKind {
     Uint32,
     Uint64,
     Uuid,
+    Custom(&'static str),
 }
 
 #[cfg(test)]
@@ -186,5 +187,28 @@ mod test {
             Some(&"32-bit unsigned integer")
         );
         assert_eq!(map.get(&DataTypeKind::Blob), None);
+    }
+
+    #[test]
+    fn test_should_create_custom_data_type_kind() {
+        let kind = DataTypeKind::Custom("role");
+        assert_eq!(kind, DataTypeKind::Custom("role"));
+        assert_ne!(kind, DataTypeKind::Custom("status"));
+        assert_ne!(kind, DataTypeKind::Text);
+    }
+
+    #[test]
+    fn test_should_copy_custom_data_type_kind() {
+        let kind = DataTypeKind::Custom("role");
+        let copied = kind;
+        assert_eq!(kind, copied);
+    }
+
+    #[test]
+    fn test_should_debug_custom_data_type_kind() {
+        let kind = DataTypeKind::Custom("role");
+        let debug = format!("{kind:?}");
+        assert!(debug.contains("Custom"));
+        assert!(debug.contains("role"));
     }
 }

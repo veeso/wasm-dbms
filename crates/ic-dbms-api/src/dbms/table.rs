@@ -8,7 +8,9 @@ use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use self::column_def::{CandidColumnDef, CandidForeignKeyDef, ColumnDef, ForeignKeyDef};
+pub use self::column_def::{
+    CandidColumnDef, CandidDataTypeKind, CandidForeignKeyDef, ColumnDef, ForeignKeyDef,
+};
 pub use self::record::{
     InsertRecord, TableColumns, TableRecord, UpdateRecord, ValuesSource, flatten_table_columns,
 };

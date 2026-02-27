@@ -29,6 +29,49 @@ pub struct ForeignKeyDef {
     pub foreign_column: &'static str,
 }
 
+/// Candid-serializable data type kind for canister API boundaries.
+///
+/// Mirrors [`DataTypeKind`] but uses owned `String` for the `Custom` variant,
+/// making it compatible with `CandidType` serialization.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, CandidType, Serialize, Deserialize)]
+pub enum CandidDataTypeKind {
+    Blob,
+    Boolean,
+    Date,
+    DateTime,
+    Decimal,
+    Int32,
+    Int64,
+    Json,
+    Principal,
+    Text,
+    Uint32,
+    Uint64,
+    Uuid,
+    Custom(String),
+}
+
+impl From<DataTypeKind> for CandidDataTypeKind {
+    fn from(kind: DataTypeKind) -> Self {
+        match kind {
+            DataTypeKind::Blob => Self::Blob,
+            DataTypeKind::Boolean => Self::Boolean,
+            DataTypeKind::Date => Self::Date,
+            DataTypeKind::DateTime => Self::DateTime,
+            DataTypeKind::Decimal => Self::Decimal,
+            DataTypeKind::Int32 => Self::Int32,
+            DataTypeKind::Int64 => Self::Int64,
+            DataTypeKind::Json => Self::Json,
+            DataTypeKind::Principal => Self::Principal,
+            DataTypeKind::Text => Self::Text,
+            DataTypeKind::Uint32 => Self::Uint32,
+            DataTypeKind::Uint64 => Self::Uint64,
+            DataTypeKind::Uuid => Self::Uuid,
+            DataTypeKind::Custom(s) => Self::Custom(s.to_string()),
+        }
+    }
+}
+
 /// Candid-serializable column definition for canister API boundaries.
 ///
 /// This type mirrors [`ColumnDef`] but uses owned `String` fields instead
@@ -40,7 +83,7 @@ pub struct CandidColumnDef {
     /// The name of the column.
     pub name: String,
     /// The data type of the column.
-    pub data_type: DataTypeKind,
+    pub data_type: CandidDataTypeKind,
     /// Indicates if this column can contain NULL values.
     pub nullable: bool,
     /// Indicates if this column is part of the primary key.
@@ -68,7 +111,7 @@ impl From<ColumnDef> for CandidColumnDef {
         Self {
             table: None,
             name: def.name.to_string(),
-            data_type: def.data_type,
+            data_type: CandidDataTypeKind::from(def.data_type),
             nullable: def.nullable,
             primary_key: def.primary_key,
             foreign_key: def.foreign_key.map(CandidForeignKeyDef::from),
@@ -233,7 +276,7 @@ mod test {
         let col = CandidColumnDef {
             table: Some("users".to_string()),
             name: "id".to_string(),
-            data_type: DataTypeKind::Uint32,
+            data_type: CandidDataTypeKind::Uint32,
             nullable: false,
             primary_key: true,
             foreign_key: None,
@@ -253,5 +296,35 @@ mod test {
         let candid_col = CandidColumnDef::from(col);
         assert_eq!(candid_col.table, None);
         assert_eq!(candid_col.name, "id");
+    }
+
+    #[test]
+    fn test_should_convert_custom_data_type_kind_to_candid() {
+        let kind = DataTypeKind::Custom("role");
+        let candid_kind = CandidDataTypeKind::from(kind);
+        assert_eq!(candid_kind, CandidDataTypeKind::Custom("role".to_string()));
+    }
+
+    #[test]
+    fn test_should_convert_builtin_data_type_kind_to_candid() {
+        let kind = DataTypeKind::Text;
+        let candid_kind = CandidDataTypeKind::from(kind);
+        assert_eq!(candid_kind, CandidDataTypeKind::Text);
+    }
+
+    #[test]
+    fn test_should_create_candid_column_def_with_custom_type() {
+        let col = ColumnDef {
+            name: "role",
+            data_type: DataTypeKind::Custom("role"),
+            nullable: false,
+            primary_key: false,
+            foreign_key: None,
+        };
+        let candid_col = CandidColumnDef::from(col);
+        assert_eq!(
+            candid_col.data_type,
+            CandidDataTypeKind::Custom("role".to_string())
+        );
     }
 }
