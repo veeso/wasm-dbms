@@ -2,6 +2,7 @@
 
 pub use ic_dbms_macros::{Encode, Table};
 
+pub use crate::dbms::custom_value::CustomValue;
 pub use crate::dbms::database::Database;
 pub use crate::dbms::foreign_fetcher::{ForeignFetcher, NoForeignFetcher};
 pub use crate::dbms::query::{
