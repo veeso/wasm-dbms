@@ -28,6 +28,7 @@ pub enum Value {
     Uint32(types::Uint32),
     Uint64(types::Uint64),
     Uuid(types::Uuid),
+    Custom(crate::dbms::custom_value::CustomValue),
 }
 
 impl FromStr for Value {
@@ -170,7 +171,31 @@ impl Value {
             Value::Uint32(_) => "Uint32",
             Value::Uint64(_) => "Uint64",
             Value::Uuid(_) => "Uuid",
+            Value::Custom(cv) => {
+                let s = format!("Custom({})", cv.type_tag);
+                // Leak is acceptable here — type_name() returns &'static str and
+                // the number of unique type tags is bounded at compile time.
+                s.leak()
+            }
         }
+    }
+
+    /// Returns reference to the inner [`CustomValue`] if this is a `Custom` variant.
+    pub fn as_custom(&self) -> Option<&crate::dbms::custom_value::CustomValue> {
+        match self {
+            Value::Custom(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Attempts to decode a `Custom` variant into a concrete [`CustomDataType`](crate::dbms::types::CustomDataType).
+    ///
+    /// Returns `None` if this is not a `Custom` variant, the type tag doesn't
+    /// match, or decoding fails.
+    pub fn as_custom_type<T: crate::dbms::types::CustomDataType>(&self) -> Option<T> {
+        self.as_custom()
+            .filter(|cv| cv.type_tag == T::TYPE_TAG)
+            .and_then(|cv| T::decode(std::borrow::Cow::Borrowed(&cv.encoded)).ok())
     }
 }
 
@@ -307,5 +332,58 @@ mod tests {
 
         let value = Value::from_str(str_value).unwrap();
         assert_eq!(value.as_text().unwrap().0, str_value);
+    }
+
+    #[test]
+    fn test_should_create_custom_value() {
+        let cv = crate::dbms::custom_value::CustomValue {
+            type_tag: "role".to_string(),
+            encoded: vec![0x01],
+            display: "Admin".to_string(),
+        };
+        let value = Value::Custom(cv.clone());
+        assert_eq!(value.as_custom(), Some(&cv));
+    }
+
+    #[test]
+    fn test_should_return_none_for_non_custom() {
+        let value = Value::Null;
+        assert_eq!(value.as_custom(), None);
+    }
+
+    #[test]
+    fn test_should_compare_custom_values() {
+        let a = Value::Custom(crate::dbms::custom_value::CustomValue {
+            type_tag: "role".to_string(),
+            encoded: vec![0x01],
+            display: "Admin".to_string(),
+        });
+        let b = Value::Custom(crate::dbms::custom_value::CustomValue {
+            type_tag: "role".to_string(),
+            encoded: vec![0x01],
+            display: "Admin".to_string(),
+        });
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_should_order_custom_after_builtin() {
+        let builtin = Value::Uuid(types::Uuid::default());
+        let custom = Value::Custom(crate::dbms::custom_value::CustomValue {
+            type_tag: "role".to_string(),
+            encoded: vec![0x01],
+            display: "Admin".to_string(),
+        });
+        assert!(builtin < custom);
+    }
+
+    #[test]
+    fn test_should_get_custom_type_name() {
+        let cv = Value::Custom(crate::dbms::custom_value::CustomValue {
+            type_tag: "role".to_string(),
+            encoded: vec![0x01],
+            display: "Admin".to_string(),
+        });
+        assert_eq!(cv.type_name(), "Custom(role)");
     }
 }
