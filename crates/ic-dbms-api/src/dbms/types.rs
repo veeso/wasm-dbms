@@ -55,6 +55,23 @@ pub trait DataType:
 {
 }
 
+/// A trait for user-defined custom data types.
+///
+/// Custom types are stored as type-erased [`CustomValue`](crate::dbms::custom_value::CustomValue)
+/// inside `Value::Custom`. The `TYPE_TAG` constant uniquely identifies the type
+/// and must be stable across versions.
+///
+/// # Ordering contract
+///
+/// For custom types used with range filters (`Gt`, `Lt`, `Ge`, `Le`) or `ORDER BY`,
+/// the [`Encode`](crate::memory::Encode) output must be order-preserving: if `a < b`,
+/// then `a.encode() < b.encode()` lexicographically.
+/// Equality filters (`Eq`, `Ne`, `In`) only require canonical encoding.
+pub trait CustomDataType: DataType {
+    /// Unique string identifier for this type (e.g., `"principal"`, `"role"`).
+    const TYPE_TAG: &'static str;
+}
+
 /// An enumeration of all supported data type kinds in the DBMS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CandidType, Serialize, Deserialize)]
 pub enum DataTypeKind {
