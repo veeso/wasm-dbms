@@ -305,7 +305,7 @@ mod custom_type_tests {
 
     use crate::dbms::custom_value::CustomValue;
     use crate::dbms::table::{ColumnDef, TableColumns, TableRecord, TableSchema, ValuesSource};
-    use crate::dbms::types::{CustomDataType, DataTypeKind, Uint32};
+    use crate::dbms::types::{CustomDataType, DataTypeKind, Nullable, Text, Uint32};
     use crate::dbms::value::Value;
     use crate::memory::{DataSize, Encode, MSize, MemoryResult, PageOffset, DEFAULT_ALIGNMENT};
     use crate::prelude::{DecodeError, MemoryError};
@@ -493,5 +493,51 @@ mod custom_type_tests {
 
         let update = TaskUpdateRequest::from_values(&values, None);
         assert_eq!(update.priority, Some(Priority::High));
+    }
+
+    /// A table with a nullable custom type field, using the Table derive macro
+    #[derive(Debug, Clone, PartialEq, Eq, candid::CandidType, serde::Deserialize)]
+    #[derive(crate::prelude::Table)]
+    #[table = "tasks_with_nullable"]
+    pub struct TaskWithNullable {
+        #[primary_key]
+        pub id: Uint32,
+        pub title: Text,
+        #[custom_type]
+        pub priority: Nullable<Priority>,
+    }
+
+    #[test]
+    fn test_nullable_custom_type_round_trip() {
+        // Test with a value
+        let task = TaskWithNullable {
+            id: Uint32(1),
+            title: Text::from("Test"),
+            priority: Nullable::Value(Priority::High),
+        };
+        let values = task.to_values();
+        // Verify priority column has Value::Custom
+        let priority_val = &values[2].1;
+        assert!(matches!(priority_val, Value::Custom(_)));
+
+        // Build TableColumns for Record::from_values
+        let table_columns: TableColumns = vec![(ValuesSource::This, values)];
+
+        // Test round-trip
+        let record = TaskWithNullableRecord::from_values(table_columns);
+        assert_eq!(record.priority, Some(Nullable::Value(Priority::High)));
+
+        // Test with null
+        let task_null = TaskWithNullable {
+            id: Uint32(2),
+            title: Text::from("Null test"),
+            priority: Nullable::Null,
+        };
+        let values_null = task_null.to_values();
+        assert!(matches!(values_null[2].1, Value::Null));
+
+        let table_columns_null: TableColumns = vec![(ValuesSource::This, values_null)];
+        let record_null = TaskWithNullableRecord::from_values(table_columns_null);
+        assert_eq!(record_null.priority, Some(Nullable::Null));
     }
 }

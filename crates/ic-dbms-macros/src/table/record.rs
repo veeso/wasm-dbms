@@ -119,13 +119,13 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         let field_name = field.name.to_string();
 
         if field.custom_type {
-            let field_type = &field.ty;
+            let custom_ident = field.custom_type_ident.as_ref().expect("custom_type field must have custom_type_ident");
             if field.nullable {
                 field_matches.push(quote::quote! {
                     #field_name => {
                         if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
                             #field_ident = Some(::ic_dbms_api::prelude::Nullable::Value(
-                                <#field_type as ::ic_dbms_api::prelude::Encode>::decode(
+                                <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
                                     std::borrow::Cow::Borrowed(&cv.encoded)
                                 ).expect("failed to decode custom type")
                             ));
@@ -139,7 +139,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                     #field_name => {
                         if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
                             #field_ident = Some(
-                                <#field_type as ::ic_dbms_api::prelude::Encode>::decode(
+                                <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
                                     std::borrow::Cow::Borrowed(&cv.encoded)
                                 ).expect("failed to decode custom type")
                             );
@@ -251,13 +251,13 @@ fn impl_to_values(metadata: &TableMetadata) -> TokenStream2 {
         let self_field_name = quote::quote! { &self.#field_name };
 
         if field.custom_type {
-            let field_type = &field.ty;
+            let custom_ident = field.custom_type_ident.as_ref().expect("custom_type field must have custom_type_ident");
             if field.nullable {
                 field_match.push(quote::quote! {
                     match #self_field_name {
-                        Some(::ic_dbms_api::prelude::Nullable::Value(ref value)) => {
+                        Some(::ic_dbms_api::prelude::Nullable::Value(value)) => {
                             ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
-                                type_tag: <#field_type as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
+                                type_tag: <#custom_ident as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
                                 encoded: ::ic_dbms_api::prelude::Encode::encode(value).into_owned(),
                                 display: ::std::string::ToString::to_string(value),
                             })
@@ -271,7 +271,7 @@ fn impl_to_values(metadata: &TableMetadata) -> TokenStream2 {
                 field_match.push(quote::quote! {
                     match #self_field_name {
                         Some(value) => ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
-                            type_tag: <#field_type as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
+                            type_tag: <#custom_ident as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
                             encoded: ::ic_dbms_api::prelude::Encode::encode(value).into_owned(),
                             display: ::std::string::ToString::to_string(value),
                         }),

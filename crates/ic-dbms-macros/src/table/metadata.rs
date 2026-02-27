@@ -44,6 +44,9 @@ pub struct Field {
     pub primary_key: bool,
     /// Whether the field uses `#[custom_type]`
     pub custom_type: bool,
+    /// For custom types: the inner type ident (with Nullable stripped).
+    /// Used in codegen for CustomDataType::TYPE_TAG and Encode::decode lookups.
+    pub custom_type_ident: Option<syn::Ident>,
     /// Sanitize struct to use for this field
     pub sanitize: Option<Sanitizer>,
     /// Validate struct to use for this field
@@ -498,15 +501,20 @@ fn get_fields(
         let custom_type = is_custom_type(field);
 
         // Step 3: build data_type_kind and value_type
-        let (data_type_kind, value_type): (syn::Expr, Option<syn::Path>) = if custom_type {
+        let field_type_ident = syn::Ident::new(&field_type_name_str, Span::call_site());
+        let (data_type_kind, value_type, custom_type_ident): (
+            syn::Expr,
+            Option<syn::Path>,
+            Option<syn::Ident>,
+        ) = if custom_type {
+            let custom_ident = field_type_ident.clone();
             let dtk: syn::Expr = syn::parse_quote! {
                 ::ic_dbms_api::prelude::DataTypeKind::Custom(
-                    <#field_type_name as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG
+                    <#custom_ident as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG
                 )
             };
-            (dtk, None)
+            (dtk, None, Some(custom_ident))
         } else {
-            let field_type_ident = syn::Ident::new(&field_type_name_str, Span::call_site());
             let dtk: syn::Path = syn::parse_quote! {
                 ::ic_dbms_api::prelude::DataTypeKind::#field_type_ident
             };
@@ -520,6 +528,7 @@ fn get_fields(
                     path: dtk,
                 }),
                 Some(vt),
+                None,
             )
         };
 
@@ -531,6 +540,7 @@ fn get_fields(
             nullable,
             primary_key,
             custom_type,
+            custom_type_ident,
             sanitize,
             validate,
             value_type,

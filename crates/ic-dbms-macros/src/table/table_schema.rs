@@ -123,17 +123,17 @@ fn to_values(fields: &[Field]) -> TokenStream2 {
         };
 
         if field.custom_type {
-            // Custom type handling
-            let field_type = &field.ty;
+            // Custom type handling — use the inner type ident (Nullable stripped) for trait lookups
+            let custom_ident = field.custom_type_ident.as_ref().expect("custom_type field must have custom_type_ident");
             if field.nullable {
                 columns.push(quote::quote! {
                     (Self::columns()[#index], match #self_field {
                         ::ic_dbms_api::prelude::Nullable::Null => ::ic_dbms_api::prelude::Value::Null,
-                        ::ic_dbms_api::prelude::Nullable::Value(ref inner) => {
+                        ::ic_dbms_api::prelude::Nullable::Value(inner) => {
                             ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
-                                type_tag: <#field_type as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
-                                encoded: ::ic_dbms_api::prelude::Encode::encode(inner).into_owned(),
-                                display: ::std::string::ToString::to_string(inner),
+                                type_tag: <#custom_ident as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
+                                encoded: ::ic_dbms_api::prelude::Encode::encode(&inner).into_owned(),
+                                display: ::std::string::ToString::to_string(&inner),
                             })
                         }
                     })
@@ -142,7 +142,7 @@ fn to_values(fields: &[Field]) -> TokenStream2 {
                 columns.push(quote::quote! {
                     (Self::columns()[#index], ::ic_dbms_api::prelude::Value::Custom(
                         ::ic_dbms_api::prelude::CustomValue {
-                            type_tag: <#field_type as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
+                            type_tag: <#custom_ident as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
                             encoded: ::ic_dbms_api::prelude::Encode::encode(&#self_field).into_owned(),
                             display: ::std::string::ToString::to_string(&#self_field),
                         }

@@ -149,13 +149,13 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         let field_name_str = field.name.to_string();
 
         if field.custom_type {
-            let field_type = &field.ty;
+            let custom_ident = field.custom_type_ident.as_ref().expect("custom_type field must have custom_type_ident");
             if field.nullable {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
                         if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
                             #field_name = Some(::ic_dbms_api::prelude::Nullable::Value(
-                                <#field_type as ::ic_dbms_api::prelude::Encode>::decode(
+                                <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
                                     std::borrow::Cow::Borrowed(&cv.encoded)
                                 ).expect("failed to decode custom type")
                             ));
@@ -169,7 +169,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                     #field_name_str => {
                         if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
                             #field_name = Some(
-                                <#field_type as ::ic_dbms_api::prelude::Encode>::decode(
+                                <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
                                     std::borrow::Cow::Borrowed(&cv.encoded)
                                 ).expect("failed to decode custom type")
                             );
