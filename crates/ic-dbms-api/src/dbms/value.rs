@@ -166,15 +166,23 @@ impl Value {
             Value::Custom(cv) => {
                 // Cache custom type names to avoid repeated allocations.
                 // The number of unique type tags is bounded at compile time,
-                // so the map grows to a fixed size.
-                static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, &'static str>>> = OnceLock::new();
-                let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+                // so the map grows to a fixed size. A maximum of 64 entries
+                // is enforced as a safety guard against unbounded memory usage
+                // on the IC, where heap is a scarce resource.
+                const MAX_CACHE_ENTRIES: usize = 64;
+                static CACHE: OnceLock<
+                    std::sync::Mutex<std::collections::HashMap<String, &'static str>>,
+                > = OnceLock::new();
+                let cache =
+                    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
                 let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
-                map.entry(cv.type_tag.clone())
-                    .or_insert_with(|| {
-                        let s = format!("Custom({})", cv.type_tag);
-                        s.leak()
-                    })
+                if map.len() >= MAX_CACHE_ENTRIES && !map.contains_key(&cv.type_tag) {
+                    return "Custom(?)";
+                }
+                map.entry(cv.type_tag.clone()).or_insert_with(|| {
+                    let s = format!("Custom({})", cv.type_tag);
+                    s.leak()
+                })
             }
         }
     }

@@ -87,11 +87,7 @@ impl crate::dbms::types::CustomDataType for Principal {
 
 impl From<Principal> for crate::dbms::value::Value {
     fn from(val: Principal) -> crate::dbms::value::Value {
-        crate::dbms::value::Value::Custom(crate::dbms::custom_value::CustomValue {
-            type_tag: "principal".to_string(),
-            encoded: crate::memory::Encode::encode(&val).into_owned(),
-            display: val.to_string(),
-        })
+        crate::dbms::value::Value::Custom(crate::dbms::custom_value::CustomValue::new(&val))
     }
 }
 

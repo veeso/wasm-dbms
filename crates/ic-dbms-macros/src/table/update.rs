@@ -155,11 +155,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
                         if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
-                            #field_name = Some(::ic_dbms_api::prelude::Nullable::Value(
-                                <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
-                                    std::borrow::Cow::Borrowed(&cv.encoded)
-                                ).expect("failed to decode custom type")
-                            ));
+                            if let Ok(decoded) = <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
+                                std::borrow::Cow::Borrowed(&cv.encoded)
+                            ) {
+                                #field_name = Some(::ic_dbms_api::prelude::Nullable::Value(decoded));
+                            }
                         } else if let ::ic_dbms_api::prelude::Value::Null = value {
                             #field_name = Some(::ic_dbms_api::prelude::Nullable::Null);
                         }
@@ -169,11 +169,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
                         if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
-                            #field_name = Some(
-                                <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
-                                    std::borrow::Cow::Borrowed(&cv.encoded)
-                                ).expect("failed to decode custom type")
-                            );
+                            if let Ok(decoded) = <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
+                                std::borrow::Cow::Borrowed(&cv.encoded)
+                            ) {
+                                #field_name = Some(decoded);
+                            }
                         }
                     }
                 })

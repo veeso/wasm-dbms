@@ -127,11 +127,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                 field_matches.push(quote::quote! {
                     #field_name => {
                         if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
-                            #field_ident = Some(::ic_dbms_api::prelude::Nullable::Value(
-                                <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
-                                    std::borrow::Cow::Borrowed(&cv.encoded)
-                                ).expect("failed to decode custom type")
-                            ));
+                            if let Ok(decoded) = <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
+                                std::borrow::Cow::Borrowed(&cv.encoded)
+                            ) {
+                                #field_ident = Some(::ic_dbms_api::prelude::Nullable::Value(decoded));
+                            }
                         } else if let ::ic_dbms_api::prelude::Value::Null = value {
                             #field_ident = Some(::ic_dbms_api::prelude::Nullable::Null);
                         }
@@ -141,11 +141,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                 field_matches.push(quote::quote! {
                     #field_name => {
                         if let ::ic_dbms_api::prelude::Value::Custom(cv) = value {
-                            #field_ident = Some(
-                                <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
-                                    std::borrow::Cow::Borrowed(&cv.encoded)
-                                ).expect("failed to decode custom type")
-                            );
+                            if let Ok(decoded) = <#custom_ident as ::ic_dbms_api::prelude::Encode>::decode(
+                                std::borrow::Cow::Borrowed(&cv.encoded)
+                            ) {
+                                #field_ident = Some(decoded);
+                            }
                         }
                     }
                 });
@@ -265,11 +265,9 @@ fn impl_to_values(metadata: &TableMetadata) -> TokenStream2 {
                 field_match.push(quote::quote! {
                     match #self_field_name {
                         Some(::ic_dbms_api::prelude::Nullable::Value(value)) => {
-                            ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
-                                type_tag: <#custom_ident as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
-                                encoded: ::ic_dbms_api::prelude::Encode::encode(value).into_owned(),
-                                display: ::std::string::ToString::to_string(value),
-                            })
+                            ::ic_dbms_api::prelude::Value::Custom(
+                                ::ic_dbms_api::prelude::CustomValue::new::<#custom_ident>(value)
+                            )
                         }
                         Some(::ic_dbms_api::prelude::Nullable::Null) | None => ::ic_dbms_api::prelude::Value::Null,
                     }
@@ -279,11 +277,9 @@ fn impl_to_values(metadata: &TableMetadata) -> TokenStream2 {
             } else {
                 field_match.push(quote::quote! {
                     match #self_field_name {
-                        Some(value) => ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
-                            type_tag: <#custom_ident as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
-                            encoded: ::ic_dbms_api::prelude::Encode::encode(value).into_owned(),
-                            display: ::std::string::ToString::to_string(value),
-                        }),
+                        Some(value) => ::ic_dbms_api::prelude::Value::Custom(
+                            ::ic_dbms_api::prelude::CustomValue::new::<#custom_ident>(value)
+                        ),
                         None => ::ic_dbms_api::prelude::Value::Null,
                     }
                 });

@@ -21,6 +21,20 @@ pub struct CustomValue {
     pub display: String,
 }
 
+impl CustomValue {
+    /// Creates a new `CustomValue` from a concrete [`CustomDataType`](crate::dbms::types::CustomDataType).
+    ///
+    /// This constructor ensures consistency between the type tag, encoded bytes,
+    /// and display string by deriving all three from the concrete value.
+    pub fn new<T: crate::dbms::types::CustomDataType>(value: &T) -> Self {
+        Self {
+            type_tag: T::TYPE_TAG.to_string(),
+            encoded: crate::memory::Encode::encode(value).into_owned(),
+            display: value.to_string(),
+        }
+    }
+}
+
 impl PartialEq for CustomValue {
     fn eq(&self, other: &Self) -> bool {
         self.type_tag == other.type_tag && self.encoded == other.encoded
@@ -150,6 +164,21 @@ mod test {
         let debug_output = format!("{cv:?}");
         assert!(debug_output.contains("color"));
         assert!(debug_output.contains("red"));
+    }
+
+    #[test]
+    fn test_should_construct_via_new() {
+        use crate::prelude::*;
+
+        let principal =
+            Principal(candid::Principal::from_text("aaaaa-aa").expect("invalid principal"));
+        let cv = CustomValue::new(&principal);
+        assert_eq!(cv.type_tag, "principal");
+        assert_eq!(cv.display, principal.to_string());
+        assert_eq!(
+            cv.encoded,
+            crate::memory::Encode::encode(&principal).into_owned()
+        );
     }
 
     #[test]

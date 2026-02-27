@@ -16,11 +16,7 @@ pub fn custom_data_type(input: &DeriveInput) -> Result<TokenStream> {
 
         impl #impl_generics ::std::convert::From<#name #ty_generics> for ::ic_dbms_api::prelude::Value #where_clause {
             fn from(val: #name #ty_generics) -> ::ic_dbms_api::prelude::Value {
-                ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue {
-                    type_tag: <#name #ty_generics as ::ic_dbms_api::prelude::CustomDataType>::TYPE_TAG.to_string(),
-                    encoded: ::ic_dbms_api::prelude::Encode::encode(&val).into_owned(),
-                    display: ::std::string::ToString::to_string(&val),
-                })
+                ::ic_dbms_api::prelude::Value::Custom(::ic_dbms_api::prelude::CustomValue::new(&val))
             }
         }
     })

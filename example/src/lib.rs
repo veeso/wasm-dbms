@@ -1,5 +1,5 @@
 use candid::CandidType;
-use ic_dbms_api::prelude::{Text, Uint32};
+use ic_dbms_api::prelude::{Principal, Text, Uint32};
 use ic_dbms_canister::prelude::{
     DbmsCanister, EmailValidator, LowerCaseSanitizer, MaxStrlenValidator, Table, TrimSanitizer,
 };
@@ -29,8 +29,18 @@ pub struct Post {
     pub user: Uint32,
 }
 
+#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[table = "projects"]
+pub struct Project {
+    #[primary_key]
+    pub id: Uint32,
+    pub name: Text,
+    #[custom_type]
+    pub owner: Principal,
+}
+
 #[derive(DbmsCanister)]
-#[tables(User = "users", Post = "posts")]
+#[tables(User = "users", Post = "posts", Project = "projects")]
 pub struct IcDbmsCanisterGenerator;
 
 ic_cdk::export_candid!();
