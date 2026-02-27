@@ -1,11 +1,50 @@
 # Changelog
 
 - [Changelog](#changelog)
+  - [0.6.0](#060)
+  - [0.5.0](#050)
   - [0.4.0](#040)
   - [0.3.0](#030)
   - [0.2.1](#021)
   - [0.2.0](#020)
   - [0.1.0](#010)
+
+## 0.6.0
+
+Released on 2026-02-27
+
+### Breaking Changes
+
+- Removed `Value::Principal` and `DataTypeKind::Principal` built-in variants
+  > Principal is no longer a first-class data type. Use the `#[custom_type]` field annotation
+  > on Principal fields instead, which treats Principal as a custom data type.
+- `DataTypeKind` no longer implements `Serialize`, `Deserialize`, `CandidType`
+  > Use `CandidDataTypeKind` at API boundaries for serializable type metadata.
+- Existing stable memory schemas are incompatible due to fingerprint changes
+  > The removal of the Principal variant and addition of Custom variant in `DataTypeKind`
+  > changes type fingerprints, making previously stored schemas incompatible.
+
+### Added
+
+- Custom data types: define arbitrary column types with `#[derive(CustomDataType)]` and `#[type_tag = "..."]` (#35)
+  > Developers can now define their own column types by implementing the `CustomDataType` trait
+  > (via the derive macro) and annotating fields with `#[custom_type]`. Custom types are stored
+  > as opaque byte blobs in stable memory and reconstructed on read via their type tag.
+- `Value::Custom(CustomValue)` variant for type-erased custom values
+  > A new Value variant that wraps custom data types as `(type_tag, encoded_bytes)` pairs,
+  > enabling storage and retrieval without compile-time type knowledge.
+- `#[custom_type]` field annotation for Table derive macro
+  > Fields annotated with `#[custom_type]` are recognized as custom data types during schema
+  > generation, insert request building, and record construction.
+- `CandidDataTypeKind` for serializable type metadata at API boundaries
+  > A Candid-compatible enum mirroring `DataTypeKind` that implements `Serialize`, `Deserialize`,
+  > and `CandidType`, with bidirectional conversion to/from `DataTypeKind`.
+- `Value::as_custom()` and `Value::as_custom_type::<T>()` accessors
+  > Convenience methods to extract custom values: `as_custom()` returns the raw `CustomValue`,
+  > while `as_custom_type::<T>()` decodes it into a concrete `CustomDataType` implementor.
+- `CustomDataType` trait extending `DataType` with `TYPE_TAG` constant
+  > The trait bridges custom types into the DBMS type system, providing encode/decode,
+  > type tag identification, and `DataTypeKind::Custom` integration.
 
 ## 0.5.0
 
