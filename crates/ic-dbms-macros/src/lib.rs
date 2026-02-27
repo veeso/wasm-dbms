@@ -27,6 +27,7 @@
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
+mod custom_data_type;
 mod dbms_canister;
 mod encode;
 mod table;
@@ -556,5 +557,55 @@ pub fn derive_dbms_canister(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     self::dbms_canister::dbms_canister(input)
         .expect("failed to derive `DbmsCanister`")
+        .into()
+}
+
+/// Derives the [`CustomDataType`] trait and an `impl From<T> for Value` conversion
+/// for a user-defined enum or struct.
+///
+/// The type must also derive [`Encode`] (for binary serialization) and implement
+/// [`Display`](std::fmt::Display) (for the cached display string in [`CustomValue`]).
+///
+/// # Required attribute
+///
+/// - `#[type_tag = "..."]`: A unique string identifier for this custom data type.
+///
+/// # What the macro generates
+///
+/// Given a type like:
+///
+/// ```rust,ignore
+/// #[derive(Encode, CustomDataType)]
+/// #[type_tag = "status"]
+/// enum Status { Active, Inactive }
+/// ```
+///
+/// The macro expands into:
+///
+/// ```rust,ignore
+/// impl CustomDataType for Status {
+///     const TYPE_TAG: &'static str = "status";
+/// }
+///
+/// impl From<Status> for Value {
+///     fn from(val: Status) -> Value {
+///         Value::Custom(CustomValue {
+///             type_tag: "status".to_string(),
+///             encoded: Encode::encode(&val).into_owned(),
+///             display: val.to_string(),
+///         })
+///     }
+/// }
+/// ```
+///
+/// # Note
+///
+/// The user must also provide `Display`, `Default`, and `DataType` implementations
+/// for the type. This macro only bridges the custom type to the `Value` system.
+#[proc_macro_derive(CustomDataType, attributes(type_tag))]
+pub fn derive_custom_data_type(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    custom_data_type::custom_data_type(&input)
+        .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

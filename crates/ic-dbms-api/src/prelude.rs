@@ -1,6 +1,6 @@
 //! Prelude exposes all the types for `ic-dbms-api` crate.
 
-pub use ic_dbms_macros::{Encode, Table};
+pub use ic_dbms_macros::{CustomDataType, Encode, Table};
 
 pub use crate::dbms::custom_value::CustomValue;
 pub use crate::dbms::database::Database;

@@ -151,4 +151,80 @@ mod test {
         assert!(debug_output.contains("color"));
         assert!(debug_output.contains("red"));
     }
+
+    #[test]
+    fn test_should_derive_custom_data_type() {
+        use crate::memory::{self, DataSize, MSize, MemoryResult, PageOffset};
+        use crate::prelude::*;
+        use candid::CandidType;
+        use serde::{Deserialize, Serialize};
+        use std::borrow::Cow;
+        use std::fmt;
+
+        #[derive(
+            Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, CandidType, Serialize,
+            Deserialize, CustomDataType,
+        )]
+        #[type_tag = "test_status"]
+        pub enum TestStatus {
+            Active,
+            Inactive,
+        }
+
+        // Manual Encode impl since #[derive(Encode)] only supports structs
+        impl memory::Encode for TestStatus {
+            const SIZE: DataSize = DataSize::Fixed(1);
+            const ALIGNMENT: PageOffset = 1;
+
+            fn size(&self) -> MSize {
+                1
+            }
+
+            fn encode(&self) -> Cow<'_, [u8]> {
+                match self {
+                    TestStatus::Active => Cow::Borrowed(&[0]),
+                    TestStatus::Inactive => Cow::Borrowed(&[1]),
+                }
+            }
+
+            fn decode(data: Cow<[u8]>) -> MemoryResult<Self> {
+                match data.first() {
+                    Some(0) => Ok(TestStatus::Active),
+                    Some(1) => Ok(TestStatus::Inactive),
+                    _ => Err(crate::memory::MemoryError::DecodeError(
+                        crate::memory::DecodeError::TooShort,
+                    )),
+                }
+            }
+        }
+
+        impl fmt::Display for TestStatus {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{self:?}")
+            }
+        }
+
+        impl Default for TestStatus {
+            fn default() -> Self {
+                Self::Active
+            }
+        }
+
+        impl crate::dbms::types::DataType for TestStatus {}
+
+        // Test trait impl
+        assert_eq!(TestStatus::TYPE_TAG, "test_status");
+
+        // Test Into<Value> conversion
+        let value: Value = TestStatus::Active.into();
+        assert!(matches!(value, Value::Custom(_)));
+
+        let cv = value.as_custom().unwrap();
+        assert_eq!(cv.type_tag, "test_status");
+        assert_eq!(cv.display, "Active");
+
+        // Test round-trip via as_custom_type
+        let decoded: TestStatus = value.as_custom_type::<TestStatus>().unwrap();
+        assert_eq!(decoded, TestStatus::Active);
+    }
 }
