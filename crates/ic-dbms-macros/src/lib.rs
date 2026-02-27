@@ -541,7 +541,15 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///
 #[proc_macro_derive(
     Table,
-    attributes(alignment, table, primary_key, foreign_key, sanitizer, validate, custom_type)
+    attributes(
+        alignment,
+        table,
+        primary_key,
+        foreign_key,
+        sanitizer,
+        validate,
+        custom_type
+    )
 )]
 pub fn derive_table(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

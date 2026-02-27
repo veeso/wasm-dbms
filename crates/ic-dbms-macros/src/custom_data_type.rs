@@ -33,10 +33,7 @@ fn extract_type_tag(input: &DeriveInput) -> Result<String> {
     for attr in &input.attrs {
         if attr.path().is_ident("type_tag") {
             let name_value = attr.meta.require_name_value().map_err(|_| {
-                syn::Error::new_spanned(
-                    attr,
-                    "expected `#[type_tag = \"...\"]` syntax",
-                )
+                syn::Error::new_spanned(attr, "expected `#[type_tag = \"...\"]` syntax")
             })?;
 
             if let syn::Expr::Lit(syn::ExprLit {

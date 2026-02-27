@@ -119,7 +119,10 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         let field_name = field.name.to_string();
 
         if field.custom_type {
-            let custom_ident = field.custom_type_ident.as_ref().expect("custom_type field must have custom_type_ident");
+            let custom_ident = field
+                .custom_type_ident
+                .as_ref()
+                .expect("custom_type field must have custom_type_ident");
             if field.nullable {
                 field_matches.push(quote::quote! {
                     #field_name => {
@@ -148,7 +151,10 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                 });
             }
         } else {
-            let value_type = field.value_type.as_ref().expect("built-in field must have value_type");
+            let value_type = field
+                .value_type
+                .as_ref()
+                .expect("built-in field must have value_type");
 
             // if is nullable, behaviour is different
             if field.nullable {
@@ -251,7 +257,10 @@ fn impl_to_values(metadata: &TableMetadata) -> TokenStream2 {
         let self_field_name = quote::quote! { &self.#field_name };
 
         if field.custom_type {
-            let custom_ident = field.custom_type_ident.as_ref().expect("custom_type field must have custom_type_ident");
+            let custom_ident = field
+                .custom_type_ident
+                .as_ref()
+                .expect("custom_type field must have custom_type_ident");
             if field.nullable {
                 field_match.push(quote::quote! {
                     match #self_field_name {
@@ -280,7 +289,10 @@ fn impl_to_values(metadata: &TableMetadata) -> TokenStream2 {
                 });
             }
         } else {
-            let value_type = field.value_type.as_ref().expect("built-in field must have value_type");
+            let value_type = field
+                .value_type
+                .as_ref()
+                .expect("built-in field must have value_type");
 
             // handle nullable
             if field.nullable {
