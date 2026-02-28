@@ -6,7 +6,7 @@ clean:
   cargo clean
 
 [group('build')]
-build_all: build_wasm_dbms build_library_wasm32 build_all_canisters
+build_all: build_wasm_dbms build_library_wasm32 build_all_canisters build_wasm_dbms_example
 
 # Build generic wasm-dbms crates for wasm32-unknown-unknown
 [group('build')]
@@ -35,6 +35,21 @@ build_example_canister:
 [group('build')]
 build_dbms_canister_client_integration_canister:
   just build_canister "dbms-canister-client-integration" "dbms_canister_client_integration" "dbms_canister_client_integration"
+
+# Build the WIT Component Model example (guest + host)
+[group('build')]
+build_wasm_dbms_example: build_wasm_dbms_example_guest build_wasm_dbms_example_host
+
+# Build the WIT guest component for wasm32-wasip2
+[group('build')]
+build_wasm_dbms_example_guest: pre_build
+  cargo build --target wasm32-wasip2 --release --package "wasm-dbms-example-guest"
+  cp "target/wasm32-wasip2/release/wasm_dbms_example_guest.wasm" "{{WASM_DIR}}/wasm-dbms-example-guest.wasm"
+
+# Build the Wasmtime host binary (native)
+[group('build')]
+build_wasm_dbms_example_host:
+  cargo build --release --package "wasm-dbms-example-host"
 
 [private]
 pre_build:
