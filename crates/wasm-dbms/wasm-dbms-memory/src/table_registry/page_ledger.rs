@@ -2,11 +2,12 @@
 
 mod page_table;
 
-use self::page_table::PageTable;
+use wasm_dbms_api::prelude::{Encode, MemoryResult, Page, PageOffset};
+
 pub use self::page_table::PageRecord;
+use self::page_table::PageTable;
 use super::raw_record::RawRecord;
 use crate::{MemoryManager, MemoryProvider, align_up};
-use wasm_dbms_api::prelude::{Encode, MemoryResult, Page, PageOffset};
 
 /// Takes care of storing the pages for each table
 #[derive(Debug)]
@@ -118,11 +119,12 @@ impl PageLedger {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::page_table::PageRecord;
-    use super::super::raw_record::RAW_RECORD_HEADER_SIZE;
-    use crate::{HeapMemoryProvider, MemoryProvider};
     use wasm_dbms_api::prelude::{DataSize, MSize, MemoryResult};
+
+    use super::super::raw_record::RAW_RECORD_HEADER_SIZE;
+    use super::page_table::PageRecord;
+    use super::*;
+    use crate::{HeapMemoryProvider, MemoryProvider};
 
     #[test]
     fn test_should_store_pages_and_load_back() {
@@ -158,9 +160,7 @@ mod tests {
     fn test_should_get_page_for_record() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         // allocate page
-        let ledger_page = mm
-            .allocate_page()
-            .expect("failed to allocate ledger page");
+        let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
         let mut page_ledger =
             PageLedger::load(ledger_page, &mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());
@@ -197,9 +197,7 @@ mod tests {
     fn test_should_get_page_with_offset() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         // allocate page
-        let ledger_page = mm
-            .allocate_page()
-            .expect("failed to allocate ledger page");
+        let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
         let mut page_ledger =
             PageLedger::load(ledger_page, &mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());
@@ -248,9 +246,7 @@ mod tests {
     fn test_should_account_for_padding_on_commit() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         // allocate page
-        let ledger_page = mm
-            .allocate_page()
-            .expect("failed to allocate ledger page");
+        let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
         let mut page_ledger =
             PageLedger::load(ledger_page, &mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());

@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use wasm_dbms_api::prelude::{
-    CandidColumnDef, ColumnDef, DataTypeKind, Database, DeleteBehavior, DbmsError, DbmsResult,
+    CandidColumnDef, ColumnDef, DataTypeKind, Database, DbmsError, DbmsResult, DeleteBehavior,
     Filter, ForeignFetcher, ForeignKeyDef, InsertRecord, OrderDirection, Query, QueryError,
     TableColumns, TableError, TableRecord, TableSchema, TransactionError, TransactionId,
     UpdateRecord, Value, ValuesSource,
@@ -119,9 +119,9 @@ impl<'ctx, M: MemoryProvider> WasmDbmsDatabase<'ctx, M> {
         for (table, columns) in self.schema.referenced_tables(T::table_name()) {
             for column in columns.iter() {
                 let filter = Filter::eq(column, pk.clone());
-                let res =
-                    self.schema
-                        .delete(self, table, DeleteBehavior::Cascade, Some(filter))?;
+                let res = self
+                    .schema
+                    .delete(self, table, DeleteBehavior::Cascade, Some(filter))?;
                 count += res;
             }
         }
@@ -297,10 +297,7 @@ impl<'ctx, M: MemoryProvider> WasmDbmsDatabase<'ctx, M> {
     }
 
     /// Retrieves existing primary keys matching a filter.
-    fn existing_primary_keys_for_filter<T>(
-        &self,
-        filter: Option<Filter>,
-    ) -> DbmsResult<Vec<Value>>
+    fn existing_primary_keys_for_filter<T>(&self, filter: Option<Filter>) -> DbmsResult<Vec<Value>>
     where
         T: TableSchema,
     {

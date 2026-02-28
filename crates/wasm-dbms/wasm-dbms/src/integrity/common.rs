@@ -3,15 +3,12 @@
 //! Shared integrity-check functions used by both insert and update validators.
 
 use wasm_dbms_api::prelude::{
-    ColumnDef, Database, ForeignFetcher, ForeignKeyDef, DbmsError, DbmsResult, QueryError,
+    ColumnDef, Database, DbmsError, DbmsResult, ForeignFetcher, ForeignKeyDef, QueryError,
     TableSchema, Value,
 };
 
 /// Checks whether `value` passes the validator defined for `column`, if any.
-pub fn check_column_validate<T: TableSchema>(
-    column: &ColumnDef,
-    value: &Value,
-) -> DbmsResult<()> {
+pub fn check_column_validate<T: TableSchema>(column: &ColumnDef, value: &Value) -> DbmsResult<()> {
     let Some(validator) = T::validator(column.name) else {
         return Ok(());
     };

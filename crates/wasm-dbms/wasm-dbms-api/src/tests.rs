@@ -3,7 +3,9 @@ use crate::dbms::types::{DataTypeKind, Text, Uint32};
 use crate::dbms::value::Value;
 use crate::error::DbmsResult;
 use crate::memory::{DEFAULT_ALIGNMENT, Encode, PageOffset};
-use crate::prelude::{DbmsError, Filter, InsertRecord, NoForeignFetcher, QueryError, UpdateRecord, Validate};
+use crate::prelude::{
+    DbmsError, Filter, InsertRecord, NoForeignFetcher, QueryError, UpdateRecord, Validate,
+};
 
 /// A simple user struct for testing purposes.
 #[derive(Debug, Clone, PartialEq, Eq)]

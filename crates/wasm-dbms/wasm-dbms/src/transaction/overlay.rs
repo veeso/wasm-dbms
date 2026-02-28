@@ -8,10 +8,10 @@ mod table;
 use std::collections::HashMap;
 
 use wasm_dbms_api::prelude::{ColumnDef, DbmsError, DbmsResult, QueryError, TableSchema, Value};
+use wasm_dbms_memory::prelude::{MemoryProvider, TableReader};
 
 pub use self::reader::DatabaseOverlayReader;
 pub(crate) use self::table::TableOverlay;
-use wasm_dbms_memory::prelude::{MemoryProvider, TableReader};
 
 /// Manages uncommitted changes during a transaction.
 ///

@@ -2,7 +2,6 @@
 
 // Re-export derive macros from ic-dbms-macros.
 pub use ic_dbms_macros::{CustomDataType, Encode, Table};
-
 // Re-export everything from wasm-dbms-api prelude.
 pub use wasm_dbms_api::prelude::*;
 

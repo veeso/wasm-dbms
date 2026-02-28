@@ -174,21 +174,17 @@ impl FreeSegmentsLedger {
     }
 
     /// Returns an iterator over the [`FreeSegmentsTable`]s in the ledger.
-    fn tables<'a, P: MemoryProvider>(
-        &'a self,
-        mm: &'a MemoryManager<P>,
-    ) -> TablesIter<'a, P> {
+    fn tables<'a, P: MemoryProvider>(&'a self, mm: &'a MemoryManager<P>) -> TablesIter<'a, P> {
         TablesIter::new(self.tables.pages(), mm)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use wasm_dbms_api::prelude::{DEFAULT_ALIGNMENT, DecodeError};
+    use wasm_dbms_api::prelude::{DEFAULT_ALIGNMENT, DataSize, DecodeError, MSize};
 
     use super::*;
     use crate::HeapMemoryProvider;
-    use wasm_dbms_api::prelude::{DataSize, MSize};
 
     #[test]
     fn test_should_load_free_segments_ledger() {

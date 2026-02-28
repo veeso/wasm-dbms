@@ -6,7 +6,7 @@ mod overlay;
 pub mod session;
 
 use wasm_dbms_api::prelude::{
-    ColumnDef, DeleteBehavior, DbmsResult, Filter, TableSchema, UpdateRecord as _, Value,
+    ColumnDef, DbmsResult, DeleteBehavior, Filter, TableSchema, UpdateRecord as _, Value,
 };
 
 pub use self::overlay::DatabaseOverlay;

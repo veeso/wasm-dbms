@@ -106,9 +106,8 @@ impl Validate for RangeStrlenValidator {
 #[cfg(test)]
 mod tests {
 
-    use crate::prelude::Text;
-
     use super::*;
+    use crate::prelude::Text;
 
     #[test]
     fn test_max_strlen_validator() {

@@ -306,7 +306,9 @@ mod tests {
         });
     }
 
-    fn registry(mm: &crate::memory::MemoryManager<impl crate::memory::MemoryProvider>) -> TableRegistry {
+    fn registry(
+        mm: &crate::memory::MemoryManager<impl crate::memory::MemoryProvider>,
+    ) -> TableRegistry {
         let user_pages = SCHEMA_REGISTRY
             .with_borrow(|sr| sr.table_registry_page::<User>())
             .expect("failed to register `User` table");

@@ -1,6 +1,8 @@
 // Rust guideline compliant 2026-02-28
 
-use wasm_dbms_api::prelude::{DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, Page, PageOffset};
+use wasm_dbms_api::prelude::{
+    DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, Page, PageOffset,
+};
 
 /// The list of pages in the page ledger
 #[derive(Debug, Clone, Default)]

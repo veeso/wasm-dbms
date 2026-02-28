@@ -238,7 +238,13 @@ where
         }
         row.iter()
             .flat_map(|(_, cols)| cols)
-            .find_map(|(col, value)| if col.name == column { Some(value) } else { None })
+            .find_map(|(col, value)| {
+                if col.name == column {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
     }
 
     /// Flattens a joined row into the output format.

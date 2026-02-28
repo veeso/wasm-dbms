@@ -6,13 +6,14 @@ mod raw_record;
 mod table_reader;
 mod write_at;
 
+use wasm_dbms_api::prelude::{Encode, MemoryResult, Page, PageOffset};
+
 use self::free_segments_ledger::FreeSegmentsLedger;
 use self::page_ledger::PageLedger;
+use self::raw_record::RawRecord;
 pub use self::table_reader::{NextRecord, TableReader};
 use self::write_at::WriteAt;
-use self::raw_record::RawRecord;
 use crate::{MemoryManager, MemoryProvider, TableRegistryPage, align_up};
-use wasm_dbms_api::prelude::{Encode, MemoryResult, Page, PageOffset};
 
 /// The table registry takes care of storing the records for each table,
 /// using the [`FreeSegmentsLedger`] and [`PageLedger`] to derive exactly where to read/write.
@@ -160,7 +161,10 @@ impl TableRegistry {
         E: Encode,
     {
         // check if there is a free segment that can hold the record
-        if let Some(segment) = self.free_segments_ledger.find_reusable_segment(record, mm)? {
+        if let Some(segment) = self
+            .free_segments_ledger
+            .find_reusable_segment(record, mm)?
+        {
             return Ok(WriteAt::ReusedSegment(segment));
         }
 
@@ -201,8 +205,8 @@ impl TableRegistry {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use wasm_dbms_api::prelude::{
-        DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryError, MemoryResult, PageOffset,
-        DecodeError,
+        DEFAULT_ALIGNMENT, DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult,
+        PageOffset,
     };
 
     /// A simple user struct for testing purposes (no macro dependencies).
@@ -246,12 +250,14 @@ pub(crate) mod test_utils {
             let id = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
             // name
-            let name_len = u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap()) as usize;
+            let name_len =
+                u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap()) as usize;
             offset += 2;
             let name = String::from_utf8_lossy(&data[offset..offset + name_len]).to_string();
             offset += name_len;
             // email
-            let email_len = u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap()) as usize;
+            let email_len =
+                u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap()) as usize;
             offset += 2;
             let email = String::from_utf8_lossy(&data[offset..offset + email_len]).to_string();
             offset += email_len;
@@ -275,10 +281,10 @@ pub(crate) mod test_utils {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use self::test_utils::User;
     use super::free_segments_ledger::FreeSegment;
     use super::table_reader::NextRecord;
-    use self::test_utils::User;
+    use super::*;
     use crate::{HeapMemoryProvider, MemoryManager};
 
     #[test]
@@ -617,7 +623,12 @@ mod tests {
             while let Some(next_record) = reader.try_next().expect("failed to read") {
                 if next_record.record.id == id {
                     registry
-                        .delete(record.clone(), next_record.page, next_record.offset, &mut mm)
+                        .delete(
+                            record.clone(),
+                            next_record.page,
+                            next_record.offset,
+                            &mut mm,
+                        )
                         .expect("failed to delete");
                     deleted = true;
                     break;
@@ -640,7 +651,12 @@ mod tests {
             while let Some(next_record) = reader.try_next().expect("failed to read") {
                 if next_record.record.id == id {
                     registry
-                        .delete(record.clone(), next_record.page, next_record.offset, &mut mm)
+                        .delete(
+                            record.clone(),
+                            next_record.page,
+                            next_record.offset,
+                            &mut mm,
+                        )
                         .expect("failed to delete");
                     deleted = true;
                     break;
@@ -689,7 +705,12 @@ mod tests {
             .expect("no record");
         // delete user
         registry
-            .delete(next_record.record, next_record.page, next_record.offset, &mut mm)
+            .delete(
+                next_record.record,
+                next_record.page,
+                next_record.offset,
+                &mut mm,
+            )
             .expect("failed to delete");
 
         // get the free segment

@@ -3,8 +3,7 @@
 //! Integrity validator for update operations.
 
 use wasm_dbms_api::prelude::{
-    ColumnDef, Database as _, DbmsError, DbmsResult, Filter, Query, QueryError, TableSchema,
-    Value,
+    ColumnDef, Database as _, DbmsError, DbmsResult, Filter, Query, QueryError, TableSchema, Value,
 };
 use wasm_dbms_memory::prelude::MemoryProvider;
 

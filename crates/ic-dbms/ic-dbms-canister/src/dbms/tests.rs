@@ -1752,8 +1752,6 @@ fn test_should_select_specific_columns_from_join() {
 
 fn init_user_table() {
     SCHEMA_REGISTRY
-        .with_borrow_mut(|sr| {
-            MEMORY_MANAGER.with_borrow_mut(|mm| sr.register_table::<User>(mm))
-        })
+        .with_borrow_mut(|sr| MEMORY_MANAGER.with_borrow_mut(|mm| sr.register_table::<User>(mm)))
         .expect("failed to register `User` table");
 }

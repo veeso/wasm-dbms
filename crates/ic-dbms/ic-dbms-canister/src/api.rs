@@ -18,10 +18,8 @@ use crate::trap;
 pub fn acl_add_principal(principal: Principal) -> IcDbmsResult<()> {
     assert_caller_is_allowed();
     let identity = principal.as_slice().to_vec();
-    ACL.with_borrow_mut(|acl| {
-        MEMORY_MANAGER.with_borrow_mut(|mm| acl.add_principal(identity, mm))
-    })
-    .map_err(IcDbmsError::from)
+    ACL.with_borrow_mut(|acl| MEMORY_MANAGER.with_borrow_mut(|mm| acl.add_principal(identity, mm)))
+        .map_err(IcDbmsError::from)
 }
 
 /// Removes the given principal from the ACL of the canister.

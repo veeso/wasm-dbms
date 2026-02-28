@@ -3,9 +3,9 @@
 //! Overlay reader that merges base table data with overlay changes.
 
 use wasm_dbms_api::prelude::{ColumnDef, DbmsResult, TableSchema, Value};
+use wasm_dbms_memory::prelude::{MemoryProvider, TableReader};
 
 use super::table::TableOverlay;
-use wasm_dbms_memory::prelude::{MemoryProvider, TableReader};
 
 /// A reader that merges base table data with overlay changes.
 pub struct DatabaseOverlayReader<'a, T, P>

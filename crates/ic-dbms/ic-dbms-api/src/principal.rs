@@ -2,10 +2,9 @@ use std::fmt;
 
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-
 use wasm_dbms_api::prelude::{
-    CustomDataType, CustomValue, DataType, Encode, Value, DEFAULT_ALIGNMENT, DataSize, MSize,
-    MemoryError, DecodeError, MemoryResult, PageOffset,
+    CustomDataType, CustomValue, DEFAULT_ALIGNMENT, DataSize, DataType, DecodeError, Encode, MSize,
+    MemoryError, MemoryResult, PageOffset, Value,
 };
 
 /// Principal data type for the IC DBMS.

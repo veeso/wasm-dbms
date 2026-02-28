@@ -1,7 +1,7 @@
 // Rust guideline compliant 2026-02-28
 
 use wasm_dbms_api::prelude::{
-    CandidColumnDef, ColumnDef, DeleteBehavior, DbmsResult, Filter, Query, Value,
+    CandidColumnDef, ColumnDef, DbmsResult, DeleteBehavior, Filter, Query, Value,
 };
 use wasm_dbms_memory::prelude::MemoryProvider;
 

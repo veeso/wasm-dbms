@@ -7,17 +7,7 @@ use crate::memory::{DataSize, Encode, PageOffset};
 
 /// Date data type for the DBMS.
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 pub struct Date {

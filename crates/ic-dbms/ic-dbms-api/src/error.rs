@@ -7,8 +7,9 @@ pub type IcDbmsResult<T> = wasm_dbms_api::error::DbmsResult<T>;
 #[cfg(test)]
 mod test {
 
-    use super::*;
     use wasm_dbms_api::prelude::{MemoryError, QueryError, TableError, TransactionError};
+
+    use super::*;
 
     #[test]
     fn test_should_display_memory_error() {
