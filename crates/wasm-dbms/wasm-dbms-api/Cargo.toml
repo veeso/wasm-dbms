@@ -1,0 +1,34 @@
+[package]
+name = "wasm-dbms-api"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+keywords = ["wasm", "dbms", "database", "types"]
+categories = ["database", "wasm"]
+repository = { workspace = true }
+documentation = "https://docs.rs/wasm-dbms-api/"
+description = "Runtime-agnostic API types and traits for the wasm-dbms DBMS engine."
+include = [
+  "src/**/*",
+  "../../LICENSE",
+  "README.md",
+  "../../CHANGELOG.md",
+]
+readme = "README.md"
+
+[dependencies]
+candid = { workspace = true, optional = true }
+lazy-regex = { workspace = true }
+percent-encoding = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+url = { workspace = true }
+
+[features]
+default = []
+candid = ["dep:candid"]

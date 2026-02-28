@@ -26,7 +26,7 @@
 
 ## Overview
 
-ic-dbms supports foreign key relationships between tables, providing:
+wasm-dbms supports foreign key relationships between tables, providing:
 
 - **Referential integrity**: Ensures foreign keys point to valid records
 - **Delete behaviors**: Control what happens when referenced records are deleted
@@ -41,7 +41,7 @@ ic-dbms supports foreign key relationships between tables, providing:
 Use the `#[foreign_key]` attribute to define relationships:
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "posts"]
 pub struct Post {
     #[primary_key]
@@ -67,21 +67,14 @@ pub struct Post {
 When you define a foreign key:
 
 1. The field type must match the referenced column type
-2. The referenced table must be included in your `DbmsCanister` definition
+2. The referenced table must be registered in your database schema
 3. Foreign key values must reference existing records (enforced on insert/update)
-
-```rust
-// Both tables must be in the canister definition
-#[derive(DbmsCanister)]
-#[tables(User = "users", Post = "posts")]
-pub struct MyDbmsCanister;
-```
 
 ---
 
 ## Referential Integrity
 
-ic-dbms enforces referential integrity automatically.
+wasm-dbms enforces referential integrity automatically.
 
 ### Insert Validation
 
@@ -89,31 +82,31 @@ When inserting a record with a foreign key, the referenced record must exist:
 
 ```rust
 // This user exists
-client.insert::<User>(User::table_name(), UserInsertRequest {
+database.insert::<User>(UserInsertRequest {
     id: 1.into(),
     name: "Alice".into(),
     ..
-}, None).await??;
+})?;
 
 // Insert post referencing existing user - OK
-client.insert::<Post>(Post::table_name(), PostInsertRequest {
+database.insert::<Post>(PostInsertRequest {
     id: 1.into(),
     title: "My Post".into(),
     author_id: 1.into(),  // User 1 exists
     ..
-}, None).await??;
+})?;
 
 // Insert post referencing non-existent user - FAILS
-let result = client.insert::<Post>(Post::table_name(), PostInsertRequest {
+let result = database.insert::<Post>(PostInsertRequest {
     id: 2.into(),
     title: "Another Post".into(),
     author_id: 999.into(),  // User 999 doesn't exist
     ..
-}, None).await?;
+});
 
 assert!(matches!(
     result,
-    Err(IcDbmsError::Query(QueryError::BrokenForeignKeyReference))
+    Err(DbmsError::Query(QueryError::BrokenForeignKeyReference))
 ));
 ```
 
@@ -128,10 +121,10 @@ let update = PostUpdateRequest::builder()
     .filter(Filter::eq("id", Value::Uint32(1.into())))
     .build();
 
-let result = client.update::<Post>(Post::table_name(), update, None).await?;
+let result = database.update::<Post>(update);
 assert!(matches!(
     result,
-    Err(IcDbmsError::Query(QueryError::BrokenForeignKeyReference))
+    Err(DbmsError::Query(QueryError::BrokenForeignKeyReference))
 ));
 ```
 
@@ -146,38 +139,32 @@ When deleting a record that is referenced by other records, you must specify how
 **Behavior**: Fail if any records reference this one.
 
 ```rust
-use ic_dbms_api::prelude::DeleteBehavior;
+use wasm_dbms_api::prelude::DeleteBehavior;
 
 // User has posts - delete fails
-let result = client.delete::<User>(
-    User::table_name(),
+let result = database.delete::<User>(
     DeleteBehavior::Restrict,
     Some(Filter::eq("id", Value::Uint32(1.into()))),
-    None
-).await?;
+);
 
 match result {
-    Err(IcDbmsError::Query(QueryError::ForeignKeyConstraintViolation)) => {
+    Err(DbmsError::Query(QueryError::ForeignKeyConstraintViolation)) => {
         println!("Cannot delete: user has posts");
     }
     _ => {}
 }
 
 // Delete posts first, then user
-client.delete::<Post>(
-    Post::table_name(),
+database.delete::<Post>(
     DeleteBehavior::Restrict,
     Some(Filter::eq("author_id", Value::Uint32(1.into()))),
-    None
-).await??;
+)?;
 
 // Now user can be deleted
-client.delete::<User>(
-    User::table_name(),
+database.delete::<User>(
     DeleteBehavior::Restrict,
     Some(Filter::eq("id", Value::Uint32(1.into()))),
-    None
-).await??;
+)?;
 ```
 
 **Use when**: You want to prevent accidental data loss. The caller must explicitly handle related records.
@@ -188,12 +175,10 @@ client.delete::<User>(
 
 ```rust
 // Deletes user AND all their posts
-client.delete::<User>(
-    User::table_name(),
+database.delete::<User>(
     DeleteBehavior::Cascade,
     Some(Filter::eq("id", Value::Uint32(1.into()))),
-    None
-).await??;
+)?;
 ```
 
 **Cascade is recursive:**
@@ -203,12 +188,10 @@ client.delete::<User>(
 // User -> Posts -> Comments
 // Deleting a user cascades to posts, which cascades to comments
 
-client.delete::<User>(
-    User::table_name(),
+database.delete::<User>(
     DeleteBehavior::Cascade,
     Some(Filter::eq("id", Value::Uint32(1.into()))),
-    None
-).await??;
+)?;
 // User deleted
 // All user's posts deleted
 // All comments on those posts deleted
@@ -243,7 +226,7 @@ let query = Query::builder()
     .with("users")  // Name of the related table
     .build();
 
-let posts = client.select::<Post>(Post::table_name(), query, None).await??;
+let posts = database.select::<Post>(query)?;
 
 // Each post now has author data available
 for post in posts {
@@ -266,7 +249,7 @@ let query = Query::builder()
     .with("categories")
     .build();
 
-let posts = client.select::<Post>(Post::table_name(), query, None).await??;
+let posts = database.select::<Post>(query)?;
 ```
 
 ### Eager Loading with Filters
@@ -282,14 +265,14 @@ let query = Query::builder()
     .with("users")
     .build();
 
-let posts = client.select::<Post>(Post::table_name(), query, None).await??;
+let posts = database.select::<Post>(query)?;
 ```
 
 ### Cross-Table Queries with Joins
 
-In addition to eager loading, ic-dbms supports SQL-style joins (INNER, LEFT, RIGHT, FULL) for combining rows from multiple tables into a flat result set. Joins are useful when you need columns from several tables in a single row — for example, listing post titles alongside author names. Unlike eager loading, joins return untyped results via the `select_raw` path.
+In addition to eager loading, wasm-dbms supports SQL-style joins (INNER, LEFT, RIGHT, FULL) for combining rows from multiple tables into a flat result set. Joins are useful when you need columns from several tables in a single row -- for example, listing post titles alongside author names. Unlike eager loading, joins return untyped results via the `select_raw` path.
 
-See the [Querying Guide — Joins](./querying.md#joins) section for full details and examples.
+See the [Querying Guide -- Joins](./querying.md#joins) section for full details and examples.
 
 ---
 
@@ -300,7 +283,7 @@ See the [Querying Guide — Joins](./querying.md#joins) section for full details
 A user has many posts:
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -308,7 +291,7 @@ pub struct User {
     pub name: Text,
 }
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "posts"]
 pub struct Post {
     #[primary_key]
@@ -322,7 +305,7 @@ pub struct Post {
 let query = Query::builder()
     .filter(Filter::eq("author_id", Value::Uint32(user_id.into())))
     .build();
-let user_posts = client.select::<Post>(Post::table_name(), query, None).await??;
+let user_posts = database.select::<Post>(query)?;
 ```
 
 ### Many-to-Many
@@ -332,7 +315,7 @@ Use a junction table for many-to-many relationships:
 ```rust
 // Students and Courses (many-to-many)
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "students"]
 pub struct Student {
     #[primary_key]
@@ -340,7 +323,7 @@ pub struct Student {
     pub name: Text,
 }
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "courses"]
 pub struct Course {
     #[primary_key]
@@ -348,7 +331,7 @@ pub struct Course {
     pub title: Text,
 }
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "enrollments"]
 pub struct Enrollment {
     #[primary_key]
@@ -365,7 +348,7 @@ let query = Query::builder()
     .filter(Filter::eq("student_id", Value::Uint32(student_id.into())))
     .with("courses")
     .build();
-let enrollments = client.select::<Enrollment>(Enrollment::table_name(), query, None).await??;
+let enrollments = database.select::<Enrollment>(query)?;
 ```
 
 ### Self-Referential
@@ -373,7 +356,7 @@ let enrollments = client.select::<Enrollment>(Enrollment::table_name(), query, N
 A table can reference itself (e.g., categories with parent categories, employees with managers):
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "employees"]
 pub struct Employee {
     #[primary_key]
@@ -387,11 +370,11 @@ pub struct Employee {
 let query = Query::builder()
     .filter(Filter::eq("manager_id", Value::Uint32(manager_id.into())))
     .build();
-let direct_reports = client.select::<Employee>(Employee::table_name(), query, None).await??;
+let direct_reports = database.select::<Employee>(query)?;
 ```
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "categories"]
 pub struct Category {
     #[primary_key]
@@ -405,11 +388,11 @@ pub struct Category {
 let query = Query::builder()
     .filter(Filter::is_null("parent_id"))
     .build();
-let root_categories = client.select::<Category>(Category::table_name(), query, None).await??;
+let root_categories = database.select::<Category>(query)?;
 
 // Find children of a category
 let query = Query::builder()
     .filter(Filter::eq("parent_id", Value::Uint32(parent_id.into())))
     .build();
-let children = client.select::<Category>(Category::table_name(), query, None).await??;
+let children = database.select::<Category>(query)?;
 ```

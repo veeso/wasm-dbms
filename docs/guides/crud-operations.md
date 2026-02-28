@@ -28,7 +28,7 @@
 
 ## Overview
 
-ic-dbms provides four fundamental database operations:
+wasm-dbms provides four fundamental database operations through the `Database` trait:
 
 | Operation | Description | Returns |
 |-----------|-------------|---------|
@@ -38,7 +38,6 @@ ic-dbms provides four fundamental database operations:
 | **Delete** | Remove records from a table | `Result<u64>` (affected rows) |
 
 All operations:
-- Respect access control (caller must be in ACL)
 - Support optional transaction IDs
 - Validate and sanitize data according to schema rules
 - Enforce foreign key constraints
@@ -52,11 +51,8 @@ All operations:
 To insert a record, create an `InsertRequest` and call the insert method:
 
 ```rust
-use ic_dbms_client::{IcDbmsCanisterClient, Client as _};
+use wasm_dbms_api::prelude::*;
 use my_schema::{User, UserInsertRequest};
-use ic_dbms_api::prelude::*;
-
-let client = IcDbmsCanisterClient::new(canister_id);
 
 let user = UserInsertRequest {
     id: 1.into(),
@@ -65,10 +61,8 @@ let user = UserInsertRequest {
     created_at: DateTime::now(),
 };
 
-// Insert without transaction (None)
-client
-    .insert::<User>(User::table_name(), user, None)
-    .await??;
+// Insert without transaction
+database.insert::<User>(user)?;
 ```
 
 ### Handling Primary Keys
@@ -77,11 +71,11 @@ Every table must have a primary key. Insert will fail if a record with the same 
 
 ```rust
 // First insert succeeds
-client.insert::<User>(User::table_name(), user1, None).await??;
+database.insert::<User>(user1)?;
 
 // Second insert with same ID fails with PrimaryKeyConflict
-let result = client.insert::<User>(User::table_name(), user2_same_id, None).await?;
-assert!(matches!(result, Err(IcDbmsError::Query(QueryError::PrimaryKeyConflict))));
+let result = database.insert::<User>(user2_same_id);
+assert!(matches!(result, Err(DbmsError::Query(QueryError::PrimaryKeyConflict))));
 ```
 
 ### Nullable Fields
@@ -89,7 +83,7 @@ assert!(matches!(result, Err(IcDbmsError::Query(QueryError::PrimaryKeyConflict))
 For fields wrapped in `Nullable<T>`, you can insert either a value or null:
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "profiles"]
 pub struct Profile {
     #[primary_key]
@@ -105,22 +99,25 @@ let profile = ProfileInsertRequest {
     website: Nullable::Null,  // No website
 };
 
-client.insert::<Profile>(Profile::table_name(), profile, None).await??;
+database.insert::<Profile>(profile)?;
 ```
 
 ### Insert with Transaction
 
-To insert within a transaction, pass the transaction ID:
+To insert within a transaction, use a transactional database instance:
 
 ```rust
 // Begin transaction
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+
+// Create a transactional database
+let database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 
 // Insert within transaction
-client.insert::<User>(User::table_name(), user, Some(tx_id)).await??;
+database.insert::<User>(user)?;
 
 // Commit or rollback
-client.commit(tx_id).await??;
+database.commit()?;
 ```
 
 ---
@@ -132,12 +129,10 @@ client.commit(tx_id).await??;
 Use `Query::builder().all()` to select all records:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 let query = Query::builder().all().build();
-let users: Vec<UserRecord> = client
-    .select::<User>(User::table_name(), query, None)
-    .await??;
+let users: Vec<UserRecord> = database.select::<User>(query)?;
 
 for user in users {
     println!("User: {} ({})", user.name, user.email);
@@ -154,7 +149,7 @@ let query = Query::builder()
     .filter(Filter::eq("name", Value::Text("Alice".into())))
     .build();
 
-let users = client.select::<User>(User::table_name(), query, None).await??;
+let users = database.select::<User>(query)?;
 ```
 
 See the [Querying Guide](./querying.md) for comprehensive filter documentation.
@@ -168,7 +163,7 @@ let query = Query::builder()
     .columns(vec!["id".to_string(), "name".to_string()])
     .build();
 
-let users = client.select::<User>(User::table_name(), query, None).await??;
+let users = database.select::<User>(query)?;
 // Only id and name are populated; other fields have default values
 ```
 
@@ -183,7 +178,7 @@ let query = Query::builder()
     .with("users")  // Eager load the related users table
     .build();
 
-let posts = client.select::<Post>(Post::table_name(), query, None).await??;
+let posts = database.select::<Post>(query)?;
 ```
 
 See the [Relationships Guide](./relationships.md) for more on eager loading.
@@ -204,9 +199,7 @@ let update = UserUpdateRequest::builder()
     .filter(Filter::eq("id", Value::Uint32(1.into())))
     .build();
 
-let affected_rows = client
-    .update::<User>(User::table_name(), update, None)
-    .await??;
+let affected_rows = database.update::<User>(update)?;
 
 println!("Updated {} row(s)", affected_rows);
 ```
@@ -222,7 +215,7 @@ let update = UserUpdateRequest::builder()
     .filter(Filter::eq("id", Value::Uint32(1.into())))
     .build();
 
-client.update::<User>(User::table_name(), update, None).await??;
+database.update::<User>(update)?;
 ```
 
 ### Update with Filter
@@ -236,7 +229,7 @@ let update = UserUpdateRequest::builder()
     .filter(Filter::like("email", "%@company.com"))
     .build();
 
-let affected = client.update::<User>(User::table_name(), update, None).await??;
+let affected = database.update::<User>(update)?;
 println!("Verified {} company users", affected);
 ```
 
@@ -245,7 +238,7 @@ println!("Verified {} company users", affected);
 Update returns the number of affected rows:
 
 ```rust
-let affected = client.update::<User>(User::table_name(), update, None).await??;
+let affected = database.update::<User>(update)?;
 
 if affected == 0 {
     println!("No records matched the filter");
@@ -263,18 +256,14 @@ if affected == 0 {
 Delete records matching a filter:
 
 ```rust
-use ic_dbms_api::prelude::DeleteBehavior;
+use wasm_dbms_api::prelude::DeleteBehavior;
 
 let filter = Filter::eq("id", Value::Uint32(1.into()));
 
-let deleted = client
-    .delete::<User>(
-        User::table_name(),
-        DeleteBehavior::Restrict,
-        Some(filter),
-        None  // No transaction
-    )
-    .await??;
+let deleted = database.delete::<User>(
+    DeleteBehavior::Restrict,
+    Some(filter),
+)?;
 
 println!("Deleted {} record(s)", deleted);
 ```
@@ -292,19 +281,17 @@ When deleting records that are referenced by foreign keys, you must specify a be
 
 ```rust
 // Will fail if any posts reference this user
-let result = client.delete::<User>(
-    User::table_name(),
+let result = database.delete::<User>(
     DeleteBehavior::Restrict,
     Some(Filter::eq("id", Value::Uint32(1.into()))),
-    None
-).await?;
+);
 
 match result {
     Ok(count) => println!("Deleted {} user(s)", count),
-    Err(IcDbmsError::Query(QueryError::ForeignKeyConstraintViolation)) => {
+    Err(DbmsError::Query(QueryError::ForeignKeyConstraintViolation)) => {
         println!("Cannot delete: user has posts");
     }
-    Err(e) => return Err(e.into()),
+    Err(e) => return Err(e),
 }
 ```
 
@@ -312,12 +299,10 @@ match result {
 
 ```rust
 // Deletes the user AND all their posts
-client.delete::<User>(
-    User::table_name(),
+database.delete::<User>(
     DeleteBehavior::Cascade,
     Some(Filter::eq("id", Value::Uint32(1.into()))),
-    None
-).await??;
+)?;
 ```
 
 ### Delete All Records
@@ -326,14 +311,10 @@ Pass `None` as the filter to delete all records (use with caution):
 
 ```rust
 // Delete ALL users (respecting foreign key behavior)
-let deleted = client
-    .delete::<User>(
-        User::table_name(),
-        DeleteBehavior::Cascade,
-        None,  // No filter = all records
-        None
-    )
-    .await??;
+let deleted = database.delete::<User>(
+    DeleteBehavior::Cascade,
+    None,  // No filter = all records
+)?;
 
 println!("Deleted all {} users and their related records", deleted);
 ```
@@ -342,25 +323,26 @@ println!("Deleted all {} users and their related records", deleted);
 
 ## Operations with Transactions
 
-All CRUD operations accept an optional transaction ID. When provided, the operation is performed within that transaction and won't be visible to other callers until committed:
+All CRUD operations can be performed within a transaction. When using a transactional database instance, operations won't be visible to other callers until committed:
 
 ```rust
 // Begin transaction
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 
 // Perform operations within transaction
-client.insert::<User>(User::table_name(), user1, Some(tx_id)).await??;
-client.insert::<User>(User::table_name(), user2, Some(tx_id)).await??;
+database.insert::<User>(user1)?;
+database.insert::<User>(user2)?;
 
 // Update within same transaction
 let update = UserUpdateRequest::builder()
     .set_verified(true.into())
     .filter(Filter::all())
     .build();
-client.update::<User>(User::table_name(), update, Some(tx_id)).await??;
+database.update::<User>(update)?;
 
 // Commit all changes atomically
-client.commit(tx_id).await??;
+database.commit()?;
 ```
 
 See the [Transactions Guide](./transactions.md) for comprehensive transaction documentation.
@@ -385,19 +367,19 @@ CRUD operations can fail for various reasons. Here are common errors:
 **Example error handling:**
 
 ```rust
-use ic_dbms_api::prelude::{IcDbmsError, QueryError};
+use wasm_dbms_api::prelude::{DbmsError, QueryError};
 
-let result = client.insert::<User>(User::table_name(), user, None).await?;
+let result = database.insert::<User>(user);
 
 match result {
     Ok(()) => println!("Insert successful"),
-    Err(IcDbmsError::Query(QueryError::PrimaryKeyConflict)) => {
+    Err(DbmsError::Query(QueryError::PrimaryKeyConflict)) => {
         println!("User with this ID already exists");
     }
-    Err(IcDbmsError::Query(QueryError::BrokenForeignKeyReference)) => {
+    Err(DbmsError::Query(QueryError::BrokenForeignKeyReference)) => {
         println!("Referenced record does not exist");
     }
-    Err(IcDbmsError::Validation(msg)) => {
+    Err(DbmsError::Validation(msg)) => {
         println!("Validation failed: {}", msg);
     }
     Err(e) => {
@@ -407,3 +389,5 @@ match result {
 ```
 
 See the [Errors Reference](../reference/errors.md) for complete error documentation.
+
+> For IC canister client usage with the `IcDbmsCanisterClient`, see the [IC CRUD Guide](../ic/guides/crud-operations.md).

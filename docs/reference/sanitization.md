@@ -30,7 +30,7 @@ Sanitizers automatically transform data before it's stored in the database. Unli
 The `#[sanitizer(...)]` attribute adds sanitization rules to fields:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 #[derive(Table, ...)]
 #[table = "users"]
@@ -56,7 +56,7 @@ pub struct User {
 
 ## Built-in Sanitizers
 
-All sanitizers are available in `ic_dbms_api::prelude`.
+All sanitizers are available in `wasm_dbms_api::prelude`.
 
 ### String Sanitizers
 
@@ -172,13 +172,13 @@ pub bio: Nullable<Text>,
 Create a struct implementing the `Sanitize` trait:
 
 ```rust
-use ic_dbms_api::prelude::{Sanitize, Value, IcDbmsResult};
+use wasm_dbms_api::prelude::{Sanitize, Value, DbmsResult};
 
 /// Capitalizes the first letter of each word
 pub struct TitleCaseSanitizer;
 
 impl Sanitize for TitleCaseSanitizer {
-    fn sanitize(&self, value: Value) -> IcDbmsResult<Value> {
+    fn sanitize(&self, value: Value) -> DbmsResult<Value> {
         match value {
             Value::Text(text) => {
                 let title_case = text
@@ -216,7 +216,7 @@ pub title: Text,
 pub struct TruncateSanitizer(pub usize);
 
 impl Sanitize for TruncateSanitizer {
-    fn sanitize(&self, value: Value) -> IcDbmsResult<Value> {
+    fn sanitize(&self, value: Value) -> DbmsResult<Value> {
         match value {
             Value::Text(text) => {
                 let truncated: String = text.as_str().chars().take(self.0).collect();
@@ -243,7 +243,7 @@ pub struct ReplaceSanitizer {
 }
 
 impl Sanitize for ReplaceSanitizer {
-    fn sanitize(&self, value: Value) -> IcDbmsResult<Value> {
+    fn sanitize(&self, value: Value) -> DbmsResult<Value> {
         match value {
             Value::Text(text) => {
                 let replaced = text.as_str().replace(self.pattern, self.replacement);
@@ -300,7 +300,7 @@ pub name: Text,
 **User profile sanitization:**
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -329,7 +329,7 @@ pub struct User {
 **Financial data sanitization:**
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "transactions"]
 pub struct Transaction {
     #[primary_key]
@@ -352,7 +352,7 @@ pub struct Transaction {
 **Content sanitization:**
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "articles"]
 pub struct Article {
     #[primary_key]
@@ -381,7 +381,7 @@ pub struct Article {
 **Combined sanitization and validation:**
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "products"]
 pub struct Product {
     #[primary_key]

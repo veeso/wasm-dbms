@@ -1,27 +1,52 @@
-# IC DBMS Canister
+# WASM DBMS
 
 ![logo](https://wasm-dbms.cc/logo-128.png)
 
-[![license-mit](https://img.shields.io/crates/l/ic-dbms-canister.svg)](https://opensource.org/licenses/MIT)
-[![repo-stars](https://img.shields.io/github/stars/veeso/ic-dbms?style=flat)](https://github.com/veeso/ic-dbms/stargazers)
-[![downloads](https://img.shields.io/crates/d/ic-dbms-canister.svg)](https://crates.io/crates/ic-dbms-canister)
-[![latest-version](https://img.shields.io/crates/v/ic-dbms-canister.svg)](https://crates.io/crates/ic-dbms-canister)
+[![license-mit](https://img.shields.io/crates/l/wasm-dbms.svg)](https://opensource.org/licenses/MIT)
+[![repo-stars](https://img.shields.io/github/stars/veeso/wasm-dbms?style=flat)](https://github.com/veeso/wasm-dbms/stargazers)
+[![downloads](https://img.shields.io/crates/d/wasm-dbms.svg)](https://crates.io/crates/wasm-dbms)
+[![latest-version](https://img.shields.io/crates/v/wasm-dbms.svg)](https://crates.io/crates/wasm-dbms)
 [![ko-fi](https://img.shields.io/badge/donate-ko--fi-red)](https://ko-fi.com/veeso)
 [![conventional-commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://conventionalcommits.org)
 
-[![ci](https://github.com/veeso/ic-dbms/actions/workflows/ci.yml/badge.svg)](https://github.com/veeso/ic-dbms/actions)
-[![coveralls](https://coveralls.io/repos/github/veeso/ic-dbms/badge.svg)](https://coveralls.io/github/veeso/ic-dbms)
-[![docs](https://docs.rs/ic-dbms-canister/badge.svg)](https://docs.rs/ic-dbms-canister)
+[![ci](https://github.com/veeso/wasm-dbms/actions/workflows/ci.yml/badge.svg)](https://github.com/veeso/wasm-dbms/actions)
+[![coveralls](https://coveralls.io/repos/github/veeso/wasm-dbms/badge.svg)](https://coveralls.io/github/veeso/wasm-dbms)
+[![docs](https://docs.rs/wasm-dbms/badge.svg)](https://docs.rs/wasm-dbms)
 
-This project is in a very early stage of development. The goal is to provide a framework for building database canisters
-on the Internet Computer.
+A Rust framework for building database applications on WASM runtimes, with first-class support for Internet Computer
+canisters.
 
 ## Overview
 
-IC DBMS Canister is an Internet Computer framework which provides an easy way to implement a database canister by just
-providing the database schema.
+This repository contains two crate families:
 
-The user can just define the data entity by defining the tables:
+- **wasm-dbms** - A runtime-agnostic DBMS engine that runs on any WASM runtime (Wasmtime, Wasmer, WasmEdge, IC)
+- **ic-dbms** - A thin IC-specific adapter that provides Internet Computer canister integration
+
+### Crate Architecture
+
+```txt
+wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms
+                                                                 ^
+ic-dbms-macros <── ic-dbms-canister ─────────────────────────────┘
+                        ^
+                   ic-dbms-client
+```
+
+| Crate              | Description                                                 |
+|--------------------|-------------------------------------------------------------|
+| `wasm-dbms-api`    | Shared types, traits, validators, sanitizers                |
+| `wasm-dbms-memory` | Memory abstraction and page management                      |
+| `wasm-dbms`        | Core DBMS engine with transactions, joins, integrity checks |
+| `wasm-dbms-macros` | Procedural macros: `Encode`, `Table`, `CustomDataType`      |
+| `ic-dbms-api`      | IC-specific types (re-exports `wasm-dbms-api`)              |
+| `ic-dbms-canister` | IC canister DBMS implementation                             |
+| `ic-dbms-macros`   | IC-specific macro: `DbmsCanister`                           |
+| `ic-dbms-client`   | Client libraries for canister interaction                   |
+
+## Quick Start (IC Canister)
+
+Define your database schema using Rust structs:
 
 ```rust
 use candid::CandidType;
@@ -43,7 +68,7 @@ pub struct User {
 }
 ```
 
-You can also define relationships between tables:
+Define relationships between tables:
 
 ```rust
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
@@ -59,10 +84,9 @@ pub struct Post {
 ```
 
 > [!NOTE]
-> Mind that deriving `CandidType`, `Deserialize` and `Clone` is required for the tables to be used in the canister.
+> Deriving `CandidType`, `Deserialize` and `Clone` is required for IC canister tables.
 
-And once you have defined all your tables, you can instantiate the database canister by deriving the `DbmsCanister`
-macro on any struct, providing the table names and their corresponding Rust struct entity:
+Instantiate the database canister:
 
 ```rust
 #[derive(DbmsCanister)]
@@ -70,9 +94,9 @@ macro on any struct, providing the table names and their corresponding Rust stru
 pub struct IcDbmsCanisterGenerator;
 ```
 
-And you will have a fully functional database canister with all the CRUD operations implemented for you.
+This generates a fully functional database canister with all CRUD operations.
 
-The canister API will be automatically generated based on the defined tables, with the following methods:
+## Generated Canister API
 
 ```candid
 service : (IcDbmsCanisterArgs) -> {
@@ -93,10 +117,6 @@ service : (IcDbmsCanisterArgs) -> {
 }
 ```
 
-## API Documentation
-
-The API generated by the `ic-dbms-canister` is the following:
-
 ### ACL Management
 
 - `acl_add_principal(principal)`: Adds a principal to the ACL.
@@ -106,31 +126,27 @@ The API generated by the `ic-dbms-canister` is the following:
 ### Transaction Management
 
 - `begin_transaction()`: Starts a new transaction and returns its ID.
-- `commit(transaction_id)`: Commits the transaction with the given ID. The user must own the transaction to commit it.
-- `rollback(transaction_id)`: Rolls back the transaction with the given ID. The user must own the transaction to roll it
-  back.
+- `commit(transaction_id)`: Commits the transaction with the given ID.
+- `rollback(transaction_id)`: Rolls back the transaction with the given ID.
 
 ### Data Manipulation
 
-For each table defined in the schema, the following methods are generated:
+For each table defined in the schema:
 
-- `insert_<table_name>(records, transaction_id)`: Inserts records into the specified table. Optionally within a
-  transaction.
-- `select_<table_name>(query, transaction_id)`: Selects records from the specified table based on the query. Optionally
-  within a transaction.
-- `update_<table_name>(updates, transaction_id)`: Updates records in the specified table. Optionally within a
-  transaction.
-- `delete_<table_name>(delete_behavior, filter, transaction_id)`: Deletes records from the specified table based on the
-  filter and delete behavior. Optionally within a transaction.
+- `insert_<table_name>(records, transaction_id)`: Inserts records into the specified table.
+- `select_<table_name>(query, transaction_id)`: Selects records from the specified table.
+- `update_<table_name>(updates, transaction_id)`: Updates records in the specified table.
+- `delete_<table_name>(delete_behavior, filter, transaction_id)`: Deletes records from the specified table.
 
 ## Getting Started
 
-See the [Getting Started Guide](https://veeso.github.io/ic-dbms/docs/get-started.html) for more information on how to
-setup and deploy the DBMS canister.
+See the [Getting Started Guide](https://wasm-dbms.cc/guides/get-started.html) for more information on how to setup and
+deploy the DBMS canister.
 
 ## Interacting with the Canister
 
-See the [ic-dbms-client](./ic-dbms-client/README.md) for more information on how to interact with the canister.
+See the [ic-dbms-client](./crates/ic-dbms/ic-dbms-client/README.md) for more information on how to interact with the
+canister.
 
 ## Features
 
@@ -143,13 +159,14 @@ See the [ic-dbms-client](./ic-dbms-client/README.md) for more information on how
 - [x] Validation, Sanitizers and constraints on table columns
 - [x] JOIN operations between tables
 - [x] Custom data types
+- [x] Runtime-agnostic core (wasm-dbms) for any WASM runtime
 - [ ] Indexes for faster queries
 - [ ] Migrations to update the database schema on canister upgrades
 - [ ] SQL query support
 
 ## Documentation
 
-Read the documentation at <https://veeso.github.io/ic-dbms>
+Read the documentation at <https://wasm-dbms.cc>
 
 ## License
 

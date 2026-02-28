@@ -20,9 +20,9 @@
 
 ## Overview
 
-ic-dbms ships with a set of [built-in data types](../reference/data-types.md) that cover the most common use cases. When your domain requires types that go beyond those built-ins, you can define **custom data types**.
+wasm-dbms ships with a set of [built-in data types](../reference/data-types.md) that cover the most common use cases. When your domain requires types that go beyond those built-ins, you can define **custom data types**.
 
-Custom data types let you store any Rust type — enums, newtypes, structs — inside your tables. The DBMS engine stores them as opaque bytes internally and uses a **type tag** string to identify each custom type.
+Custom data types let you store any Rust type -- enums, newtypes, structs -- inside your tables. The DBMS engine stores them as opaque bytes internally and uses a **type tag** string to identify each custom type.
 
 **When to use custom types:**
 
@@ -46,12 +46,11 @@ Creating a custom type requires four steps:
 Your type must derive or implement several traits. For enums, all must be implemented manually or derived:
 
 ```rust
-use candid::CandidType;
 use serde::{Deserialize, Serialize};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, CandidType, Serialize, Deserialize,
+    Hash, Default, Serialize, Deserialize,
 )]
 pub enum Priority {
     #[default]
@@ -66,7 +65,7 @@ For structs, the same traits are required:
 ```rust
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, CandidType, Serialize, Deserialize,
+    Hash, Default, Serialize, Deserialize,
 )]
 pub struct Address {
     pub street: String,
@@ -85,10 +84,11 @@ pub struct Address {
 | `PartialOrd`, `Ord` | Ordering (for sorting and range filters) |
 | `Hash` | Hashing (for hash-based lookups) |
 | `Default` | Default value construction |
-| `CandidType` | Candid serialization (IC boundary) |
 | `Serialize`, `Deserialize` | Serde serialization |
 | `Display` | Human-readable display (see Step 2) |
 | `Encode` | Binary encoding for storage (see Step 3) |
+
+> **Note:** For IC canister usage, also derive `CandidType` and `Deserialize` from the `candid` crate.
 
 ### Step 2: Implement Display
 
@@ -116,13 +116,13 @@ impl fmt::Display for Address {
 
 ### Step 3: Implement Encode
 
-The `Encode` trait defines how your type is serialized to and from bytes for stable memory storage. Enums require a manual implementation; for structs, you can use `#[derive(Encode)]`.
+The `Encode` trait defines how your type is serialized to and from bytes for memory storage. Enums require a manual implementation; for structs, you can use `#[derive(Encode)]`.
 
 **Enum (manual implementation):**
 
 ```rust
 use std::borrow::Cow;
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 impl Encode for Priority {
     const SIZE: DataSize = DataSize::Fixed(1);
@@ -157,14 +157,14 @@ impl Encode for Priority {
 
 **Struct (derive macro):**
 
-The `#[derive(Encode)]` macro works for structs whose fields all implement `Encode`. Since `String` does not implement `Encode` but `Text` does, use ic-dbms types for the struct fields:
+The `#[derive(Encode)]` macro works for structs whose fields all implement `Encode`. Since `String` does not implement `Encode` but `Text` does, use wasm-dbms types for the struct fields:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, CandidType, Serialize, Deserialize,
+    Hash, Default, Serialize, Deserialize,
     Encode,
 )]
 pub struct Address {
@@ -187,7 +187,7 @@ pub struct Address {
 Finally, implement the `DataType` marker trait and derive `CustomDataType` with a unique type tag:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 impl DataType for Priority {}
 
@@ -211,7 +211,7 @@ impl From<Priority> for Value {
 For structs, you can use the `CustomDataType` derive macro instead of the manual implementation above:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 impl DataType for Address {}
 
@@ -226,8 +226,8 @@ The `#[derive(CustomDataType)]` macro generates both the `CustomDataType` trait 
 
 **Type tag rules:**
 
-- Must be unique across all custom types in your canister
-- Must be stable across canister upgrades (changing it makes existing data unreadable)
+- Must be unique across all custom types in your database
+- Must be stable across upgrades (changing it makes existing data unreadable)
 - Use lowercase, descriptive names (e.g., `"priority"`, `"address"`, `"role"`)
 
 ---
@@ -239,10 +239,9 @@ The `#[derive(CustomDataType)]` macro generates both the `CustomDataType` trait 
 To use a custom type in a table, annotate the field with `#[custom_type]`:
 
 ```rust
-use candid::{CandidType, Deserialize};
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "tasks"]
 pub struct Task {
     #[primary_key]
@@ -262,7 +261,7 @@ Without the `#[custom_type]` attribute, the `Table` macro won't know how to hand
 Custom types can be wrapped in `Nullable<T>` for optional fields:
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "tasks"]
 pub struct Task {
     #[primary_key]
@@ -282,7 +281,7 @@ When `Nullable::Null`, the value is stored as `Value::Null`. When `Nullable::Val
 To filter on custom type fields, construct a `Value::Custom` with the appropriate `CustomValue`:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 // Create a filter for Priority::High
 let high_priority = Priority::High;
@@ -318,7 +317,7 @@ if let Some(priority) = value.as_custom_type::<Priority>() {
 
 Custom types support all filter operations: `Eq`, `Ne`, `In`, `Gt`, `Lt`, `Ge`, `Le`.
 
-For **equality filters** (`Eq`, `Ne`, `In`), the only requirement is that the `Encode` implementation produces canonical output — the same value always encodes to the same bytes.
+For **equality filters** (`Eq`, `Ne`, `In`), the only requirement is that the `Encode` implementation produces canonical output -- the same value always encodes to the same bytes.
 
 For **range filters** (`Gt`, `Lt`, `Ge`, `Le`) and `ORDER BY`, the encoding must be **order-preserving**: if `a < b` according to `Ord`, then `a.encode() < b.encode()` lexicographically. This is because the DBMS compares custom values by their encoded bytes.
 
@@ -340,14 +339,13 @@ A complete example of a custom enum type used in a table:
 use std::borrow::Cow;
 use std::fmt;
 
-use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 // 1. Define the type
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, CandidType, Serialize, Deserialize,
+    Hash, Default, Serialize, Deserialize,
 )]
 pub enum Priority {
     #[default]
@@ -416,7 +414,7 @@ impl From<Priority> for Value {
 }
 
 // Use in a table
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "tasks"]
 pub struct Task {
     #[primary_key]
@@ -434,14 +432,13 @@ A complete example of a custom struct type. Structs can use `#[derive(Encode)]` 
 ```rust
 use std::fmt;
 
-use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 // 1. Define the type with Encode and CustomDataType derives
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, CandidType, Serialize, Deserialize,
+    Hash, Default, Serialize, Deserialize,
     Encode, CustomDataType,
 )]
 #[type_tag = "address"]
@@ -467,7 +464,7 @@ impl fmt::Display for Address {
 impl DataType for Address {}
 
 // Use in a table
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "customers"]
 pub struct Customer {
     #[primary_key]

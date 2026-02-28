@@ -12,7 +12,6 @@
     - [Consistency](#consistency)
     - [Isolation](#isolation)
     - [Durability](#durability)
-  - [Transaction Ownership](#transaction-ownership)
   - [Error Handling](#error-handling)
     - [Handling Failures](#handling-failures)
     - [Transaction Errors](#transaction-errors)
@@ -29,14 +28,14 @@
 
 ## Overview
 
-ic-dbms supports ACID transactions, allowing you to group multiple database operations into a single atomic unit. Either all operations succeed and are committed together, or none of them take effect.
+wasm-dbms supports ACID transactions, allowing you to group multiple database operations into a single atomic unit. Either all operations succeed and are committed together, or none of them take effect.
 
 **Key features:**
 
 - **Atomicity**: All operations in a transaction succeed or fail together
 - **Consistency**: Data integrity constraints are maintained
 - **Isolation**: Transactions are isolated from each other
-- **Durability**: Committed changes persist across canister upgrades
+- **Durability**: Committed changes persist
 
 ---
 
@@ -44,44 +43,36 @@ ic-dbms supports ACID transactions, allowing you to group multiple database oper
 
 ### Begin Transaction
 
-Start a new transaction using `begin_transaction()`:
+Start a new transaction using `DbmsContext::begin_transaction()`:
 
 ```rust
-use ic_dbms_client::{IcDbmsCanisterClient, Client as _};
-
-let client = IcDbmsCanisterClient::new(canister_id);
+use wasm_dbms::prelude::*;
 
 // Begin a new transaction
-let tx_id: u64 = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
 println!("Started transaction: {}", tx_id);
 ```
 
-The returned transaction ID is used for all subsequent operations within this transaction.
+The returned transaction ID is used to create a transactional database instance.
 
 ### Perform Operations
 
-Pass the transaction ID to CRUD operations:
+Create a `WasmDbmsDatabase` with the transaction ID and perform operations:
 
 ```rust
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
+
 // Insert within transaction
-client
-    .insert::<User>(User::table_name(), user, Some(tx_id))
-    .await??;
+database.insert::<User>(user)?;
 
 // Update within transaction
-client
-    .update::<User>(User::table_name(), update, Some(tx_id))
-    .await??;
+database.update::<User>(update)?;
 
 // Delete within transaction
-client
-    .delete::<User>(User::table_name(), DeleteBehavior::Restrict, Some(filter), Some(tx_id))
-    .await??;
+database.delete::<User>(DeleteBehavior::Restrict, Some(filter))?;
 
 // Select within transaction (sees uncommitted changes)
-let users = client
-    .select::<User>(User::table_name(), query, Some(tx_id))
-    .await??;
+let users = database.select::<User>(query)?;
 ```
 
 > **Note:** Operations within a transaction are visible to subsequent operations in the same transaction, but not to other callers until committed.
@@ -92,7 +83,7 @@ Commit the transaction to make all changes permanent:
 
 ```rust
 // Commit the transaction
-client.commit(tx_id).await??;
+database.commit()?;
 println!("Transaction committed successfully");
 ```
 
@@ -100,7 +91,7 @@ After commit:
 
 - All changes become visible to other callers
 - The transaction ID becomes invalid
-- Changes persist across canister upgrades
+- Changes persist in storage
 
 ### Rollback
 
@@ -108,7 +99,7 @@ Rollback the transaction to discard all changes:
 
 ```rust
 // Rollback the transaction
-client.rollback(tx_id).await??;
+database.rollback()?;
 println!("Transaction rolled back");
 ```
 
@@ -127,17 +118,18 @@ After rollback:
 All operations in a transaction are treated as a single unit. If any operation fails, the entire transaction can be rolled back:
 
 ```rust
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 
 // First operation succeeds
-client.insert::<User>(User::table_name(), user1, Some(tx_id)).await??;
+database.insert::<User>(user1)?;
 
 // Second operation fails (e.g., primary key conflict)
-let result = client.insert::<User>(User::table_name(), user2_duplicate, Some(tx_id)).await?;
+let result = database.insert::<User>(user2_duplicate);
 
 if result.is_err() {
     // Rollback everything - user1 is also discarded
-    client.rollback(tx_id).await??;
+    database.rollback()?;
 }
 ```
 
@@ -151,7 +143,8 @@ Transactions maintain data integrity:
 - Sanitizers are applied
 
 ```rust
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 
 // This will fail if referenced user doesn't exist
 let post = PostInsertRequest {
@@ -160,8 +153,8 @@ let post = PostInsertRequest {
     author_id: 999.into(),  // Non-existent user
 };
 
-let result = client.insert::<Post>(Post::table_name(), post, Some(tx_id)).await?;
-// Returns Err(BrokenForeignKeyReference)
+let result = database.insert::<Post>(post);
+// Returns Err(DbmsError::Query(QueryError::BrokenForeignKeyReference))
 ```
 
 ### Isolation
@@ -169,50 +162,27 @@ let result = client.insert::<Post>(Post::table_name(), post, Some(tx_id)).await?
 Changes made within a transaction are not visible to other callers until committed:
 
 ```rust
-// Caller A starts a transaction
-let tx_a = client_a.begin_transaction().await?;
-client_a.insert::<User>(User::table_name(), new_user, Some(tx_a)).await??;
+// Database A starts a transaction
+let tx_id = ctx.begin_transaction();
+let mut db_a = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
+db_a.insert::<User>(new_user)?;
 
-// Caller B queries - does NOT see the new user
-let users = client_b.select::<User>(User::table_name(), query, None).await??;
+// Database B queries - does NOT see the new user
+let db_b = WasmDbmsDatabase::oneshot(&ctx, my_schema);
+let users = db_b.select::<User>(query)?;
 assert!(!users.iter().any(|u| u.id == new_user.id));
 
-// Caller A commits
-client_a.commit(tx_a).await??;
+// Database A commits
+db_a.commit()?;
 
-// Now Caller B can see the user
-let users = client_b.select::<User>(User::table_name(), query, None).await??;
+// Now Database B can see the user
+let users = db_b.select::<User>(query)?;
 assert!(users.iter().any(|u| u.id == new_user.id));
 ```
 
 ### Durability
 
-Committed transactions persist across canister upgrades. ic-dbms uses stable memory to ensure data survives upgrades.
-
----
-
-## Transaction Ownership
-
-Transactions are owned by the principal that created them. Only the owner can:
-
-- Perform operations within the transaction
-- Commit the transaction
-- Rollback the transaction
-
-```rust
-// Principal A creates transaction
-let tx_id = client_a.begin_transaction().await?;
-
-// Principal A can use it
-client_a.insert::<User>(User::table_name(), user, Some(tx_id)).await??;  // OK
-
-// Principal B cannot use it
-let result = client_b.insert::<User>(User::table_name(), user, Some(tx_id)).await?;
-// Returns Err(TransactionNotFound) or similar error
-
-// Only Principal A can commit
-client_a.commit(tx_id).await??;  // OK
-```
+Committed transactions persist in storage. When using stable memory providers (e.g., on the Internet Computer), data survives across upgrades.
 
 ---
 
@@ -223,23 +193,24 @@ client_a.commit(tx_id).await??;  // OK
 When an operation fails within a transaction, you should typically rollback:
 
 ```rust
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 
-async fn process_order(client: &impl Client, tx_id: u64) -> Result<(), IcDbmsError> {
+fn process_order(database: &impl Database) -> Result<(), DbmsError> {
     // Multiple operations that should succeed together
-    client.insert::<Order>(Order::table_name(), order, Some(tx_id)).await??;
-    client.update::<Inventory>(Inventory::table_name(), update, Some(tx_id)).await??;
-    client.insert::<OrderItem>(OrderItem::table_name(), item, Some(tx_id)).await??;
+    database.insert::<Order>(order)?;
+    database.update::<Inventory>(update)?;
+    database.insert::<OrderItem>(item)?;
     Ok(())
 }
 
-match process_order(&client, tx_id).await {
+match process_order(&database) {
     Ok(()) => {
-        client.commit(tx_id).await??;
+        database.commit()?;
         println!("Order processed successfully");
     }
     Err(e) => {
-        client.rollback(tx_id).await??;
+        database.rollback()?;
         println!("Order failed, rolled back: {:?}", e);
     }
 }
@@ -250,16 +221,15 @@ match process_order(&client, tx_id).await {
 | Error | Cause |
 |-------|-------|
 | `TransactionNotFound` | Invalid transaction ID or transaction already completed |
-| `TransactionNotOwned` | Caller doesn't own the transaction |
+| `NoActiveTransaction` | Attempting to commit/rollback without an active transaction |
 
 ```rust
-use ic_dbms_api::prelude::{IcDbmsError, TransactionError};
+use wasm_dbms_api::prelude::{DbmsError, TransactionError};
 
-let result = client.commit(invalid_tx_id).await?;
-match result {
+match database.commit() {
     Ok(()) => println!("Committed"),
-    Err(IcDbmsError::Transaction(TransactionError::NotFound)) => {
-        println!("Transaction not found or already completed");
+    Err(DbmsError::Transaction(TransactionError::NoActiveTransaction)) => {
+        println!("No active transaction to commit");
     }
     Err(e) => println!("Other error: {:?}", e),
 }
@@ -277,19 +247,21 @@ Long-running transactions hold resources and block other operations:
 // GOOD: Prepare data outside transaction
 let users_to_insert = prepare_users();
 
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 for user in users_to_insert {
-    client.insert::<User>(User::table_name(), user, Some(tx_id)).await??;
+    database.insert::<User>(user)?;
 }
-client.commit(tx_id).await??;
+database.commit()?;
 
 // BAD: Doing expensive work inside transaction
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 for raw_data in large_dataset {
     let user = expensive_parsing(raw_data);  // Don't do this in transaction
-    client.insert::<User>(User::table_name(), user, Some(tx_id)).await??;
+    database.insert::<User>(user)?;
 }
-client.commit(tx_id).await??;
+database.commit()?;
 ```
 
 ### 2. Always handle rollback
@@ -297,17 +269,18 @@ client.commit(tx_id).await??;
 Ensure transactions are either committed or rolled back:
 
 ```rust
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 
-let result = async {
-    client.insert::<User>(User::table_name(), user1, Some(tx_id)).await??;
-    client.insert::<User>(User::table_name(), user2, Some(tx_id)).await??;
-    Ok::<(), IcDbmsError>(())
-}.await;
+let result = (|| -> Result<(), DbmsError> {
+    database.insert::<User>(user1)?;
+    database.insert::<User>(user2)?;
+    Ok(())
+})();
 
 match result {
-    Ok(()) => client.commit(tx_id).await??,
-    Err(_) => client.rollback(tx_id).await??,
+    Ok(()) => database.commit()?,
+    Err(_) => database.rollback()?,
 }
 ```
 
@@ -317,31 +290,35 @@ Group operations that should succeed or fail together:
 
 ```rust
 // GOOD: Related operations in transaction
-let tx_id = client.begin_transaction().await?;
-client.insert::<Order>(Order::table_name(), order, Some(tx_id)).await??;
-client.insert::<Payment>(Payment::table_name(), payment, Some(tx_id)).await??;
-client.update::<Inventory>(Inventory::table_name(), inv_update, Some(tx_id)).await??;
-client.commit(tx_id).await??;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
+database.insert::<Order>(order)?;
+database.insert::<Payment>(payment)?;
+database.update::<Inventory>(inv_update)?;
+database.commit()?;
 
 // BAD: Unrelated operations in transaction (unnecessary)
-let tx_id = client.begin_transaction().await?;
-client.insert::<UserPreferences>(prefs_table, prefs, Some(tx_id)).await??;
-client.insert::<AuditLog>(log_table, log, Some(tx_id)).await??;  // Unrelated
-client.commit(tx_id).await??;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
+database.insert::<UserPreferences>(prefs)?;
+database.insert::<AuditLog>(log)?;  // Unrelated
+database.commit()?;
 ```
 
 ### 4. Don't mix transactional and non-transactional operations
 
 ```rust
-let tx_id = client.begin_transaction().await?;
+let tx_id = ctx.begin_transaction();
+let mut database = WasmDbmsDatabase::from_transaction(&ctx, my_schema, tx_id);
 
 // GOOD: All operations use the transaction
-client.insert::<Order>(Order::table_name(), order, Some(tx_id)).await??;
-client.insert::<OrderItem>(OrderItem::table_name(), item, Some(tx_id)).await??;
+database.insert::<Order>(order)?;
+database.insert::<OrderItem>(item)?;
 
 // BAD: Mixing transaction and non-transaction
-client.insert::<Order>(Order::table_name(), order, Some(tx_id)).await??;
-client.insert::<AuditLog>(AuditLog::table_name(), log, None).await??;  // Not in transaction!
+let oneshot = WasmDbmsDatabase::oneshot(&ctx, my_schema);
+database.insert::<Order>(order)?;
+oneshot.insert::<AuditLog>(log)?;  // Not in transaction!
 ```
 
 ---
@@ -353,27 +330,28 @@ client.insert::<AuditLog>(AuditLog::table_name(), log, None).await??;  // Not in
 Transfer money between accounts atomically:
 
 ```rust
-async fn transfer(
-    client: &impl Client,
+fn transfer(
+    ctx: &DbmsContext<impl MemoryProvider>,
     from_account: u32,
     to_account: u32,
     amount: Decimal,
-) -> Result<(), IcDbmsError> {
-    let tx_id = client.begin_transaction().await?;
+) -> Result<(), DbmsError> {
+    let tx_id = ctx.begin_transaction();
+    let mut database = WasmDbmsDatabase::from_transaction(ctx, my_schema, tx_id);
 
     // Deduct from source account
     let deduct = AccountUpdateRequest::builder()
         .decrease_balance(amount)
         .filter(Filter::eq("id", Value::Uint32(from_account.into())))
         .build();
-    client.update::<Account>(Account::table_name(), deduct, Some(tx_id)).await??;
+    database.update::<Account>(deduct)?;
 
     // Add to destination account
     let add = AccountUpdateRequest::builder()
         .increase_balance(amount)
         .filter(Filter::eq("id", Value::Uint32(to_account.into())))
         .build();
-    client.update::<Account>(Account::table_name(), add, Some(tx_id)).await??;
+    database.update::<Account>(add)?;
 
     // Record the transfer
     let transfer_record = TransferInsertRequest {
@@ -383,10 +361,10 @@ async fn transfer(
         amount,
         timestamp: DateTime::now(),
     };
-    client.insert::<Transfer>(Transfer::table_name(), transfer_record, Some(tx_id)).await??;
+    database.insert::<Transfer>(transfer_record)?;
 
     // Commit atomically
-    client.commit(tx_id).await??;
+    database.commit()?;
     Ok(())
 }
 ```
@@ -396,20 +374,21 @@ async fn transfer(
 Process an order with inventory update:
 
 ```rust
-async fn process_order(
-    client: &impl Client,
+fn process_order(
+    ctx: &DbmsContext<impl MemoryProvider>,
     order: OrderInsertRequest,
     items: Vec<OrderItemInsertRequest>,
 ) -> Result<u32, Box<dyn std::error::Error>> {
-    let tx_id = client.begin_transaction().await?;
+    let tx_id = ctx.begin_transaction();
+    let mut database = WasmDbmsDatabase::from_transaction(ctx, my_schema, tx_id);
 
     // Insert the order
-    client.insert::<Order>(Order::table_name(), order.clone(), Some(tx_id)).await??;
+    database.insert::<Order>(order.clone())?;
 
     // Insert order items and update inventory
     for item in items {
         // Insert order item
-        client.insert::<OrderItem>(OrderItem::table_name(), item.clone(), Some(tx_id)).await??;
+        database.insert::<OrderItem>(item.clone())?;
 
         // Decrease inventory
         let inv_update = InventoryUpdateRequest::builder()
@@ -417,21 +396,17 @@ async fn process_order(
             .filter(Filter::eq("product_id", Value::Uint32(item.product_id)))
             .build();
 
-        let updated = client.update::<Inventory>(
-            Inventory::table_name(),
-            inv_update,
-            Some(tx_id)
-        ).await??;
+        let updated = database.update::<Inventory>(inv_update)?;
 
         if updated == 0 {
             // Product not in inventory, rollback
-            client.rollback(tx_id).await??;
+            database.rollback()?;
             return Err("Product not found in inventory".into());
         }
     }
 
     // All successful, commit
-    client.commit(tx_id).await??;
+    database.commit()?;
     Ok(order.id.into())
 }
 ```

@@ -35,7 +35,7 @@
 
 ## Overview
 
-ic-dbms provides a powerful query API for retrieving data from your tables. Queries are built using the `QueryBuilder`
+wasm-dbms provides a powerful query API for retrieving data from your tables. Queries are built using the `QueryBuilder`
 and can include:
 
 - **Filters** - Narrow down which records to return
@@ -54,7 +54,7 @@ and can include:
 Use `Query::builder()` to construct queries:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 // Select all records
 let query = Query::builder().all().build();
@@ -350,7 +350,7 @@ let query = Query::builder()
 .all()
 .build();
 
-let users = client.select::<User>(User::table_name(), query, None).await? ?;
+let users = database.select::<User>(query)?;
 // All fields are populated
 ```
 
@@ -363,7 +363,7 @@ let query = Query::builder()
 .columns(vec!["id".to_string(), "name".to_string(), "email".to_string()])
 .build();
 
-let users = client.select::<User>(User::table_name(), query, None).await? ?;
+let users = database.select::<User>(query)?;
 // Only id, name, and email are populated
 // Other fields will have default values
 ```
@@ -378,7 +378,7 @@ Load related records in a single query using `.with()`:
 
 ```rust
 // Define tables with foreign key
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "posts"]
 pub struct Post {
     #[primary_key]
@@ -394,7 +394,7 @@ let query = Query::builder()
 .with("users")
 .build();
 
-let posts = client.select::<Post>(Post::table_name(), query, None).await? ?;
+let posts = database.select::<Post>(query)?;
 ```
 
 See the [Relationships Guide](./relationships.md) for more on eager loading.
@@ -403,9 +403,9 @@ See the [Relationships Guide](./relationships.md) for more on eager loading.
 
 ## Joins
 
-Joins combine rows from two or more tables based on a related column, producing a single result set with columns from all joined tables. Use joins when you need to correlate data across tables in a single flat result — for example, listing posts alongside their author names.
+Joins combine rows from two or more tables based on a related column, producing a single result set with columns from all joined tables. Use joins when you need to correlate data across tables in a single flat result -- for example, listing posts alongside their author names.
 
-> **Note:** Joins only work through the untyped `select_raw` path (or the `select` canister endpoint). Typed `select::<T>` rejects queries that contain joins with a `JoinInsideTypedSelect` error.
+> **Note:** Joins only work through the untyped `select_raw` path. Typed `select::<T>` rejects queries that contain joins with a `JoinInsideTypedSelect` error.
 
 ### Join Types
 
@@ -421,7 +421,7 @@ Joins combine rows from two or more tables based on a related column, producing 
 Use `.inner_join(table, left_column, right_column)` to join two tables:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 // Join users with their posts (INNER JOIN)
 let query = Query::builder()
@@ -430,7 +430,7 @@ let query = Query::builder()
     .build();
 
 // Use select_raw since joins return untyped rows
-let rows = client.select_raw("users", query, None).await??;
+let rows = database.select_raw("users", query)?;
 
 // Each row contains columns from both "users" and "posts"
 for row in &rows {
@@ -470,14 +470,14 @@ For LEFT, RIGHT, and FULL joins, columns from the unmatched side are filled with
 Chain multiple joins to combine more than two tables:
 
 ```rust
-// Users → Posts → Comments
+// Users -> Posts -> Comments
 let query = Query::builder()
     .all()
     .inner_join("posts", "id", "user_id")
     .left_join("comments", "posts.id", "post_id")
     .build();
 
-let rows = client.select_raw("users", query, None).await??;
+let rows = database.select_raw("users", query)?;
 ```
 
 Joins are processed left-to-right. The second join operates on the result of the first.
@@ -510,10 +510,10 @@ Unqualified names default to the FROM table (the table passed to `select_raw`).
 
 | | Eager Loading | Joins |
 |--|--------------|-------|
-| **Result type** | Typed (`Vec<T>`) | Untyped (`Vec<Vec<(CandidColumnDef, Value)>>`) |
+| **Result type** | Typed (`Vec<T>`) | Untyped (`Vec<Vec<(ColumnDef, Value)>>`) |
 | **Result format** | Separate related records | Flat combined rows |
-| **API method** | `select::<T>` | `select_raw` / `select` endpoint |
+| **API method** | `select::<T>` | `select_raw` |
 | **Column disambiguation** | Not needed | Use `table.column` syntax |
 | **Use case** | Load parent with children | Correlate columns across tables |
 
-Use **eager loading** when you want typed results with related records attached. Use **joins** when you need a flat, cross-table result set — for example, for reporting, search, or when you need columns from multiple tables in a single row.
+Use **eager loading** when you want typed results with related records attached. Use **joins** when you need a flat, cross-table result set -- for example, for reporting, search, or when you need columns from multiple tables in a single row.

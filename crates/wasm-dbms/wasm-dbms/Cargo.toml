@@ -1,0 +1,19 @@
+[package]
+name = "wasm-dbms"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+description = "Runtime-agnostic DBMS engine for WASM environments"
+license = { workspace = true }
+repository = { workspace = true }
+readme = "../../../README.md"
+categories = ["database", "wasm"]
+keywords = ["database", "wasm", "dbms"]
+
+[dependencies]
+wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.6.0" }
+wasm-dbms-memory = { path = "../wasm-dbms-memory", version = "0.6.0" }
+
+[dev-dependencies]
+candid = { workspace = true }
+serde = { workspace = true }

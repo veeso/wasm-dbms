@@ -6,10 +6,8 @@
   - [Layer 2: DBMS Layer](#layer-2-dbms-layer)
   - [Layer 3: API Layer](#layer-3-api-layer)
 - [Crate Organization](#crate-organization)
-  - [ic-dbms-api](#ic-dbms-api)
-  - [ic-dbms-canister](#ic-dbms-canister)
-  - [ic-dbms-macros](#ic-dbms-macros)
-  - [ic-dbms-client](#ic-dbms-client)
+  - [Generic Layer (wasm-dbms)](#generic-layer-wasm-dbms)
+  - [IC Layer (ic-dbms)](#ic-layer-ic-dbms)
 - [Data Flow](#data-flow)
   - [Insert Operation](#insert-operation)
   - [Select Operation](#select-operation)
@@ -21,10 +19,13 @@
 
 ## Overview
 
-ic-dbms is built as a layered architecture where each layer has specific responsibilities and builds upon the layer below. This design provides:
+ic-dbms is built as a layered architecture where each layer has specific responsibilities and builds upon the layer below. The core DBMS engine is runtime-agnostic (`wasm-dbms-*` crates), while the IC-specific adapter layer (`ic-dbms-*` crates) provides Internet Computer integration.
+
+This design provides:
 
 - **Separation of concerns**: Each layer focuses on one aspect
 - **Testability**: Layers can be tested independently
+- **Portability**: The generic layer runs on any WASM runtime (Wasmtime, Wasmer, WasmEdge)
 - **Flexibility**: Internal implementations can change without affecting APIs
 
 ---
@@ -50,10 +51,13 @@ ic-dbms is built as a layered architecture where each layer has specific respons
                     ┌─────────────────┐
                     │  IC Stable      │
                     │    Memory       │
+                    │   (or Heap)     │
                     └─────────────────┘
 ```
 
 ### Layer 1: Memory Layer
+
+**Crate:** `wasm-dbms-memory`
 
 **Responsibilities:**
 - Manage stable memory allocation (64 KiB pages)
@@ -83,6 +87,8 @@ See [Memory Documentation](./memory.md) for detailed technical information.
 
 ### Layer 2: DBMS Layer
 
+**Crate:** `wasm-dbms`
+
 **Responsibilities:**
 - Implement CRUD operations
 - Manage transactions with ACID properties
@@ -94,11 +100,11 @@ See [Memory Documentation](./memory.md) for detailed technical information.
 
 | Component | Purpose |
 |-----------|---------|
+| `DbmsContext<M>` | Owns all DBMS state (memory, schema, ACL, transactions) |
+| `WasmDbmsDatabase` | Session-scoped DBMS operations |
 | `TableRegistry` | Manages records for a single table |
-| `TransactionManager` | Handles transaction lifecycle |
+| `TransactionSession` | Handles transaction lifecycle |
 | `Transaction` | Overlay for uncommitted changes |
-| `QueryExecutor` | Executes queries with filters |
-| `ForeignKeyHandler` | Validates and cascades foreign keys |
 | `JoinEngine` | Executes cross-table join queries |
 
 **Transaction model:**
@@ -128,6 +134,8 @@ Transactions use an overlay pattern:
 - Rollback discards the overlay
 
 ### Layer 3: API Layer
+
+**Crate:** `ic-dbms-canister` (IC-specific)
 
 **Responsibilities:**
 - Expose Candid interface
@@ -172,51 +180,117 @@ acl_allowed_principals() -> Vec<Principal>
 
 ```
 ic-dbms/
-├── ic-dbms-api/        # Shared types and traits
-├── ic-dbms-canister/   # Core DBMS implementation
-├── ic-dbms-macros/     # Procedural macros
-└── ic-dbms-client/     # Client libraries
+├── crates/
+│   ├── wasm-dbms/                  # Generic WASM DBMS crates
+│   │   ├── wasm-dbms-api/          # Shared types and traits
+│   │   ├── wasm-dbms-memory/       # Memory abstraction and page management
+│   │   ├── wasm-dbms/              # Core DBMS engine
+│   │   └── wasm-dbms-macros/       # Procedural macros (Encode, Table, CustomDataType)
+│   │
+│   └── ic-dbms/                    # IC-specific crates
+│       ├── ic-dbms-api/            # IC-specific types (re-exports wasm-dbms-api)
+│       ├── ic-dbms-canister/       # Core IC canister implementation
+│       ├── ic-dbms-macros/         # IC-specific macros (DbmsCanister)
+│       ├── ic-dbms-client/         # Client libraries
+│       ├── example/                # Reference implementation
+│       └── integration-tests/      # PocketIC integration tests
+│
+└── .artifact/                      # Build outputs (.wasm, .did, .wasm.gz)
 ```
 
-### ic-dbms-api
+### Dependency Graph
 
-**Purpose:** Shared types used across all crates
+```
+wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms
+                                                                 ^
+ic-dbms-macros <── ic-dbms-canister ─────────────────────────────┘
+                        ^
+                   ic-dbms-client
+```
+
+### Generic Layer (wasm-dbms)
+
+#### wasm-dbms-api
+
+**Purpose:** Runtime-agnostic shared types and traits
 
 **Contents:**
 - Data types (`Uint32`, `Text`, `DateTime`, etc.)
 - `Value` enum for runtime values
-- Filter and Query types
+- Filter, Query, and Join types
+- `Database` trait
+- `CallerContext` trait for identity abstraction
 - Sanitizer and Validator traits
-- Error types
-- `Table` trait (marker for table types)
+- `CustomDataType` trait and `CustomValue`
+- Error types (`DbmsError`, `DbmsResult`)
 
-**Dependencies:** Minimal (candid, serde)
+**Dependencies:** Minimal (serde, thiserror). Candid support via optional `candid` feature.
 
-### ic-dbms-canister
+#### wasm-dbms-memory
 
-**Purpose:** Core database engine
+**Purpose:** Memory abstraction and page management
 
 **Contents:**
-- Memory layer implementation
-- DBMS layer implementation
-- Transaction management
-- Built-in sanitizers and validators
-- `DbmsCanister` derive macro re-export
+- `MemoryProvider` trait
+- `HeapMemoryProvider` (testing)
+- `MemoryManager` (page-level operations)
+- `SchemaRegistry` (table-to-page mapping)
+- `AccessControlList` (identity-based ACL)
+- `TableRegistry` (record-level operations)
 
-**Dependencies:** ic-dbms-api, ic-dbms-macros, ic-cdk
+#### wasm-dbms
 
-### ic-dbms-macros
+**Purpose:** Core DBMS engine (runtime-agnostic)
 
-**Purpose:** Procedural macros for code generation
+**Contents:**
+- `DbmsContext<M: MemoryProvider>` (owns all mutable state)
+- `WasmDbmsDatabase` (session-scoped operations)
+- Transaction management (overlay pattern)
+- Foreign key integrity checks
+- JOIN execution engine
+- `DatabaseSchema` trait for dynamic dispatch
+
+#### wasm-dbms-macros
+
+**Purpose:** Generic procedural macros
 
 **Macros:**
 - `#[derive(Encode)]` - Binary serialization
 - `#[derive(Table)]` - Table schema and related types
-- `#[derive(DbmsCanister)]` - Complete canister API
+- `#[derive(CustomDataType)]` - Custom data type bridge
 
-**Dependencies:** syn, quote, proc-macro2
+### IC Layer (ic-dbms)
 
-### ic-dbms-client
+#### ic-dbms-api
+
+**Purpose:** IC-specific types, re-exports generic API
+
+**Contents:**
+- Re-exports all types from `wasm-dbms-api`
+- `Principal` custom data type (wraps `candid::Principal`)
+- `IcDbmsCanisterArgs` init/upgrade arguments
+- `IcDbmsError` / `IcDbmsResult` type aliases
+
+#### ic-dbms-canister
+
+**Purpose:** Core IC database engine
+
+**Contents:**
+- `IcMemoryProvider` (IC stable memory)
+- `IcDbmsDatabase` (IC-adapted DBMS operations)
+- Thread-local state management
+- Canister API layer with ACL guards
+
+**Dependencies:** ic-dbms-api, ic-dbms-macros, wasm-dbms-memory, ic-cdk
+
+#### ic-dbms-macros
+
+**Purpose:** IC-specific code generation
+
+**Macros:**
+- `#[derive(DbmsCanister)]` - Generates complete canister API
+
+#### ic-dbms-client
 
 **Purpose:** Client libraries for canister interaction
 
@@ -224,8 +298,6 @@ ic-dbms/
 - `IcDbmsCanisterClient` - Inter-canister calls
 - `IcDbmsAgentClient` - External via ic-agent (feature-gated)
 - `IcDbmsPocketIcClient` - Testing with PocketIC (feature-gated)
-
-**Dependencies:** ic-dbms-api, ic-cdk (optional ic-agent, pocket-ic)
 
 ---
 
@@ -315,7 +387,7 @@ See [Join Engine](./join-engine.md) for implementation details.
 begin_transaction():
   1. Generate transaction ID
   2. Create empty overlay
-  3. Record owner (caller principal)
+  3. Record owner (caller identity)
   4. Return transaction ID
 
 Operation with tx_id:
@@ -348,7 +420,7 @@ Implement the `Sanitize` trait:
 
 ```rust
 pub trait Sanitize {
-    fn sanitize(&self, value: Value) -> IcDbmsResult<Value>;
+    fn sanitize(&self, value: Value) -> DbmsResult<Value>;
 }
 ```
 
@@ -358,21 +430,26 @@ Implement the `Validate` trait:
 
 ```rust
 pub trait Validate {
-    fn validate(&self, value: &Value) -> IcDbmsResult<()>;
+    fn validate(&self, value: &Value) -> DbmsResult<()>;
 }
 ```
 
 ### Custom Data Types
 
-While not directly extensible, you can use `Json` for custom structures:
+Define custom data types with the `CustomDataType` derive macro:
 
 ```rust
-pub metadata: Json,  // Store any structure
+#[derive(Encode, CustomDataType, Clone, Debug, PartialEq, Eq)]
+#[type_tag = "status"]
+pub enum Status {
+    Active,
+    Inactive,
+}
 ```
 
 ### Memory Provider
 
-For testing, implement `MemoryProvider`:
+Implement `MemoryProvider` for custom memory backends:
 
 ```rust
 pub trait MemoryProvider {
@@ -385,6 +462,6 @@ pub trait MemoryProvider {
 }
 ```
 
-ic-dbms provides:
+Built-in providers:
 - `IcMemoryProvider` - Uses IC stable memory (production)
 - `HeapMemoryProvider` - Uses heap memory (testing)

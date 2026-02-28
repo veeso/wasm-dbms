@@ -1,0 +1,30 @@
+[package]
+name = "ic-dbms-macros"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+repository = { workspace = true }
+documentation = "https://docs.rs/ic-dbms-macros/"
+description = "Macros and derive ic-dbms-canister"
+include = [
+  "examples/**/*",
+  "src/**/*",
+  "../../../LICENSE",
+  "README.md",
+  "../../../CHANGELOG.md",
+]
+readme = "README.md"
+
+[lib]
+name = "ic_dbms_macros"
+path = "src/lib.rs"
+proc-macro = true
+
+[dependencies]
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["full"] }

@@ -7,18 +7,14 @@
 - [Define Your Schema](#define-your-schema)
   - [Create the Schema Crate](#create-the-schema-crate)
   - [Define Tables](#define-tables)
-- [Create the DBMS Canister](#create-the-dbms-canister)
-  - [Canister Dependencies](#canister-dependencies)
-  - [Generate the Canister API](#generate-the-canister-api)
-  - [Build the Canister](#build-the-canister)
-- [Deploy the Canister](#deploy-the-canister)
-  - [Canister Init Arguments](#canister-init-arguments)
-  - [Deploy with dfx](#deploy-with-dfx)
+- [Using the Database](#using-the-database)
+  - [Create a DbmsContext](#create-a-dbmscontext)
+  - [Perform CRUD Operations](#perform-crud-operations)
 - [Quick Example: Complete Workflow](#quick-example-complete-workflow)
-- [Integration Testing](#integration-testing)
+- [Testing with HeapMemoryProvider](#testing-with-heapmemoryprovider)
 - [Next Steps](#next-steps)
 
-This guide walks you through setting up a complete database canister using ic-dbms. By the end, you'll have a working canister with CRUD operations, transactions, and access control.
+This guide walks you through setting up a database using wasm-dbms. By the end, you'll have a working database with CRUD operations and transactions.
 
 ---
 
@@ -28,9 +24,6 @@ Before starting, ensure you have:
 
 - Rust 1.85.1 or later
 - `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
-- [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install/) (Internet Computer SDK)
-- `ic-wasm`: `cargo install ic-wasm`
-- `candid-extractor`: `cargo install candid-extractor`
 
 ---
 
@@ -38,7 +31,7 @@ Before starting, ensure you have:
 
 ### Workspace Structure
 
-We recommend organizing your project as a Cargo workspace with two crates:
+We recommend organizing your project as a Cargo workspace with a schema crate:
 
 ```
 my-dbms-project/
@@ -47,7 +40,7 @@ my-dbms-project/
 │   ├── Cargo.toml
 │   └── src/
 │       └── lib.rs
-└── canister/           # The DBMS canister
+└── app/                # Your application using the database
     ├── Cargo.toml
     └── src/
         └── lib.rs
@@ -57,7 +50,7 @@ my-dbms-project/
 
 ```toml
 [workspace]
-members = ["schema", "canister"]
+members = ["schema", "app"]
 resolver = "2"
 ```
 
@@ -87,9 +80,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-candid = "0.10"
-ic-dbms-api = "0.4"
-serde = "1"
+wasm-dbms-api = "0.6"
 ```
 
 ### Define Tables
@@ -97,10 +88,9 @@ serde = "1"
 In `schema/src/lib.rs`, define your database tables using the `Table` derive macro:
 
 ```rust
-use candid::{CandidType, Deserialize};
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -113,7 +103,7 @@ pub struct User {
     pub created_at: DateTime,
 }
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "posts"]
 pub struct Post {
     #[primary_key]
@@ -127,7 +117,7 @@ pub struct Post {
 }
 ```
 
-**Required derives:** `Table`, `CandidType`, `Deserialize`, `Clone`
+**Required derives:** `Table`, `Clone`
 
 The `Table` macro generates additional types for each table:
 
@@ -140,134 +130,43 @@ The `Table` macro generates additional types for each table:
 
 ---
 
-## Create the DBMS Canister
+## Using the Database
 
-### Canister Dependencies
+### Create a DbmsContext
 
-Create `canister/Cargo.toml`:
-
-```toml
-[package]
-name = "my-canister"
-version = "0.1.0"
-edition = "2024"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-candid = "0.10"
-ic-cdk = "0.19"
-ic-dbms-api = "0.4"
-ic-dbms-canister = "0.4"
-my-schema = { path = "../schema" }
-serde = "1"
-```
-
-### Generate the Canister API
-
-In `canister/src/lib.rs`:
+The `DbmsContext` holds all database state. Create one using a `MemoryProvider`:
 
 ```rust
-use ic_dbms_canister::prelude::DbmsCanister;
-use my_schema::{User, Post};
+use wasm_dbms::prelude::*;
+use wasm_dbms_api::prelude::*;
 
-#[derive(DbmsCanister)]
-#[tables(User = "users", Post = "posts")]
-pub struct MyDbmsCanister;
-
-ic_cdk::export_candid!();
+// For testing, use HeapMemoryProvider
+let ctx = DbmsContext::new(HeapMemoryProvider::default());
 ```
 
-The `DbmsCanister` macro generates a complete canister API:
+### Perform CRUD Operations
 
-```candid
-service : (IcDbmsCanisterArgs) -> {
-  // ACL Management
-  acl_add_principal : (principal) -> (Result);
-  acl_allowed_principals : () -> (vec principal) query;
-  acl_remove_principal : (principal) -> (Result);
+Create a `WasmDbmsDatabase` from the context to perform operations:
 
-  // Transactions
-  begin_transaction : () -> (nat);
-  commit : (nat) -> (Result);
-  rollback : (nat) -> (Result);
+```rust
+use wasm_dbms::prelude::*;
+use my_schema::{User, UserInsertRequest};
 
-  // Users CRUD
-  insert_users : (UserInsertRequest, opt nat) -> (Result);
-  select_users : (Query, opt nat) -> (Result_1) query;
-  update_users : (UserUpdateRequest, opt nat) -> (Result_2);
-  delete_users : (DeleteBehavior, opt Filter, opt nat) -> (Result_2);
+// Create a one-shot (non-transactional) database
+let database = WasmDbmsDatabase::oneshot(&ctx, my_schema);
 
-  // Posts CRUD
-  insert_posts : (PostInsertRequest, opt nat) -> (Result);
-  select_posts : (Query, opt nat) -> (Result_3) query;
-  update_posts : (PostUpdateRequest, opt nat) -> (Result_2);
-  delete_posts : (DeleteBehavior, opt Filter, opt nat) -> (Result_2);
-}
-```
-
-### Build the Canister
-
-Create a build script or use the following commands:
-
-```bash
-# Build the canister
-cargo build --target wasm32-unknown-unknown --release -p my-canister
-
-# Optimize the WASM
-ic-wasm target/wasm32-unknown-unknown/release/my_canister.wasm \
-    -o my_canister.wasm shrink
-
-# Extract Candid interface
-candid-extractor my_canister.wasm > my_canister.did
-
-# Optionally compress
-gzip -k my_canister.wasm --force
-```
-
----
-
-## Deploy the Canister
-
-### Canister Init Arguments
-
-The canister requires initialization arguments specifying which principals can access the database:
-
-```candid
-type IcDbmsCanisterArgs = variant {
-  Init : IcDbmsCanisterInitArgs;
-  Upgrade;
+// Insert a record
+let user = UserInsertRequest {
+    id: 1.into(),
+    name: "Alice".into(),
+    email: "alice@example.com".into(),
+    created_at: DateTime::now(),
 };
+database.insert::<User>(user)?;
 
-type IcDbmsCanisterInitArgs = record {
-  allowed_principals : vec principal;
-};
-```
-
-> **Warning:** Only principals in `allowed_principals` can perform database operations. Make sure to include all necessary principals (your frontend canister, admin principal, etc.).
-
-### Deploy with dfx
-
-Create `dfx.json`:
-
-```json
-{
-  "canisters": {
-    "my_dbms": {
-      "type": "custom",
-      "candid": "my_canister.did",
-      "wasm": "my_canister.wasm",
-      "build": []
-    }
-  }
-}
-```
-
-Deploy:
-
-```bash
-dfx deploy my_dbms --argument '(variant { Init = record { allowed_principals = vec { principal "your-principal-here" } } })'
+// Query records
+let query = Query::builder().all().build();
+let users = database.select::<User>(query)?;
 ```
 
 ---
@@ -277,13 +176,10 @@ dfx deploy my_dbms --argument '(variant { Init = record { allowed_principals = v
 Here's a complete example showing insert, query, update, and delete operations:
 
 ```rust
-use ic_dbms_client::{IcDbmsCanisterClient, Client as _};
+use wasm_dbms_api::prelude::*;
 use my_schema::{User, UserInsertRequest, UserUpdateRequest};
-use ic_dbms_api::prelude::*;
 
-async fn example(canister_id: Principal) -> Result<(), Box<dyn std::error::Error>> {
-    let client = IcDbmsCanisterClient::new(canister_id);
-
+fn example(database: &impl Database) -> Result<(), DbmsError> {
     // 1. INSERT a new user
     let insert_req = UserInsertRequest {
         id: 1.into(),
@@ -291,13 +187,13 @@ async fn example(canister_id: Principal) -> Result<(), Box<dyn std::error::Error
         email: "alice@example.com".into(),
         created_at: DateTime::now(),
     };
-    client.insert::<User>(User::table_name(), insert_req, None).await??;
+    database.insert::<User>(insert_req)?;
 
     // 2. SELECT users
     let query = Query::builder()
         .filter(Filter::eq("name", Value::Text("Alice".into())))
         .build();
-    let users = client.select::<User>(User::table_name(), query, None).await??;
+    let users = database.select::<User>(query)?;
     println!("Found {} user(s)", users.len());
 
     // 3. UPDATE the user
@@ -305,16 +201,14 @@ async fn example(canister_id: Principal) -> Result<(), Box<dyn std::error::Error
         .set_email("alice.new@example.com".into())
         .filter(Filter::eq("id", Value::Uint32(1.into())))
         .build();
-    let updated = client.update::<User>(User::table_name(), update_req, None).await??;
+    let updated = database.update::<User>(update_req)?;
     println!("Updated {} record(s)", updated);
 
     // 4. DELETE the user
-    let deleted = client.delete::<User>(
-        User::table_name(),
+    let deleted = database.delete::<User>(
         DeleteBehavior::Restrict,
         Some(Filter::eq("id", Value::Uint32(1.into()))),
-        None
-    ).await??;
+    )?;
     println!("Deleted {} record(s)", deleted);
 
     Ok(())
@@ -323,29 +217,19 @@ async fn example(canister_id: Principal) -> Result<(), Box<dyn std::error::Error
 
 ---
 
-## Integration Testing
+## Testing with HeapMemoryProvider
 
-For integration tests using PocketIC, add `ic-dbms-client` with the `pocket-ic` feature:
-
-```toml
-[dev-dependencies]
-ic-dbms-client = { version = "0.4", features = ["pocket-ic"] }
-pocket-ic = "9"
-```
-
-Example test:
+For unit tests, use `HeapMemoryProvider` which stores data in heap memory:
 
 ```rust
-use ic_dbms_client::prelude::{Client as _, IcDbmsPocketIcClient};
+use wasm_dbms::prelude::*;
+use wasm_dbms_api::prelude::*;
 use my_schema::{User, UserInsertRequest};
-use pocket_ic::PocketIc;
 
-#[tokio::test]
-async fn test_insert_and_select() {
-    let pic = PocketIc::new();
-    // ... setup canister ...
-
-    let client = IcDbmsPocketIcClient::new(canister_id, admin_principal, &pic);
+#[test]
+fn test_insert_and_select() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    let database = WasmDbmsDatabase::oneshot(&ctx, my_schema);
 
     let insert_req = UserInsertRequest {
         id: 1.into(),
@@ -354,35 +238,28 @@ async fn test_insert_and_select() {
         created_at: DateTime::now(),
     };
 
-    client
-        .insert::<User>(User::table_name(), insert_req, None)
-        .await
-        .expect("call failed")
-        .expect("insert failed");
+    database.insert::<User>(insert_req).expect("insert failed");
 
     let query = Query::builder().all().build();
-    let users = client
-        .select::<User>(User::table_name(), query, None)
-        .await
-        .expect("call failed")
-        .expect("select failed");
+    let users = database.select::<User>(query).expect("select failed");
 
     assert_eq!(users.len(), 1);
     assert_eq!(users[0].name.as_str(), "Test User");
 }
 ```
 
+> For deploying on the Internet Computer as a canister, see the [IC Getting Started Guide](../ic/guides/get-started.md).
+
 ---
 
 ## Next Steps
 
-Now that you have a working canister, explore these topics:
+Now that you have a working database, explore these topics:
 
 - [CRUD Operations](./crud-operations.md) - Detailed guide on all database operations
 - [Querying](./querying.md) - Filters, ordering, pagination, and field selection
 - [Transactions](./transactions.md) - ACID transactions with commit/rollback
 - [Relationships](./relationships.md) - Foreign keys and eager loading
-- [Access Control](./access-control.md) - Managing the ACL
 - [Custom Data Types](./custom-data-types.md) - Define your own data types (enums, structs)
 - [Schema Definition](../reference/schema.md) - Complete schema reference
 - [Data Types](../reference/data-types.md) - All supported field types

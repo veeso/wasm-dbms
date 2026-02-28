@@ -17,9 +17,6 @@
     - [InsertRequest Type](#insertrequest-type)
     - [UpdateRequest Type](#updaterequest-type)
     - [ForeignFetcher Type](#foreignfetcher-type)
-  - [DbmsCanister Macro](#dbmscanister-macro)
-    - [Basic Usage](#basic-usage)
-    - [Generated API](#generated-api)
   - [Complete Example](#complete-example)
   - [Best Practices](#best-practices)
 
@@ -27,14 +24,13 @@
 
 ## Overview
 
-ic-dbms schemas are defined entirely in Rust using derive macros and attributes. Each struct represents a database table, and each field represents a column.
+wasm-dbms schemas are defined entirely in Rust using derive macros and attributes. Each struct represents a database table, and each field represents a column.
 
 **Key concepts:**
 
 - Structs with `#[derive(Table)]` become database tables
 - Fields become columns with their types
 - Attributes configure primary keys, foreign keys, validation, and more
-- The `DbmsCanister` macro generates the complete canister API
 
 ---
 
@@ -45,10 +41,9 @@ ic-dbms schemas are defined entirely in Rust using derive macros and attributes.
 Every table struct must have these derives:
 
 ```rust
-use candid::{CandidType, Deserialize};
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -60,11 +55,11 @@ pub struct User {
 | Derive | Required | Purpose |
 |--------|----------|---------|
 | `Table` | Yes | Generates table schema and related types |
-| `CandidType` | Yes | Enables Candid serialization |
-| `Deserialize` | Yes | Enables deserialization from Candid |
 | `Clone` | Yes | Required by the macro system |
 | `Debug` | Recommended | Useful for debugging |
 | `PartialEq`, `Eq` | Recommended | Useful for comparisons in tests |
+
+> **Note:** For IC canister usage, also add `CandidType` and `Deserialize` derives. See the [IC Schema Reference](../ic/reference/schema.md).
 
 ### Table Attribute
 
@@ -314,9 +309,7 @@ pub struct UserRecord {
 }
 
 // Usage
-let users: Vec<UserRecord> = client
-    .select::<User>(User::table_name(), query, None)
-    .await??;
+let users: Vec<UserRecord> = database.select::<User>(query)?;
 
 for user in users {
     println!("{}: {}", user.id, user.name);
@@ -342,7 +335,7 @@ let user = UserInsertRequest {
     email: "alice@example.com".into(),
 };
 
-client.insert::<User>(User::table_name(), user, None).await??;
+database.insert::<User>(user)?;
 ```
 
 ### UpdateRequest Type
@@ -358,7 +351,7 @@ let update = UserUpdateRequest::builder()
     .build();
 
 // Usage
-client.update::<User>(User::table_name(), update, None).await??;
+database.update::<User>(update)?;
 ```
 
 **Builder methods:**
@@ -378,65 +371,13 @@ client.update::<User>(User::table_name(), update, None).await??;
 
 ---
 
-## DbmsCanister Macro
-
-### Basic Usage
-
-Generate a complete canister API from your tables:
-
-```rust
-use ic_dbms_canister::prelude::DbmsCanister;
-use my_schema::{User, Post, Comment};
-
-#[derive(DbmsCanister)]
-#[tables(User = "users", Post = "posts", Comment = "comments")]
-pub struct MyDbmsCanister;
-
-ic_cdk::export_candid!();
-```
-
-**Format:** `#[tables(StructName = "table_name", ...)]`
-
-### Generated API
-
-For each table, the macro generates:
-
-```candid
-service : (IcDbmsCanisterArgs) -> {
-  // For "users" table
-  insert_users : (UserInsertRequest, opt nat) -> (Result);
-  select_users : (Query, opt nat) -> (Result_Vec_UserRecord) query;
-  update_users : (UserUpdateRequest, opt nat) -> (Result_u64);
-  delete_users : (DeleteBehavior, opt Filter, opt nat) -> (Result_u64);
-
-  // For "posts" table
-  insert_posts : (PostInsertRequest, opt nat) -> (Result);
-  select_posts : (Query, opt nat) -> (Result_Vec_PostRecord) query;
-  update_posts : (PostUpdateRequest, opt nat) -> (Result_u64);
-  delete_posts : (DeleteBehavior, opt Filter, opt nat) -> (Result_u64);
-
-  // Transaction methods
-  begin_transaction : () -> (nat);
-  commit : (nat) -> (Result);
-  rollback : (nat) -> (Result);
-
-  // ACL methods
-  acl_add_principal : (principal) -> (Result);
-  acl_remove_principal : (principal) -> (Result);
-  acl_allowed_principals : () -> (vec principal) query;
-}
-```
-
----
-
 ## Complete Example
 
 ```rust
 // schema/src/lib.rs
-use candid::{CandidType, Deserialize};
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -456,7 +397,7 @@ pub struct User {
     pub is_active: Boolean,
 }
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "posts"]
 pub struct Post {
     #[primary_key]
@@ -477,7 +418,7 @@ pub struct Post {
     pub created_at: DateTime,
 }
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "comments"]
 pub struct Comment {
     #[primary_key]
@@ -496,17 +437,7 @@ pub struct Comment {
 }
 ```
 
-```rust
-// canister/src/lib.rs
-use ic_dbms_canister::prelude::DbmsCanister;
-use my_schema::{User, Post, Comment};
-
-#[derive(DbmsCanister)]
-#[tables(User = "users", Post = "posts", Comment = "comments")]
-pub struct BlogDbmsCanister;
-
-ic_cdk::export_candid!();
-```
+> For generating a complete IC canister API from this schema, see the [IC Schema Reference](../ic/reference/schema.md).
 
 ---
 
@@ -519,7 +450,7 @@ my-project/
 ├── schema/           # Reusable types
 │   ├── Cargo.toml
 │   └── src/lib.rs
-└── canister/         # Canister implementation
+└── app/              # Application using the database
     ├── Cargo.toml
     └── src/lib.rs
 ```

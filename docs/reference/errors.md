@@ -3,7 +3,7 @@
 - [Errors Reference](#errors-reference)
   - [Overview](#overview)
   - [Error Hierarchy](#error-hierarchy)
-  - [IcDbmsError](#icdbmserror)
+  - [DbmsError](#dbmserror)
   - [Query Errors](#query-errors)
     - [PrimaryKeyConflict](#primarykeyconflict)
     - [BrokenForeignKeyReference](#brokenforeignkeyreference)
@@ -17,15 +17,13 @@
   - [Validation Errors](#validation-errors)
   - [Sanitization Errors](#sanitization-errors)
   - [Memory Errors](#memory-errors)
-  - [Client Error Handling](#client-error-handling)
-    - [Double Result Pattern](#double-result-pattern)
-    - [Error Handling Examples](#error-handling-examples)
+  - [Error Handling Examples](#error-handling-examples)
 
 ---
 
 ## Overview
 
-ic-dbms uses a structured error system to provide clear information about what went wrong. Errors are categorized by their source:
+wasm-dbms uses a structured error system to provide clear information about what went wrong. Errors are categorized by their source:
 
 | Category | Description |
 |----------|-------------|
@@ -41,7 +39,7 @@ ic-dbms uses a structured error system to provide clear information about what w
 ## Error Hierarchy
 
 ```
-IcDbmsError
+DbmsError
 ├── Query(QueryError)
 │   ├── PrimaryKeyConflict
 │   ├── BrokenForeignKeyReference
@@ -60,14 +58,14 @@ IcDbmsError
 
 ---
 
-## IcDbmsError
+## DbmsError
 
 The top-level error enum:
 
 ```rust
-use ic_dbms_api::prelude::IcDbmsError;
+use wasm_dbms_api::prelude::DbmsError;
 
-pub enum IcDbmsError {
+pub enum DbmsError {
     Memory(MemoryError),
     Query(QueryError),
     Table(TableError),
@@ -81,24 +79,24 @@ pub enum IcDbmsError {
 
 ```rust
 match error {
-    IcDbmsError::Query(query_err) => {
+    DbmsError::Query(query_err) => {
         // Handle query errors
     }
-    IcDbmsError::Transaction(tx_err) => {
+    DbmsError::Transaction(tx_err) => {
         // Handle transaction errors
     }
-    IcDbmsError::Validation(msg) => {
+    DbmsError::Validation(msg) => {
         // Handle validation errors
         println!("Validation failed: {}", msg);
     }
-    IcDbmsError::Sanitize(msg) => {
+    DbmsError::Sanitize(msg) => {
         // Handle sanitization errors
         println!("Sanitization failed: {}", msg);
     }
-    IcDbmsError::Memory(mem_err) => {
+    DbmsError::Memory(mem_err) => {
         // Handle memory errors (rare)
     }
-    IcDbmsError::Table(table_err) => {
+    DbmsError::Table(table_err) => {
         // Handle table errors (rare)
     }
 }
@@ -116,21 +114,21 @@ Query errors occur during database operations.
 
 ```rust
 // Insert first user
-client.insert::<User>(User::table_name(), UserInsertRequest {
+database.insert::<User>(UserInsertRequest {
     id: 1.into(),
     name: "Alice".into(),
     ..
-}, None).await??;
+})?;
 
 // Insert second user with same ID - FAILS
-let result = client.insert::<User>(User::table_name(), UserInsertRequest {
+let result = database.insert::<User>(UserInsertRequest {
     id: 1.into(),  // Same ID!
     name: "Bob".into(),
     ..
-}, None).await?;
+});
 
 match result {
-    Err(IcDbmsError::Query(QueryError::PrimaryKeyConflict)) => {
+    Err(DbmsError::Query(QueryError::PrimaryKeyConflict)) => {
         println!("A user with this ID already exists");
     }
     _ => {}
@@ -148,15 +146,15 @@ match result {
 
 ```rust
 // Insert post with non-existent author
-let result = client.insert::<Post>(Post::table_name(), PostInsertRequest {
+let result = database.insert::<Post>(PostInsertRequest {
     id: 1.into(),
     title: "My Post".into(),
     author_id: 999.into(),  // User 999 doesn't exist!
     ..
-}, None).await?;
+});
 
 match result {
-    Err(IcDbmsError::Query(QueryError::BrokenForeignKeyReference)) => {
+    Err(DbmsError::Query(QueryError::BrokenForeignKeyReference)) => {
         println!("Referenced user does not exist");
     }
     _ => {}
@@ -173,15 +171,13 @@ match result {
 
 ```rust
 // User has posts - cannot delete with Restrict
-let result = client.delete::<User>(
-    User::table_name(),
+let result = database.delete::<User>(
     DeleteBehavior::Restrict,
     Some(Filter::eq("id", Value::Uint32(1.into()))),
-    None
-).await?;
+);
 
 match result {
-    Err(IcDbmsError::Query(QueryError::ForeignKeyConstraintViolation)) => {
+    Err(DbmsError::Query(QueryError::ForeignKeyConstraintViolation)) => {
         println!("Cannot delete: user has related records");
     }
     _ => {}
@@ -201,13 +197,12 @@ match result {
 // Filter with wrong column name
 let filter = Filter::eq("username", Value::Text("alice".into()));  // Column is "name", not "username"
 
-let result = client.select::<User>(User::table_name(),
+let result = database.select::<User>(
     Query::builder().filter(filter).build(),
-    None
-).await?;
+);
 
 match result {
-    Err(IcDbmsError::Query(QueryError::UnknownColumn)) => {
+    Err(DbmsError::Query(QueryError::UnknownColumn)) => {
         println!("Column does not exist in table");
     }
     _ => {}
@@ -242,7 +237,7 @@ let update = UserUpdateRequest::builder()
     .filter(Filter::eq("id", Value::Uint32(999.into())))  // Doesn't exist
     .build();
 
-let affected = client.update::<User>(User::table_name(), update, None).await??;
+let affected = database.update::<User>(update)?;
 
 // affected == 0 indicates no records matched
 if affected == 0 {
@@ -260,13 +255,12 @@ if affected == 0 {
 // Invalid JSON path
 let filter = Filter::json("metadata", JsonFilter::has_key("user."));  // Trailing dot
 
-let result = client.select::<User>(User::table_name(),
+let result = database.select::<User>(
     Query::builder().filter(filter).build(),
-    None
-).await?;
+);
 
 match result {
-    Err(IcDbmsError::Query(QueryError::InvalidQuery)) => {
+    Err(DbmsError::Query(QueryError::InvalidQuery)) => {
         println!("Query is malformed");
     }
     _ => {}
@@ -287,12 +281,11 @@ match result {
 **Cause:** Invalid transaction ID or transaction already completed.
 
 ```rust
-// Use invalid transaction ID
-let result = client.commit(99999).await?;
+use wasm_dbms_api::prelude::{DbmsError, TransactionError};
 
-match result {
-    Err(IcDbmsError::Transaction(TransactionError::NotFound)) => {
-        println!("Transaction not found or already completed");
+match database.commit() {
+    Err(DbmsError::Transaction(TransactionError::NoActiveTransaction)) => {
+        println!("No active transaction to commit");
     }
     _ => {}
 }
@@ -302,7 +295,6 @@ match result {
 - Transaction ID never existed
 - Transaction was already committed
 - Transaction was already rolled back
-- Caller doesn't own the transaction
 
 ---
 
@@ -319,14 +311,14 @@ pub struct User {
 }
 
 // Insert with invalid email
-let result = client.insert::<User>(User::table_name(), UserInsertRequest {
+let result = database.insert::<User>(UserInsertRequest {
     id: 1.into(),
     email: "not-an-email".into(),  // Invalid!
     ..
-}, None).await?;
+});
 
 match result {
-    Err(IcDbmsError::Validation(msg)) => {
+    Err(DbmsError::Validation(msg)) => {
         println!("Validation failed: {}", msg);
         // msg might be: "Invalid email format"
     }
@@ -350,7 +342,7 @@ match result {
 ```rust
 // Sanitization errors are rare but can occur with malformed data
 match result {
-    Err(IcDbmsError::Sanitize(msg)) => {
+    Err(DbmsError::Sanitize(msg)) => {
         println!("Sanitization failed: {}", msg);
     }
     _ => {}
@@ -363,68 +355,43 @@ Sanitization errors are less common than validation errors since sanitizers typi
 
 ## Memory Errors
 
-**Cause:** Low-level stable memory errors.
+**Cause:** Low-level memory errors.
 
 ```rust
 pub enum MemoryError {
     OutOfBounds,           // Read/write outside allocated memory
-    StableMemoryError(String),  // IC stable memory API error
+    StableMemoryError(String),  // Memory API error
     InsufficientSpace,     // Not enough space to allocate
 }
 ```
 
 **Memory errors are rare** and usually indicate:
-- Canister running out of stable memory
+- Running out of available memory
 - Corrupted memory state
-- Bug in ic-dbms (please report!)
+- Bug in wasm-dbms (please report!)
 
 ---
 
-## Client Error Handling
+## Error Handling Examples
 
-### Double Result Pattern
-
-Client operations return `Result<Result<T, IcDbmsError>, CallError>`:
-
-- **Outer Result:** Network/call errors (canister unreachable, cycles exhausted)
-- **Inner Result:** Database errors (validation, constraints, etc.)
-
-### Error Handling Examples
-
-**Basic with `??`:**
+**Basic error handling:**
 
 ```rust
-// Propagate both error types
-let users = client.select::<User>(User::table_name(), query, None).await??;
-```
+let result = database.insert::<User>(user);
 
-**Detailed error handling:**
-
-```rust
-match client.insert::<User>(User::table_name(), user, None).await {
-    Ok(Ok(())) => {
-        println!("Insert successful");
+match result {
+    Ok(()) => println!("Insert successful"),
+    Err(DbmsError::Query(QueryError::PrimaryKeyConflict)) => {
+        println!("User already exists");
     }
-    Ok(Err(db_error)) => {
-        // Handle database errors
-        match db_error {
-            IcDbmsError::Query(QueryError::PrimaryKeyConflict) => {
-                println!("User already exists");
-            }
-            IcDbmsError::Query(QueryError::BrokenForeignKeyReference) => {
-                println!("Referenced record doesn't exist");
-            }
-            IcDbmsError::Validation(msg) => {
-                println!("Validation error: {}", msg);
-            }
-            _ => {
-                println!("Database error: {:?}", db_error);
-            }
-        }
+    Err(DbmsError::Query(QueryError::BrokenForeignKeyReference)) => {
+        println!("Referenced record doesn't exist");
     }
-    Err(call_error) => {
-        // Handle network/call errors
-        println!("Failed to call canister: {:?}", call_error);
+    Err(DbmsError::Validation(msg)) => {
+        println!("Validation error: {}", msg);
+    }
+    Err(e) => {
+        println!("Database error: {:?}", e);
     }
 }
 ```
@@ -432,56 +399,20 @@ match client.insert::<User>(User::table_name(), user, None).await {
 **Helper function pattern:**
 
 ```rust
-fn handle_db_error(error: IcDbmsError) -> String {
+fn handle_db_error(error: DbmsError) -> String {
     match error {
-        IcDbmsError::Query(QueryError::PrimaryKeyConflict) =>
+        DbmsError::Query(QueryError::PrimaryKeyConflict) =>
             "Record with this ID already exists".to_string(),
-        IcDbmsError::Query(QueryError::BrokenForeignKeyReference) =>
+        DbmsError::Query(QueryError::BrokenForeignKeyReference) =>
             "Referenced record not found".to_string(),
-        IcDbmsError::Query(QueryError::ForeignKeyConstraintViolation) =>
+        DbmsError::Query(QueryError::ForeignKeyConstraintViolation) =>
             "Cannot delete: record has dependencies".to_string(),
-        IcDbmsError::Validation(msg) =>
+        DbmsError::Validation(msg) =>
             format!("Invalid data: {}", msg),
         _ =>
             format!("Unexpected error: {:?}", error),
     }
 }
-
-// Usage
-let result = client.insert::<User>(User::table_name(), user, None).await;
-match result {
-    Ok(Ok(())) => Ok(()),
-    Ok(Err(e)) => Err(handle_db_error(e)),
-    Err(e) => Err(format!("Call failed: {:?}", e)),
-}
 ```
 
-**Retry pattern for transient errors:**
-
-```rust
-async fn insert_with_retry<T: Table>(
-    client: &impl Client,
-    table: &str,
-    record: T::InsertRequest,
-    max_retries: u32,
-) -> Result<(), String> {
-    for attempt in 0..max_retries {
-        match client.insert::<T>(table, record.clone(), None).await {
-            Ok(Ok(())) => return Ok(()),
-            Ok(Err(e)) => {
-                // Database errors - don't retry
-                return Err(format!("Database error: {:?}", e));
-            }
-            Err(call_err) => {
-                // Call errors - might be transient, retry
-                if attempt < max_retries - 1 {
-                    println!("Attempt {} failed, retrying...", attempt + 1);
-                    continue;
-                }
-                return Err(format!("Call failed after {} attempts: {:?}", max_retries, call_err));
-            }
-        }
-    }
-    unreachable!()
-}
-```
+> For IC client-specific error handling (double result pattern with `CallError`), see the [IC Errors Reference](../ic/reference/errors.md).

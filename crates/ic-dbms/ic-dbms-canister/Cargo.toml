@@ -1,0 +1,39 @@
+[package]
+name = "ic-dbms-canister"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+repository = { workspace = true }
+documentation = "https://docs.rs/ic-dbms-canister/"
+description = "A framework to build Database canisters on the Internet Computer using DBMS, by just providing the schema."
+include = [
+  "examples/**/*",
+  "src/**/*",
+  "../../../LICENSE",
+  "README.md",
+  "../../../CHANGELOG.md",
+]
+readme = "README.md"
+
+[dependencies]
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+ic-dbms-api = { version = "0.6", path = "../ic-dbms-api" }
+ic-dbms-macros = { version = "0.6", path = "../ic-dbms-macros" }
+wasm-dbms-memory = { version = "0.6", path = "../../wasm-dbms/wasm-dbms-memory" }
+serde = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "read_table"
+harness = false
+
+[[bench]]
+name = "eager_relation"
+harness = false

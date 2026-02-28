@@ -1,0 +1,20 @@
+[package]
+name = "example"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+description = "Example ic-dbms-canister instance."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+ic-dbms-api = { version = "0.6", path = "../ic-dbms-api" }
+ic-dbms-canister = { version = "0.6", path = "../ic-dbms-canister" }
+serde = { workspace = true }

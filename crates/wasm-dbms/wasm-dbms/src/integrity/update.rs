@@ -1,0 +1,90 @@
+// Rust guideline compliant 2026-02-28
+
+//! Integrity validator for update operations.
+
+use wasm_dbms_api::prelude::{
+    ColumnDef, Database as _, DbmsError, DbmsResult, Filter, Query, QueryError, TableSchema,
+    Value,
+};
+use wasm_dbms_memory::prelude::MemoryProvider;
+
+use super::common;
+use crate::database::WasmDbmsDatabase;
+
+/// Integrity validator for update operations.
+///
+/// Unlike [`super::InsertIntegrityValidator`], this validator allows the
+/// primary key to remain unchanged during an update.
+pub struct UpdateIntegrityValidator<'a, T, M>
+where
+    T: TableSchema,
+    M: MemoryProvider,
+{
+    database: &'a WasmDbmsDatabase<'a, M>,
+    /// The current primary key value of the record being updated.
+    old_pk: Value,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<'a, T, M> UpdateIntegrityValidator<'a, T, M>
+where
+    T: TableSchema,
+    M: MemoryProvider,
+{
+    /// Creates a new update integrity validator.
+    pub fn new(dbms: &'a WasmDbmsDatabase<'a, M>, old_pk: Value) -> Self {
+        Self {
+            database: dbms,
+            old_pk,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T, M> UpdateIntegrityValidator<'_, T, M>
+where
+    T: TableSchema,
+    M: MemoryProvider,
+{
+    /// Verifies whether the given updated record values are valid.
+    pub fn validate(&self, record_values: &[(ColumnDef, Value)]) -> DbmsResult<()> {
+        for (col, value) in record_values {
+            common::check_column_validate::<T>(col, value)?;
+        }
+        self.check_primary_key_conflict(record_values)?;
+        common::check_foreign_keys::<T>(self.database, record_values)?;
+        common::check_non_nullable_fields::<T>(record_values)?;
+
+        Ok(())
+    }
+
+    /// Checks for primary key conflicts with *other* records.
+    fn check_primary_key_conflict(&self, record_values: &[(ColumnDef, Value)]) -> DbmsResult<()> {
+        let pk_name = T::primary_key();
+        let new_pk = record_values
+            .iter()
+            .find(|(col_def, _)| col_def.name == pk_name)
+            .map(|(_, value)| value.clone())
+            .ok_or(DbmsError::Query(QueryError::MissingNonNullableField(
+                pk_name.to_string(),
+            )))?;
+
+        let query = Query::builder()
+            .field(pk_name)
+            .and_where(Filter::Eq(pk_name.to_string(), new_pk.clone()))
+            .build();
+
+        let res = self.database.select::<T>(query)?;
+        match res.len() {
+            0 => Ok(()),
+            1 => {
+                if new_pk == self.old_pk {
+                    Ok(())
+                } else {
+                    Err(DbmsError::Query(QueryError::PrimaryKeyConflict))
+                }
+            }
+            _ => Err(DbmsError::Query(QueryError::PrimaryKeyConflict)),
+        }
+    }
+}

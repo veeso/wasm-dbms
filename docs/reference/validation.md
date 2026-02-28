@@ -32,7 +32,7 @@ Validators enforce constraints on data being inserted or updated. If validation 
 The `#[validate(...)]` attribute adds validation rules to fields:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
 #[derive(Table, ...)]
 #[table = "users"]
@@ -54,7 +54,7 @@ pub struct User {
 
 ## Built-in Validators
 
-All validators are available in `ic_dbms_api::prelude`.
+All validators are available in `wasm_dbms_api::prelude`.
 
 ### String Length Validators
 
@@ -162,21 +162,21 @@ pub country: Text,  // e.g., "US", "GB", "DE"
 Create a struct implementing the `Validate` trait:
 
 ```rust
-use ic_dbms_api::prelude::{Validate, Value, IcDbmsResult, IcDbmsError};
+use wasm_dbms_api::prelude::{Validate, Value, DbmsResult, DbmsError};
 
 /// Validates that a number is positive
 pub struct PositiveValidator;
 
 impl Validate for PositiveValidator {
-    fn validate(&self, value: &Value) -> IcDbmsResult<()> {
+    fn validate(&self, value: &Value) -> DbmsResult<()> {
         match value {
             Value::Int32(n) if n.0 > 0 => Ok(()),
             Value::Int64(n) if n.0 > 0 => Ok(()),
             Value::Decimal(d) if d.0 > rust_decimal::Decimal::ZERO => Ok(()),
             Value::Int32(_) | Value::Int64(_) | Value::Decimal(_) => {
-                Err(IcDbmsError::Validation("Value must be positive".to_string()))
+                Err(DbmsError::Validation("Value must be positive".to_string()))
             }
-            _ => Err(IcDbmsError::Validation("PositiveValidator only applies to numeric types".to_string()))
+            _ => Err(DbmsError::Validation("PositiveValidator only applies to numeric types".to_string()))
         }
     }
 }
@@ -199,14 +199,14 @@ pub struct Product {
 pub struct RegexValidator(pub &'static str);
 
 impl Validate for RegexValidator {
-    fn validate(&self, value: &Value) -> IcDbmsResult<()> {
+    fn validate(&self, value: &Value) -> DbmsResult<()> {
         if let Value::Text(text) = value {
             let re = regex::Regex::new(self.0).unwrap();
             if re.is_match(text.as_str()) {
                 return Ok(());
             }
         }
-        Err(IcDbmsError::Validation(
+        Err(DbmsError::Validation(
             format!("Value does not match pattern: {}", self.0)
         ))
     }
@@ -227,17 +227,17 @@ pub struct RangeValidator {
 }
 
 impl Validate for RangeValidator {
-    fn validate(&self, value: &Value) -> IcDbmsResult<()> {
+    fn validate(&self, value: &Value) -> DbmsResult<()> {
         let num = match value {
             Value::Int32(n) => n.0 as i64,
             Value::Int64(n) => n.0,
-            _ => return Err(IcDbmsError::Validation("RangeValidator requires integer".to_string())),
+            _ => return Err(DbmsError::Validation("RangeValidator requires integer".to_string())),
         };
 
         if num >= self.min && num <= self.max {
             Ok(())
         } else {
-            Err(IcDbmsError::Validation(
+            Err(DbmsError::Validation(
                 format!("Value must be between {} and {}", self.min, self.max)
             ))
         }
@@ -253,14 +253,14 @@ pub percentage: Int32,
 
 ## Validation Errors
 
-When validation fails, an `IcDbmsError::Validation(String)` is returned:
+When validation fails, a `DbmsError::Validation(String)` is returned:
 
 ```rust
-let result = client.insert::<User>(User::table_name(), user, None).await?;
+let result = database.insert::<User>(user);
 
 match result {
     Ok(()) => println!("Insert successful"),
-    Err(IcDbmsError::Validation(msg)) => {
+    Err(DbmsError::Validation(msg)) => {
         println!("Validation failed: {}", msg);
         // e.g., "Invalid email format"
         // e.g., "String length exceeds maximum of 100"
@@ -276,7 +276,7 @@ match result {
 **Comprehensive user validation:**
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -308,7 +308,7 @@ pub struct User {
 **Product validation:**
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "products"]
 pub struct Product {
     #[primary_key]
@@ -334,7 +334,7 @@ pub struct Product {
 **Combined with sanitizers:**
 
 ```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "articles"]
 pub struct Article {
     #[primary_key]

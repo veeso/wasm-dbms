@@ -32,9 +32,9 @@ The `Json` data type allows you to store and query semi-structured JSON data wit
 To use JSON in your schema, use the `Json` type:
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -53,7 +53,7 @@ pub struct User {
 
 ```rust
 use std::str::FromStr;
-use ic_dbms_api::prelude::Json;
+use wasm_dbms_api::prelude::Json;
 
 let json = Json::from_str(r#"{"name": "Alice", "age": 30}"#).unwrap();
 ```
@@ -62,7 +62,7 @@ let json = Json::from_str(r#"{"name": "Alice", "age": 30}"#).unwrap();
 
 ```rust
 use serde_json::json;
-use ic_dbms_api::prelude::Json;
+use wasm_dbms_api::prelude::Json;
 
 let json: Json = json!({
     "name": "Alice",
@@ -96,7 +96,7 @@ let user = UserInsertRequest {
 
 ## JSON Filtering
 
-ic-dbms provides powerful JSON filtering through the `JsonFilter` enum:
+wasm-dbms provides powerful JSON filtering through the `JsonFilter` enum:
 
 - **Contains**: Check if JSON contains a pattern (structural containment)
 - **Extract**: Extract value at path and compare
@@ -141,7 +141,7 @@ Checks if the JSON column contains a specified pattern. Implements PostgreSQL `@
 - **Primitives**: Must be equal
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 use std::str::FromStr;
 
 // Filter where metadata contains {"active": true}
@@ -295,10 +295,10 @@ JsonFilter::extract_eq("name", Value::Text("Alice".into()))
 ## Complete Example
 
 ```rust
-use ic_dbms_api::prelude::*;
+use wasm_dbms_api::prelude::*;
 use std::str::FromStr;
 
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "products"]
 pub struct Product {
     #[primary_key]
@@ -307,30 +307,30 @@ pub struct Product {
     pub attributes: Json,  // {"color": "red", "size": "M", "tags": ["sale", "new"], "price": 29.99}
 }
 
-async fn example_queries(client: &impl Client) -> Result<(), Box<dyn std::error::Error>> {
+fn example_queries(database: &impl Database) -> Result<(), Box<dyn std::error::Error>> {
     // Find all red products
     let filter = Filter::json("attributes",
         JsonFilter::extract_eq("color", Value::Text("red".into()))
     );
     let query = Query::builder().filter(filter).build();
-    let red_products = client.select::<Product>(Product::table_name(), query, None).await??;
+    let red_products = database.select::<Product>(query)?;
 
     // Find products with "sale" tag
     let pattern = Json::from_str(r#"{"tags": ["sale"]}"#)?;
     let filter = Filter::json("attributes", JsonFilter::contains(pattern));
     let query = Query::builder().filter(filter).build();
-    let sale_products = client.select::<Product>(Product::table_name(), query, None).await??;
+    let sale_products = database.select::<Product>(query)?;
 
     // Find products with size attribute
     let filter = Filter::json("attributes", JsonFilter::has_key("size"));
     let query = Query::builder().filter(filter).build();
-    let sized_products = client.select::<Product>(Product::table_name(), query, None).await??;
+    let sized_products = database.select::<Product>(query)?;
 
     // Find red products with price > 20
     let filter = Filter::json("attributes", JsonFilter::extract_eq("color", Value::Text("red".into())))
         .and(Filter::json("attributes", JsonFilter::extract_gt("price", Value::Decimal(20.0.into()))));
     let query = Query::builder().filter(filter).build();
-    let expensive_red = client.select::<Product>(Product::table_name(), query, None).await??;
+    let expensive_red = database.select::<Product>(query)?;
 
     // Find products in specific sizes
     let filter = Filter::json("attributes",
@@ -341,7 +341,7 @@ async fn example_queries(client: &impl Client) -> Result<(), Box<dyn std::error:
         ])
     );
     let query = Query::builder().filter(filter).build();
-    let standard_sizes = client.select::<Product>(Product::table_name(), query, None).await??;
+    let standard_sizes = database.select::<Product>(query)?;
 
     Ok(())
 }
@@ -370,13 +370,12 @@ let filter = Filter::json("metadata", JsonFilter::has_key("user."));  // Trailin
 // Non-JSON column - will error
 let filter = Filter::json("name", JsonFilter::has_key("field"));  // "name" is Text, not Json
 
-let result = client.select::<User>(User::table_name(),
+let result = database.select::<User>(
     Query::builder().filter(filter).build(),
-    None
-).await?;
+);
 
 match result {
-    Err(IcDbmsError::Query(QueryError::InvalidQuery)) => {
+    Err(DbmsError::Query(QueryError::InvalidQuery)) => {
         println!("Invalid JSON filter");
     }
     _ => {}

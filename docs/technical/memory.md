@@ -22,11 +22,11 @@
 
 ## Overview
 
-This document provides the technical details of memory management in ic-dbms, also known as Layer 0 (the Memory Layer). Understanding this layer is useful for:
+This document provides the technical details of memory management in wasm-dbms, also known as Layer 0 (the Memory Layer). Understanding this layer is useful for:
 
 - Performance optimization
 - Debugging memory issues
-- Contributing to ic-dbms
+- Contributing to wasm-dbms
 - Understanding storage costs
 
 ---
@@ -40,7 +40,7 @@ On the Internet Computer, canisters have access to stable memory that persists a
 - **Persistent**: Survives canister upgrades
 - **Limited**: Subject to subnet memory limits
 
-ic-dbms uses stable memory directly (not the heap) to ensure data persistence.
+wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 
 ---
 

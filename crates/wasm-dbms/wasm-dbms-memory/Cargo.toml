@@ -1,0 +1,18 @@
+[package]
+name = "wasm-dbms-memory"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+description = "Memory abstraction and page management for the wasm-dbms framework"
+license = { workspace = true }
+repository = { workspace = true }
+readme = "README.md"
+categories = ["database", "wasm"]
+keywords = ["database", "wasm", "memory"]
+
+[dependencies]
+wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.6.0" }
+
+[dev-dependencies]
+candid = { workspace = true }
+serde = { workspace = true }

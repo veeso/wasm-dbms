@@ -1,0 +1,29 @@
+[package]
+name = "wasm-dbms-macros"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+keywords = ["wasm", "dbms", "database", "macros"]
+categories = ["database", "wasm"]
+repository = { workspace = true }
+documentation = "https://docs.rs/wasm-dbms-macros/"
+description = "Runtime-agnostic procedural macros for the wasm-dbms DBMS engine."
+include = [
+  "src/**/*",
+  "../../LICENSE",
+  "README.md",
+  "../../CHANGELOG.md",
+]
+readme = "README.md"
+
+[lib]
+name = "wasm_dbms_macros"
+path = "src/lib.rs"
+proc-macro = true
+
+[dependencies]
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["full"] }

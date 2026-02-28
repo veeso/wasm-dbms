@@ -1,22 +1,26 @@
 [workspace]
 members = [
-  "example",
-  "crates/ic-dbms-api",
-  "crates/ic-dbms-canister",
-  "crates/ic-dbms-client",
-  "crates/ic-dbms-macros",
-  "integration-tests/dbms-canister-client-integration",
-  "integration-tests/pocket-ic-tests",
-  "integration-tests/pocket-ic-tests-macro",
+  "crates/ic-dbms/example",
+  "crates/ic-dbms/ic-dbms-api",
+  "crates/ic-dbms/ic-dbms-canister",
+  "crates/ic-dbms/ic-dbms-client",
+  "crates/ic-dbms/ic-dbms-macros",
+  "crates/wasm-dbms/wasm-dbms-api",
+  "crates/wasm-dbms/wasm-dbms-memory",
+  "crates/wasm-dbms/wasm-dbms",
+  "crates/wasm-dbms/wasm-dbms-macros",
+  "crates/ic-dbms/integration-tests/dbms-canister-client-integration",
+  "crates/ic-dbms/integration-tests/pocket-ic-tests",
+  "crates/ic-dbms/integration-tests/pocket-ic-tests-macro",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.85.1"
 authors = ["Christian Visintin <christian.visintin@veeso.dev>"]
-repository = "https://github.com/veeso/ic-dbms"
+repository = "https://github.com/veeso/wasm-dbms"
 license = "MIT"
 keywords = ["ic", "dbms", "canister", "database", "async"]
 categories = ["database", "network-programming", "wasm"]
@@ -34,7 +38,7 @@ pocket-ic = "12"
 proc-macro2 = "1"
 quote = "1"
 rust_decimal = "1"
-serde = "1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 syn = "2"
 thiserror = "2"
