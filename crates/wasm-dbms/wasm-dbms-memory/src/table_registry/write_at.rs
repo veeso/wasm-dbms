@@ -1,7 +1,8 @@
 // Rust guideline compliant 2026-02-28
 
-use super::free_segments_ledger::FreeSegmentTicket;
 use wasm_dbms_api::prelude::{Page, PageOffset};
+
+use super::free_segments_ledger::FreeSegmentTicket;
 
 /// Indicates where to write a record
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -32,8 +33,8 @@ impl WriteAt {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::free_segments_ledger::FreeSegment;
+    use super::*;
 
     #[test]
     fn test_write_at_free_segment() {

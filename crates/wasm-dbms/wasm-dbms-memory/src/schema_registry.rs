@@ -2,8 +2,10 @@
 
 use std::collections::HashMap;
 
-use wasm_dbms_api::prelude::{DEFAULT_ALIGNMENT, TableFingerprint, TableSchema};
-use wasm_dbms_api::prelude::{DataSize, Encode, MSize, MemoryResult, Page, PageOffset};
+use wasm_dbms_api::prelude::{
+    DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, Page, PageOffset, TableFingerprint,
+    TableSchema,
+};
 
 use crate::{MemoryManager, MemoryProvider};
 
@@ -139,11 +141,11 @@ impl Encode for SchemaRegistry {
 mod tests {
 
     use candid::CandidType;
+    use serde::{Deserialize, Serialize};
     use wasm_dbms_api::prelude::{
         ColumnDef, DbmsResult, InsertRecord, NoForeignFetcher, TableColumns, TableRecord,
         UpdateRecord,
     };
-    use serde::{Deserialize, Serialize};
 
     use super::*;
     use crate::HeapMemoryProvider;
@@ -157,8 +159,7 @@ mod tests {
         let mut mm = make_mm();
 
         // load
-        let mut registry =
-            SchemaRegistry::load(&mm).expect("failed to load init schema registry");
+        let mut registry = SchemaRegistry::load(&mm).expect("failed to load init schema registry");
 
         // register table
         let registry_page = registry

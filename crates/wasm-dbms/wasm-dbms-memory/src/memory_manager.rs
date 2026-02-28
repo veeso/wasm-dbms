@@ -2,7 +2,9 @@
 
 //! Memory manager for page-level memory operations.
 
-use wasm_dbms_api::prelude::{DataSize, Encode, MSize, MemoryError, MemoryResult, Page, PageOffset};
+use wasm_dbms_api::prelude::{
+    DataSize, Encode, MSize, MemoryError, MemoryResult, Page, PageOffset,
+};
 
 use crate::provider::MemoryProvider;
 
@@ -249,7 +251,9 @@ where
 mod tests {
     use std::borrow::Cow;
 
-    use wasm_dbms_api::prelude::{DEFAULT_ALIGNMENT, DataSize, MSize, MemoryError, MemoryResult, PageOffset, Text};
+    use wasm_dbms_api::prelude::{
+        DEFAULT_ALIGNMENT, DataSize, MSize, MemoryError, MemoryResult, PageOffset, Text,
+    };
 
     use super::*;
     use crate::provider::HeapMemoryProvider;
@@ -437,9 +441,7 @@ mod tests {
     fn test_should_allocate_new_page() {
         let mut mm = make_mm();
         let initial_last_page = mm.last_page().unwrap();
-        let new_page = mm
-            .allocate_page()
-            .expect("Failed to allocate new page");
+        let new_page = mm.allocate_page().expect("Failed to allocate new page");
         assert_eq!(new_page, initial_last_page + 1);
         let updated_last_page = mm.last_page().unwrap();
         assert_eq!(updated_last_page, new_page);

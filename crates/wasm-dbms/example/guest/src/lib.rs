@@ -63,8 +63,12 @@ fn wit_value_to_dbms(v: wit::Value) -> Value {
         wit::Value::I16Val(n) => Value::Int16(t::Int16(n)),
         wit::Value::I32Val(n) => Value::Int32(t::Int32(n)),
         wit::Value::I64Val(n) => Value::Int64(t::Int64(n)),
-        wit::Value::F32Val(f) => Value::Decimal(t::Decimal(rust_decimal::Decimal::try_from(f).unwrap_or_default())),
-        wit::Value::F64Val(f) => Value::Decimal(t::Decimal(rust_decimal::Decimal::try_from(f).unwrap_or_default())),
+        wit::Value::F32Val(f) => Value::Decimal(t::Decimal(
+            rust_decimal::Decimal::try_from(f).unwrap_or_default(),
+        )),
+        wit::Value::F64Val(f) => Value::Decimal(t::Decimal(
+            rust_decimal::Decimal::try_from(f).unwrap_or_default(),
+        )),
         wit::Value::TextVal(s) => Value::Text(t::Text(s)),
         wit::Value::BlobVal(b) => Value::Blob(t::Blob(b)),
         wit::Value::NullVal => Value::Null,
@@ -204,10 +208,7 @@ struct GuestDbms;
 export!(GuestDbms);
 
 impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
-    fn select(
-        table: String,
-        query: wit::Query,
-    ) -> Result<Vec<wit::Row>, wit::DbmsError> {
+    fn select(table: String, query: wit::Query) -> Result<Vec<wit::Row>, wit::DbmsError> {
         let query = wit_query_to_dbms(query);
         with_dbms(|ctx| {
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
@@ -224,13 +225,11 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     ) -> Result<(), wit::DbmsError> {
         let named_values = wit_row_to_named_values(values);
         with_dbms(|ctx| {
-            let col_values =
-                match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
+            let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
             let table_name = leak_str(&table);
 
             if let Some(tx_id) = tx {
-                let db =
-                    WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
+                let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
                 ExampleDatabaseSchema
                     .insert(&db, table_name, &col_values)
                     .map_err(dbms_error_to_wit)
@@ -250,13 +249,11 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     ) -> Result<u64, wit::DbmsError> {
         let named_values = wit_row_to_named_values(values);
         with_dbms(|ctx| {
-            let col_values =
-                match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
+            let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
             let table_name = leak_str(&table);
 
             if let Some(tx_id) = tx {
-                let db =
-                    WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
+                let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
                 ExampleDatabaseSchema
                     .update(&db, table_name, &col_values, None)
                     .map_err(dbms_error_to_wit)
@@ -279,8 +276,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
             let table_name = leak_str(&table);
 
             if let Some(tx_id) = tx {
-                let db =
-                    WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
+                let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
                 ExampleDatabaseSchema
                     .delete(&db, table_name, DeleteBehavior::Restrict, filter)
                     .map_err(dbms_error_to_wit)

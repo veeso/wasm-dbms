@@ -29,9 +29,7 @@ pub const USERS_FIXTURES: &[&str] = &[
 pub fn load_fixtures() {
     // register tables
     let user_pages = SCHEMA_REGISTRY
-        .with_borrow_mut(|sr| {
-            MEMORY_MANAGER.with_borrow_mut(|mm| sr.register_table::<User>(mm))
-        })
+        .with_borrow_mut(|sr| MEMORY_MANAGER.with_borrow_mut(|mm| sr.register_table::<User>(mm)))
         .expect("failed to register `User` table");
 
     MEMORY_MANAGER.with_borrow_mut(|mm| {

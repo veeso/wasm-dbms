@@ -1,6 +1,8 @@
 // Rust guideline compliant 2026-02-28
 
-use wasm_dbms_api::prelude::{DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult, PageOffset};
+use wasm_dbms_api::prelude::{
+    DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult, PageOffset,
+};
 
 /// Each record is prefixed with its length encoded in 2 bytes.
 pub const RAW_RECORD_HEADER_SIZE: MSize = 2;

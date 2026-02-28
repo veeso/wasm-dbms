@@ -92,9 +92,7 @@ pub const POSTS_FIXTURES: &[(&str, &str, u32)] = &[
 pub fn load_fixtures() {
     // register tables
     let posts_pages = SCHEMA_REGISTRY
-        .with_borrow_mut(|sr| {
-            MEMORY_MANAGER.with_borrow_mut(|mm| sr.register_table::<Post>(mm))
-        })
+        .with_borrow_mut(|sr| MEMORY_MANAGER.with_borrow_mut(|mm| sr.register_table::<Post>(mm)))
         .expect("failed to register `Post` table");
 
     MEMORY_MANAGER.with_borrow_mut(|mm| {

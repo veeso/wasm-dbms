@@ -4,9 +4,8 @@ use wasm_dbms_api::prelude::{
     DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, Page, PageOffset,
 };
 
-use crate::{MemoryManager, MemoryProvider};
-
 use super::FreeSegment;
+use crate::{MemoryManager, MemoryProvider};
 
 const TABLE_LEN_SIZE: MSize = 2;
 
@@ -231,9 +230,8 @@ impl Encode for FreeSegmentsList {
 #[cfg(test)]
 mod tests {
 
-    use crate::HeapMemoryProvider;
-
     use super::*;
+    use crate::HeapMemoryProvider;
 
     #[test]
     fn test_should_encode_and_decode_free_segments_table() {

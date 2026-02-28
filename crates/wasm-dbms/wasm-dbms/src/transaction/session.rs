@@ -49,10 +49,7 @@ impl TransactionSession {
     }
 
     /// Removes and returns the transaction (used during commit).
-    pub fn take_transaction(
-        &mut self,
-        transaction_id: &TransactionId,
-    ) -> DbmsResult<Transaction> {
+    pub fn take_transaction(&mut self, transaction_id: &TransactionId) -> DbmsResult<Transaction> {
         let transaction = self
             .transactions
             .remove(transaction_id)

@@ -7,9 +7,7 @@ use super::types;
 
 /// A generic wrapper enum to hold any DBMS value.
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Value {
     Blob(types::Blob),
     Boolean(types::Boolean),

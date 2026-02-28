@@ -11,17 +11,7 @@ use crate::memory::{DEFAULT_ALIGNMENT, DataSize, Encode, PageOffset};
 /// A nullable means that the type can either hold a value of type T or be null.
 /// It is a wrapper around another [`DataType`] T.
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 #[serde(bound(deserialize = "T: DataType"))]

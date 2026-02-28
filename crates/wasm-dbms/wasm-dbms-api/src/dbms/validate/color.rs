@@ -45,9 +45,8 @@ impl Validate for RgbColorValidator {
 #[cfg(test)]
 mod tests {
 
-    use crate::prelude::{Text, Value};
-
     use super::*;
+    use crate::prelude::{Text, Value};
 
     #[test]
     fn test_rgb_color_validator() {

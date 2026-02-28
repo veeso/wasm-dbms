@@ -2,9 +2,8 @@
 
 use wasm_dbms_api::prelude::{MemoryResult, Page};
 
-use crate::{MemoryManager, MemoryProvider};
-
 use super::FreeSegmentsTable;
+use crate::{MemoryManager, MemoryProvider};
 
 /// An iterator which yields all the [`FreeSegmentsTable`]s.
 pub struct TablesIter<'a, P>
@@ -53,9 +52,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::HeapMemoryProvider;
-
     use super::*;
+    use crate::HeapMemoryProvider;
 
     #[test]
     fn test_tables_iter_empty() {

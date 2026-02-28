@@ -28,15 +28,12 @@ pub const MESSAGES_FIXTURES: &[(&str, u32, u32)] = &[
 pub fn load_fixtures() {
     // register tables
     let messages_pages = SCHEMA_REGISTRY
-        .with_borrow_mut(|sr| {
-            MEMORY_MANAGER.with_borrow_mut(|mm| sr.register_table::<Message>(mm))
-        })
+        .with_borrow_mut(|sr| MEMORY_MANAGER.with_borrow_mut(|mm| sr.register_table::<Message>(mm)))
         .expect("failed to register `Message` table");
 
     MEMORY_MANAGER.with_borrow_mut(|mm| {
-        let mut messages_table: TableRegistry =
-            TableRegistry::load(messages_pages, mm)
-                .expect("failed to load `Message` table registry");
+        let mut messages_table: TableRegistry = TableRegistry::load(messages_pages, mm)
+            .expect("failed to load `Message` table registry");
 
         // insert messages
         for (id, (text, sender_id, recipient_id)) in MESSAGES_FIXTURES.iter().enumerate() {

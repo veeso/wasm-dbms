@@ -162,9 +162,7 @@ impl Validate for CamelCaseValidator {
 
         let mut chars = s.chars();
         let first_char = chars.next().ok_or_else(|| {
-            crate::prelude::DbmsError::Validation(
-                "Empty string is not valid CamelCase".to_string(),
-            )
+            crate::prelude::DbmsError::Validation("Empty string is not valid CamelCase".to_string())
         })?;
         if !first_char.is_uppercase() {
             return Err(crate::prelude::DbmsError::Validation(format!(
@@ -185,9 +183,8 @@ impl Validate for CamelCaseValidator {
 
 #[cfg(test)]
 mod tests {
-    use crate::prelude::{Text, Value};
-
     use super::*;
+    use crate::prelude::{Text, Value};
 
     #[test]
     fn test_snake_case_validator() {
@@ -202,15 +199,11 @@ mod tests {
         assert!(validator.validate(&value).is_err());
 
         // Invalid snake_case (special character)
-        let value = Value::Text(Text(
-            "invalid-snake-case!".to_string(),
-        ));
+        let value = Value::Text(Text("invalid-snake-case!".to_string()));
         assert!(validator.validate(&value).is_err());
 
         // Invalid snake_case (starts with digit)
-        let value = Value::Text(Text(
-            "1invalid_snake_case".to_string(),
-        ));
+        let value = Value::Text(Text("1invalid_snake_case".to_string()));
         assert!(validator.validate(&value).is_err());
 
         // Valid snake_case (starts with underscore)
@@ -238,9 +231,7 @@ mod tests {
         assert!(validator.validate(&value).is_err());
 
         // Invalid kebab-case (special character)
-        let value = Value::Text(Text(
-            "invalid-kebab-case!".to_string(),
-        ));
+        let value = Value::Text(Text("invalid-kebab-case!".to_string()));
         assert!(validator.validate(&value).is_err());
 
         // empty string
@@ -248,9 +239,7 @@ mod tests {
         assert!(validator.validate(&value).is_err());
 
         // Invalid kebab-case (starts with digit)
-        let value = Value::Text(Text(
-            "1invalid-kebab-case".to_string(),
-        ));
+        let value = Value::Text(Text("1invalid-kebab-case".to_string()));
         assert!(validator.validate(&value).is_err());
 
         let value = Value::Int32(123i32.into());

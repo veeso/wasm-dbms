@@ -1,7 +1,8 @@
 // Rust guideline compliant 2026-02-28
 
-use wasm_dbms_api::prelude::DEFAULT_ALIGNMENT;
-use wasm_dbms_api::prelude::{DataSize, Encode, MSize, MemoryResult, PageOffset};
+use wasm_dbms_api::prelude::{
+    DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, PageOffset,
+};
 
 use crate::{MemoryManager, MemoryProvider};
 

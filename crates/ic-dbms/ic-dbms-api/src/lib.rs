@@ -30,13 +30,11 @@
 extern crate self as ic_dbms_api;
 
 // Re-export generic modules from wasm-dbms-api for path compatibility.
-pub use wasm_dbms_api::dbms;
-pub use wasm_dbms_api::memory;
-pub use wasm_dbms_api::utils;
+pub use wasm_dbms_api::{dbms, memory, utils};
 
 mod error;
 mod init;
-mod principal;
 pub mod prelude;
+mod principal;
 #[cfg(test)]
 mod tests;

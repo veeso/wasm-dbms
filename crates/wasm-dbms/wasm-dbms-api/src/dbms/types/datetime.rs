@@ -9,17 +9,7 @@ const TYPE_SIZE: usize = 2 + 1 + 1 + 1 + 1 + 1 + 4 + 2; // year + month + day + 
 
 /// Date time data type for the DBMS.
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 pub struct DateTime {

@@ -84,10 +84,7 @@ fn select_eq(column: &str, value: &str) -> Query {
 /// Pretty-prints a list of result rows.
 fn print_rows(rows: &[Vec<ColumnValue>]) {
     for row in rows {
-        let fields = row
-            .iter()
-            .map(format_column_value)
-            .collect::<Vec<String>>();
+        let fields = row.iter().map(format_column_value).collect::<Vec<String>>();
         println!("  {{ {} }}", fields.join(", "));
     }
 }
@@ -223,20 +220,14 @@ fn main() -> Result<()> {
     // ── Select posts filtered by user=1 ─────────────────────────────
     println!("--- Select posts where user = 1 ---");
     let rows = db
-        .call_select(
-            &mut store,
-            "posts",
-            &select_eq("user", r#"{"Uint32":1}"#),
-        )?
+        .call_select(&mut store, "posts", &select_eq("user", r#"{"Uint32":1}"#))?
         .map_err(dbms_err)?;
     print_rows(&rows);
     println!();
 
     // ── Transaction: commit ─────────────────────────────────────────
     println!("--- Transaction: commit (insert user 4 Diana) ---");
-    let tx = db
-        .call_begin_transaction(&mut store)?
-        .map_err(dbms_err)?;
+    let tx = db.call_begin_transaction(&mut store)?.map_err(dbms_err)?;
     println!("  Transaction started: tx={tx}");
 
     let diana_row = vec![
@@ -253,11 +244,7 @@ fn main() -> Result<()> {
 
     // Verify Diana exists.
     let rows = db
-        .call_select(
-            &mut store,
-            "users",
-            &select_eq("id", r#"{"Uint32":4}"#),
-        )?
+        .call_select(&mut store, "users", &select_eq("id", r#"{"Uint32":4}"#))?
         .map_err(dbms_err)?;
     assert!(!rows.is_empty(), "Diana should exist after commit");
     println!("  Verified: Diana exists after commit.");
@@ -266,9 +253,7 @@ fn main() -> Result<()> {
 
     // ── Transaction: rollback ───────────────────────────────────────
     println!("--- Transaction: rollback (insert user 5 Eve) ---");
-    let tx = db
-        .call_begin_transaction(&mut store)?
-        .map_err(dbms_err)?;
+    let tx = db.call_begin_transaction(&mut store)?.map_err(dbms_err)?;
     println!("  Transaction started: tx={tx}");
 
     let eve_row = vec![
@@ -285,11 +270,7 @@ fn main() -> Result<()> {
 
     // Verify Eve does NOT exist.
     let rows = db
-        .call_select(
-            &mut store,
-            "users",
-            &select_eq("id", r#"{"Uint32":5}"#),
-        )?
+        .call_select(&mut store, "users", &select_eq("id", r#"{"Uint32":5}"#))?
         .map_err(dbms_err)?;
     assert!(rows.is_empty(), "Eve should NOT exist after rollback");
     println!("  Verified: Eve does NOT exist after rollback.");

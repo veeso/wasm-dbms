@@ -2,7 +2,9 @@
 
 use std::marker::PhantomData;
 
-use wasm_dbms_api::prelude::{DecodeError, Encode, MSize, MemoryError, MemoryResult, Page, PageOffset};
+use wasm_dbms_api::prelude::{
+    DecodeError, Encode, MSize, MemoryError, MemoryResult, Page, PageOffset,
+};
 
 use super::page_ledger::PageLedger;
 use super::raw_record::{RAW_RECORD_HEADER_SIZE, RawRecord};
@@ -124,8 +126,7 @@ where
                 std::cmp::min(self.page_size, page_size as usize).saturating_sub(offset as usize);
             // if offset is zero, read page; otherwise, just reuse buffer
             if offset == 0 {
-                self.mm
-                    .read_at_raw(page, 0, &mut self.buffer[..read_len])?;
+                self.mm.read_at_raw(page, 0, &mut self.buffer[..read_len])?;
             }
 
             // find next record in buffer; if found, return it
@@ -225,8 +226,8 @@ where
 mod tests {
 
     use super::*;
-    use crate::{HeapMemoryProvider, TableRegistry, TableRegistryPage};
     use crate::table_registry::test_utils::User;
+    use crate::{HeapMemoryProvider, TableRegistry, TableRegistryPage};
 
     #[test]
     fn test_should_read_all_records() {

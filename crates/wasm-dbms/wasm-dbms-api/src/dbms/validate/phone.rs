@@ -1,5 +1,6 @@
-use crate::prelude::{Validate, Value};
 use lazy_regex::{Lazy, Regex, lazy_regex};
+
+use crate::prelude::{Validate, Value};
 
 static PHONE_REGEX: Lazy<Regex> = lazy_regex!(r"^\+?[0-9\s().-]{7,20}$");
 

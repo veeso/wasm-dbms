@@ -177,9 +177,7 @@ mod test {
         use crate::dbms::value::Value;
         use crate::memory::{self, DataSize, MSize, MemoryResult, PageOffset};
 
-        #[derive(
-            Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-        )]
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub enum TestStatus {
             Active,
             Inactive,

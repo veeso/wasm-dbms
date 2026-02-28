@@ -6,9 +6,7 @@ use crate::dbms::types::DataType;
 use crate::memory::{DEFAULT_ALIGNMENT, DataSize, Encode, PageOffset};
 
 /// Blob data type for the DBMS.
-#[derive(
-    Clone, Debug, PartialEq, Default, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Clone, Debug, PartialEq, Default, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 pub struct Blob(pub Vec<u8>);
 
