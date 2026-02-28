@@ -1,0 +1,63 @@
+package wasm-dbms:dbms;
+
+interface types {
+    variant value {
+        bool-val(bool),
+        u8-val(u8),
+        u16-val(u16),
+        u32-val(u32),
+        u64-val(u64),
+        i8-val(s8),
+        i16-val(s16),
+        i32-val(s32),
+        i64-val(s64),
+        f32-val(f32),
+        f64-val(f64),
+        text-val(string),
+        blob-val(list<u8>),
+        null-val,
+    }
+
+    record column-value {
+        name: string,
+        value: value,
+    }
+    type row = list<column-value>;
+
+    record query {
+        filter: option<string>,
+        order-by: option<string>,
+        order-dir: option<order-direction>,
+        limit: option<u64>,
+        offset: option<u64>,
+    }
+    enum order-direction { asc, desc }
+
+    type transaction-id = u64;
+
+    variant dbms-error {
+        table-not-found(string),
+        validation-error(string),
+        integrity-error(string),
+        transaction-error(string),
+        memory-error(string),
+        io-error(string),
+    }
+}
+
+interface database {
+    use types.{row, query, transaction-id, dbms-error};
+
+    select: func(table: string, query: query) -> result<list<row>, dbms-error>;
+    insert: func(table: string, values: row, tx: option<transaction-id>) -> result<_, dbms-error>;
+    update: func(table: string, values: row, tx: option<transaction-id>) -> result<u64, dbms-error>;
+    delete: func(table: string, filter: option<string>, tx: option<transaction-id>) -> result<u64, dbms-error>;
+
+    begin-transaction: func() -> result<transaction-id, dbms-error>;
+    commit: func(tx: transaction-id) -> result<_, dbms-error>;
+    rollback: func(tx: transaction-id) -> result<_, dbms-error>;
+}
+
+world dbms {
+    export database;
+}
