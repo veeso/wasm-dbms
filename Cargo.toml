@@ -10,6 +10,7 @@ members = [
   "crates/wasm-dbms/wasm-dbms",
   "crates/wasm-dbms/wasm-dbms-macros",
   "crates/wasm-dbms/example/guest",
+  "crates/wasm-dbms/example/host",
   "crates/ic-dbms/integration-tests/dbms-canister-client-integration",
   "crates/ic-dbms/integration-tests/pocket-ic-tests",
   "crates/ic-dbms/integration-tests/pocket-ic-tests-macro",

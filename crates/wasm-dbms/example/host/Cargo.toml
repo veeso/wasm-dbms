@@ -1,0 +1,18 @@
+[package]
+name = "wasm-dbms-example-host"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+description = "Wasmtime host for wasm-dbms WIT Component Model example"
+publish = false
+
+[[bin]]
+name = "wasm-dbms-example"
+path = "src/main.rs"
+
+[dependencies]
+wasmtime = { version = "42", features = ["component-model"] }
+wasmtime-wasi = "42"
