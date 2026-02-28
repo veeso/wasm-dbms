@@ -86,7 +86,7 @@ fn print_rows(rows: &[Vec<ColumnValue>]) {
     for row in rows {
         let fields = row
             .iter()
-            .map(|cv| format_column_value(cv))
+            .map(format_column_value)
             .collect::<Vec<String>>();
         println!("  {{ {} }}", fields.join(", "));
     }

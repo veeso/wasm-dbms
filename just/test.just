@@ -4,8 +4,8 @@ test_all: test integration_test test_wasm_dbms_example
 
 [group('test')]
 test test_name="":
-  cargo test --lib {{test_name}}
-  cargo test --doc
+  cargo test --lib {{test_name}} --workspace --exclude wasm-dbms-example-guest
+  cargo test --doc --workspace --exclude wasm-dbms-example-guest
 
 # Run only wasm-dbms crate tests (fast feedback loop for generic development)
 [group('test')]
