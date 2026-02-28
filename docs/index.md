@@ -31,6 +31,7 @@ Step-by-step guides for building databases with wasm-dbms:
 - [Transactions](./guides/transactions.md) - ACID transactions with commit/rollback
 - [Relationships](./guides/relationships.md) - Foreign keys, delete behaviors, and eager loading
 - [Custom Data Types](./guides/custom-data-types.md) - Define your own data types (enums, structs)
+- [Wasmtime Example](./guides/wasmtime-example.md) - Using wasm-dbms with the WIT Component Model and Wasmtime
 
 ### Reference
 
