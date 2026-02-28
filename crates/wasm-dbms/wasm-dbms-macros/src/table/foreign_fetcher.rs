@@ -41,7 +41,7 @@ fn impl_fetch(metadata: &TableMetadata) -> TokenStream2 {
                 let record = match results.pop() {
                     Some(record) => record,
                     None => {
-                        return Err(::wasm_dbms_api::prelude::IcDbmsError::Query(::wasm_dbms_api::prelude::QueryError::BrokenForeignKeyReference {
+                        return Err(::wasm_dbms_api::prelude::DbmsError::Query(::wasm_dbms_api::prelude::QueryError::BrokenForeignKeyReference {
                             table: #table_name.to_string(),
                             key: pk_value,
                         }));
@@ -68,13 +68,13 @@ fn impl_fetch(metadata: &TableMetadata) -> TokenStream2 {
             table: &str,
             local_column: &'static str,
             pk_value: ::wasm_dbms_api::prelude::Value,
-        ) -> wasm_dbms_api::prelude::IcDbmsResult<::wasm_dbms_api::prelude::TableColumns> {
+        ) -> wasm_dbms_api::prelude::DbmsResult<::wasm_dbms_api::prelude::TableColumns> {
             use ::wasm_dbms_api::prelude::TableSchema as _;
             use ::wasm_dbms_api::prelude::TableRecord as _;
 
             match table {
                 #(#match_arms)*
-                _ => Err(wasm_dbms_api::prelude::IcDbmsError::Query(wasm_dbms_api::prelude::QueryError::InvalidQuery(format!(
+                _ => Err(wasm_dbms_api::prelude::DbmsError::Query(wasm_dbms_api::prelude::QueryError::InvalidQuery(format!(
                     "ForeignFetcher: unknown table '{table}' for {table_name} foreign fetcher",
                     table_name = #table_name
                 )))),
@@ -128,7 +128,7 @@ fn impl_fetch_batch(metadata: &TableMetadata) -> TokenStream2 {
             database: &impl ::wasm_dbms_api::prelude::Database,
             table: &str,
             pk_values: &[::wasm_dbms_api::prelude::Value],
-        ) -> wasm_dbms_api::prelude::IcDbmsResult<
+        ) -> wasm_dbms_api::prelude::DbmsResult<
             ::std::collections::HashMap<::wasm_dbms_api::prelude::Value, Vec<(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)>>
         > {
             use ::wasm_dbms_api::prelude::TableSchema as _;
@@ -136,7 +136,7 @@ fn impl_fetch_batch(metadata: &TableMetadata) -> TokenStream2 {
 
             match table {
                 #(#match_arms)*
-                _ => Err(wasm_dbms_api::prelude::IcDbmsError::Query(wasm_dbms_api::prelude::QueryError::InvalidQuery(format!(
+                _ => Err(wasm_dbms_api::prelude::DbmsError::Query(wasm_dbms_api::prelude::QueryError::InvalidQuery(format!(
                     "ForeignFetcher: unknown table '{table}' for {table_name} foreign fetcher",
                     table_name = #table_name
                 )))),

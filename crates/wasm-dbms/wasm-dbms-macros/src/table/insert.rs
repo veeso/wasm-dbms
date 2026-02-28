@@ -47,7 +47,7 @@ fn generate_insert_request_struct(metadata: &TableMetadata) -> TokenStream2 {
     let insert_request_ident = &metadata.insert;
 
     quote::quote! {
-        #[derive(Clone, candid::CandidType, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone)]
         pub struct #insert_request_ident {
             #(#fields)*
         }
@@ -219,7 +219,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             })
         } else {
             struct_fields.push(quote::quote! {
-                #name: #name.ok_or(::wasm_dbms_api::prelude::IcDbmsError::Query(::wasm_dbms_api::prelude::QueryError::MissingNonNullableField(
+                #name: #name.ok_or(::wasm_dbms_api::prelude::DbmsError::Query(::wasm_dbms_api::prelude::QueryError::MissingNonNullableField(
                     #name_str.to_string(),
                 )))?,
             })
@@ -228,7 +228,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
 
     quote::quote! {
         #[allow(clippy::copy_clone)]
-        fn from_values(values: &[(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)]) -> ::wasm_dbms_api::prelude::IcDbmsResult<Self> {
+        fn from_values(values: &[(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)]) -> ::wasm_dbms_api::prelude::DbmsResult<Self> {
             #(#declare_lets)*
 
             for (column, value) in values {

@@ -1,0 +1,22 @@
+[package]
+name = "wasm-dbms-example-guest"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+description = "WIT Component Model guest example for wasm-dbms"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-dbms-api = { version = "0.6", path = "../../wasm-dbms-api" }
+wasm-dbms-memory = { version = "0.6", path = "../../wasm-dbms-memory" }
+wasm-dbms = { version = "0.6", path = "../../wasm-dbms" }
+wasm-dbms-macros = { version = "0.6", path = "../../wasm-dbms-macros" }
+wit-bindgen = { version = "0.53", default-features = false, features = ["macros", "realloc"] }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
