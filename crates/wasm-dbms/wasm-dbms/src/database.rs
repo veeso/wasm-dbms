@@ -1,5 +1,5 @@
 // Rust guideline compliant 2026-03-01
-// X-WHERE-CLAUSE, M-CANONICAL-DOCS
+// X-WHERE-CLAUSE, M-CANONICAL-DOCS, M-PANIC-ON-BUG
 
 //! Core DBMS database struct providing CRUD and transaction operations.
 
@@ -96,16 +96,44 @@ where
         f(tx)
     }
 
-    /// Executes a closure atomically.
+    /// Executes a closure atomically using a write-ahead journal.
     ///
-    /// If the closure returns an error, panics to ensure consistency.
-    fn atomic<F, R>(&self, f: F) -> R
+    /// All writes performed inside `f` are recorded. On success the journal
+    /// is committed (entries discarded). On error the journal is rolled back,
+    /// restoring every modified byte to its pre-call state.
+    ///
+    /// When a journal is already active (e.g., inside [`Database::commit`]),
+    /// this method delegates to the outer journal and does not manage its own.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rollback itself fails, because a failed rollback leaves
+    /// memory in an irrecoverably corrupt state (M-PANIC-ON-BUG).
+    fn atomic<F, R>(&self, f: F) -> DbmsResult<R>
     where
         F: FnOnce(&WasmDbmsDatabase<'ctx, M, A>) -> DbmsResult<R>,
     {
+        let nested = self.ctx.mm.borrow().is_journal_active();
+        if !nested {
+            self.ctx.mm.borrow_mut().begin_journal();
+        }
         match f(self) {
-            Ok(res) => res,
-            Err(err) => panic!("{err}"),
+            Ok(res) => {
+                if !nested {
+                    self.ctx.mm.borrow_mut().commit_journal();
+                }
+                Ok(res)
+            }
+            Err(err) => {
+                if !nested {
+                    self.ctx
+                        .mm
+                        .borrow_mut()
+                        .rollback_journal()
+                        .expect("critical: failed to rollback journal");
+                }
+                Err(err)
+            }
         }
     }
 
@@ -620,7 +648,7 @@ where
                     .insert(record.into_record(), &mut *mm)
                     .map_err(DbmsError::from)?;
                 Ok(())
-            });
+            })?;
         }
 
         Ok(())
@@ -650,7 +678,7 @@ where
             }
         });
 
-        let res = self.atomic(|db| {
+        self.atomic(|db| {
             let mut count = 0;
 
             let mut table_registry = db.load_table_registry::<T>()?;
@@ -708,9 +736,7 @@ where
             }
 
             Ok(count)
-        });
-
-        Ok(res)
+        })
     }
 
     fn delete<T>(&self, behaviour: DeleteBehavior, filter: Option<Filter>) -> DbmsResult<u64>
@@ -726,17 +752,17 @@ where
             return Ok(count);
         }
 
-        let res = self.atomic(|db| {
+        self.atomic(|db| {
             let mut table_registry = db.load_table_registry::<T>()?;
             let records = db.collect_matching_records::<T>(&table_registry, &filter)?;
             let mut count = records.len() as u64;
             for (record, record_values) in records {
                 match behaviour {
                     DeleteBehavior::Cascade => {
-                        count += self.delete_foreign_keys_cascade::<T>(&record_values)?;
+                        count += db.delete_foreign_keys_cascade::<T>(&record_values)?;
                     }
                     DeleteBehavior::Restrict => {
-                        if self.has_foreign_key_references::<T>(&record_values)? {
+                        if db.has_foreign_key_references::<T>(&record_values)? {
                             return Err(DbmsError::Query(
                                 QueryError::ForeignKeyConstraintViolation {
                                     referencing_table: T::table_name().to_string(),
@@ -753,9 +779,7 @@ where
             }
 
             Ok(count)
-        });
-
-        Ok(res)
+        })
     }
 
     fn commit(&mut self) -> DbmsResult<()> {
@@ -769,29 +793,40 @@ where
             ts.take_transaction(&txid)?
         };
 
+        self.ctx.mm.borrow_mut().begin_journal();
+
         for op in transaction.operations {
-            match op {
-                TransactionOp::Insert { table, values } => {
-                    self.schema.validate_insert(self, table, &values)?;
-                    self.atomic(|db| db.schema.insert(db, table, &values));
-                }
+            let result = match op {
+                TransactionOp::Insert { table, values } => self
+                    .schema
+                    .validate_insert(self, table, &values)
+                    .and_then(|()| self.schema.insert(self, table, &values)),
                 TransactionOp::Delete {
                     table,
                     behaviour,
                     filter,
-                } => {
-                    self.atomic(|db| db.schema.delete(db, table, behaviour, filter));
-                }
+                } => self
+                    .schema
+                    .delete(self, table, behaviour, filter)
+                    .map(|_| ()),
                 TransactionOp::Update {
                     table,
                     patch,
                     filter,
-                } => {
-                    self.atomic(|db| db.schema.update(db, table, &patch, filter));
-                }
+                } => self.schema.update(self, table, &patch, filter).map(|_| ()),
+            };
+
+            if let Err(err) = result {
+                self.ctx
+                    .mm
+                    .borrow_mut()
+                    .rollback_journal()
+                    .expect("critical: failed to rollback journal");
+                return Err(err);
             }
         }
 
+        self.ctx.mm.borrow_mut().commit_journal();
         Ok(())
     }
 

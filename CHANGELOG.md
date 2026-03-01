@@ -1,6 +1,7 @@
 # Changelog
 
 - [Changelog](#changelog)
+  - [Unreleased](#unreleased)
   - [0.6.0](#060)
   - [0.5.0](#050)
   - [0.4.0](#040)
@@ -8,6 +9,18 @@
   - [0.2.1](#021)
   - [0.2.0](#020)
   - [0.1.0](#010)
+
+## Unreleased
+
+### Changed
+
+- **BREAKING**: `atomic()` now uses a write-ahead journal instead of panic-based rollback (#48)
+  > The `MemoryManager` now supports `begin_journal()`, `commit_journal()`, and `rollback_journal()`
+  > methods. All writes via `write_at` and `zero` are recorded in the journal when active, allowing
+  > byte-level rollback on error. This makes atomicity runtime-agnostic — it no longer depends on
+  > IC's trap-reverts-stable-memory semantics. Transaction `commit()` now uses a single journal
+  > spanning all operations, ensuring all-or-nothing semantics even when multiple operations are
+  > involved.
 
 ## 0.6.0
 
