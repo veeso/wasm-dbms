@@ -7,8 +7,8 @@ pub const WASM_PAGE_SIZE: u64 = 65536;
 
 /// Memory Provider trait defines the interface for interacting with the underlying memory.
 ///
-/// It is mainly required because in tests we cannot use the actual stable memory of the IC,
-/// so we need to provide a heap-based implementation for testing purposes.
+/// Abstracting memory access allows different implementations for production
+/// (e.g. stable memory) and testing (heap-based).
 pub trait MemoryProvider {
     /// The size of a memory page in bytes.
     const PAGE_SIZE: u64;

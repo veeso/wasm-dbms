@@ -86,7 +86,7 @@ fn impl_insert_record(struct_name: &Ident, metadata: &TableMetadata) -> TokenStr
 /// ```
 ///
 /// ```rust,ignore
-///fn from_values(values: &[(ColumnDef, Value)]) -> wasm_dbms_api::prelude::IcDbmsResult<Self> {
+///fn from_values(values: &[(ColumnDef, Value)]) -> wasm_dbms_api::prelude::DbmsResult<Self> {
 ///    let mut id: Option<Uint32> = None;
 ///    let mut title: Option<Text> = None;
 ///    let mut content: Option<Text> = None;
@@ -117,16 +117,16 @@ fn impl_insert_record(struct_name: &Ident, metadata: &TableMetadata) -> TokenStr
 ///        }
 ///    }
 ///    Ok(Self {
-///        id: id.ok_or(IcDbmsError::Query(QueryError::MissingNonNullableField(
+///        id: id.ok_or(DbmsError::Query(QueryError::MissingNonNullableField(
 ///            "id".to_string(),
 ///        )))?,
-///        title: title.ok_or(IcDbmsError::Query(QueryError::MissingNonNullableField(
+///        title: title.ok_or(DbmsError::Query(QueryError::MissingNonNullableField(
 ///            "title".to_string(),
 ///        )))?,
-///        content: content.ok_or(IcDbmsError::Query(QueryError::MissingNonNullableField(
+///        content: content.ok_or(DbmsError::Query(QueryError::MissingNonNullableField(
 ///            "content".to_string(),
 ///        )))?,
-///        user_id: user_id.ok_or(IcDbmsError::Query(QueryError::MissingNonNullableField(
+///        user_id: user_id.ok_or(DbmsError::Query(QueryError::MissingNonNullableField(
 ///            "user_id".to_string(),
 ///        )))?,
 ///    })

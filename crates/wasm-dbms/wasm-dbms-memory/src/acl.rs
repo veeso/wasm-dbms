@@ -10,8 +10,7 @@ use crate::{MemoryManager, MemoryProvider};
 /// Trait for access control providers.
 ///
 /// Each implementation specifies its own `Id` type so that runtimes
-/// can use native identity representations (e.g. `Principal` on IC,
-/// raw bytes elsewhere).
+/// can use native identity representations.
 ///
 /// Runtimes that need ACL use [`AccessControlList`] (the default).
 /// Runtimes without ACL use [`NoAccessControl`] which allows everything.
@@ -101,7 +100,7 @@ impl AccessControl for NoAccessControl {
 /// Access control list storing allowed identities as raw bytes.
 ///
 /// Identities are stored as `Vec<u8>` so that the memory layer stays
-/// runtime-agnostic (no dependency on `candid::Principal`).
+/// runtime-agnostic.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AccessControlList {
     allowed: Vec<Vec<u8>>,
@@ -241,7 +240,7 @@ mod tests {
         let acl = AccessControlList {
             allowed: vec![
                 vec![0x04], // anonymous-like identity
-                vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01], // management canister-like
+                vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01],
                 vec![0xDE, 0xAD, 0xBE, 0xEF],
                 vec![0x01, 0x02, 0x03, 0x04, 0x05],
             ],

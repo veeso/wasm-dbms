@@ -1,4 +1,4 @@
-//! This module exposes the [`Json`] data type used in the ic-dbms system.
+//! This module exposes the [`Json`] data type used in the DBMS.
 
 use std::cmp::Ordering;
 use std::hash::Hash;
@@ -247,7 +247,7 @@ impl<'de> Deserialize<'de> for Json {
     where
         D: serde::Deserializer<'de>,
     {
-        // deserialize as string (matching the Serialize and CandidType impls)
+        // deserialize as string (matching the Serialize impl)
         let s: String = serde::Deserialize::deserialize(deserializer)?;
         // parse json_filter
         let value: Value = serde_json::from_str(&s).map_err(serde::de::Error::custom)?;

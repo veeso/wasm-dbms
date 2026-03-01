@@ -31,7 +31,7 @@ pub use self::uuid::Uuid;
 ///
 /// This is an umbrella trait that combines several other traits to ensure that
 /// any type implementing [`DataType`] can be cloned, compared, hashed, encoded,
-/// and serialized/deserialized using both Candid and Serde.
+/// and serialized/deserialized using Serde.
 ///
 /// Also it is used by the DBMS to compare and sort values of different data types.
 pub trait DataType:

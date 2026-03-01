@@ -4,9 +4,8 @@
 //! DBMS context that owns all database state.
 //!
 //! `DbmsContext` provides a runtime-agnostic container for the full DBMS
-//! state. Internal `RefCell` wrappers allow shared-reference mutation,
-//! matching the borrow patterns that the IC layer previously achieved
-//! with per-field thread-locals.
+//! state. Internal `RefCell` wrappers allow shared-reference mutation
+//! through a single shared reference.
 
 use std::cell::RefCell;
 
@@ -26,17 +25,6 @@ use crate::transaction::session::TransactionSession;
 ///
 /// The access-control provider `A` defaults to [`AccessControlList`].
 /// Runtimes that do not need ACL can use [`NoAccessControl`](wasm_dbms_memory::NoAccessControl).
-///
-/// # IC integration
-///
-/// On the Internet Computer the context lives in a `thread_local!`:
-///
-/// ```ignore
-/// thread_local! {
-///     static DBMS: DbmsContext<IcMemoryProvider, IcAccessControlList> =
-///         DbmsContext::with_acl(IcMemoryProvider::default());
-/// }
-/// ```
 pub struct DbmsContext<M, A = AccessControlList>
 where
     M: MemoryProvider,
