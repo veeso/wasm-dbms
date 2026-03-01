@@ -2,7 +2,7 @@
 // X-WHERE-CLAUSE, M-PUBLIC-DEBUG, M-CANONICAL-DOCS
 
 use wasm_dbms_api::prelude::{
-    DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, PageOffset,
+    DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryError, MemoryResult, PageOffset,
 };
 
 use crate::{MemoryManager, MemoryProvider};
@@ -162,7 +162,9 @@ impl AccessControl for AccessControlList {
             .position(|p| p.as_slice() == identity.as_slice())
         {
             if self.allowed.len() == 1 {
-                panic!("ACL cannot be empty");
+                return Err(MemoryError::ConstraintViolation(
+                    "ACL must contain at least one identity".to_string(),
+                ));
             }
             self.allowed.swap_remove(pos);
             self.save(mm)?;
@@ -268,14 +270,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "ACL cannot be empty")]
-    fn test_remove_last_identity_traps() {
+    fn test_remove_last_identity_returns_error() {
         let mut mm = make_mm();
         let mut acl = AccessControlList::default();
         let identity = vec![0x00, 0x00, 0x00, 0x00, 0x01, 0x01];
         acl.add_identity(identity.clone(), &mut mm).unwrap();
         assert!(acl.is_allowed(&identity));
-        acl.remove_identity(&identity, &mut mm).unwrap(); // should panic
+        let result = acl.remove_identity(&identity, &mut mm);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MemoryError::ConstraintViolation(_)
+        ));
     }
 
     #[test]

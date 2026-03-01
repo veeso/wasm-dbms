@@ -125,7 +125,7 @@ impl MemoryProvider for IcMemoryProvider {
 
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64> {
         ic_cdk::stable::stable_grow(new_pages)
-            .map_err(MemoryError::StableMemoryError)
+            .map_err(MemoryError::ProviderError)
     }
 
     fn read(&self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {

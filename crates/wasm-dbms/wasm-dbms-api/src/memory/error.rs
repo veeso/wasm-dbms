@@ -9,6 +9,9 @@ use crate::memory::{Page, PageOffset};
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 #[derive(Debug, Error, Deserialize, Serialize)]
 pub enum MemoryError {
+    /// Error when a constraint prevents the requested operation.
+    #[error("Constraint violation: {0}")]
+    ConstraintViolation(String),
     /// Error when the data to be written is too large for the page.
     #[error("Data too large for page (page size: {page_size}, requested: {requested})")]
     DataTooLarge { page_size: u64, requested: u64 },
@@ -33,9 +36,9 @@ pub enum MemoryError {
         data_size: u64,
         page_size: u64,
     },
-    /// Error when failing to grow stable memory.
-    #[error("Failed to grow stable memory: {0}")]
-    StableMemoryError(String),
+    /// Error from the underlying memory provider.
+    #[error("Memory provider error: {0}")]
+    ProviderError(String),
 }
 
 impl From<TryFromSliceError> for MemoryError {
@@ -66,9 +69,9 @@ pub enum DecodeError {
     /// Error when JSON is invalid.
     #[error("Invalid JSON: {0}")]
     InvalidJson(String),
-    /// Principal error
-    #[error("Principal error: {0}")]
-    PrincipalError(String),
+    /// Identity decoding error.
+    #[error("Identity decode error: {0}")]
+    IdentityDecodeError(String),
     /// Error when failing to convert from slice.
     #[error("Failed to convert from slice: {0}")]
     TryFromSliceError(String),
@@ -104,7 +107,7 @@ impl From<TryFromSliceError> for DecodeError {
 #[cfg(feature = "candid")]
 impl From<candid::types::principal::PrincipalError> for DecodeError {
     fn from(err: candid::types::principal::PrincipalError) -> Self {
-        DecodeError::PrincipalError(err.to_string())
+        DecodeError::IdentityDecodeError(err.to_string())
     }
 }
 

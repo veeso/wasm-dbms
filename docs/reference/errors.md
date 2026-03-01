@@ -360,7 +360,7 @@ Sanitization errors are less common than validation errors since sanitizers typi
 ```rust
 pub enum MemoryError {
     OutOfBounds,           // Read/write outside allocated memory
-    StableMemoryError(String),  // Memory API error
+    ProviderError(String),      // Memory provider error
     InsufficientSpace,     // Not enough space to allocate
 }
 ```

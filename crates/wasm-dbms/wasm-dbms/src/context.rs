@@ -25,6 +25,15 @@ use crate::transaction::session::TransactionSession;
 ///
 /// The access-control provider `A` defaults to [`AccessControlList`].
 /// Runtimes that do not need ACL can use [`NoAccessControl`](wasm_dbms_memory::NoAccessControl).
+///
+/// # Threading
+///
+/// `DbmsContext` is `!Send` and `!Sync` because of the `RefCell`
+/// wrappers. This is intentional: WASM runtimes (both IC canisters
+/// and WASI preview 1 modules) execute single-threaded, so interior
+/// mutability via `RefCell` is sufficient and avoids the overhead of
+/// synchronization primitives. Embedders that need multi-threaded
+/// access should wrap the context in their own synchronization layer.
 pub struct DbmsContext<M, A = AccessControlList>
 where
     M: MemoryProvider,

@@ -38,11 +38,11 @@ impl FileMemoryProvider {
             .create(true)
             .truncate(false)
             .open(&path)
-            .map_err(|e| MemoryError::StableMemoryError(e.to_string()))?;
+            .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
 
         let size = file
             .metadata()
-            .map_err(|e| MemoryError::StableMemoryError(e.to_string()))?
+            .map_err(|e| MemoryError::ProviderError(e.to_string()))?
             .len();
 
         Ok(Self { file, path, size })
@@ -70,7 +70,7 @@ impl MemoryProvider for FileMemoryProvider {
         let new_size = previous_size + new_pages * Self::PAGE_SIZE;
         self.file
             .set_len(new_size)
-            .map_err(|e| MemoryError::StableMemoryError(e.to_string()))?;
+            .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
         self.size = new_size;
         Ok(previous_size)
     }
@@ -85,10 +85,10 @@ impl MemoryProvider for FileMemoryProvider {
         let mut reader = &self.file;
         reader
             .seek(SeekFrom::Start(offset))
-            .map_err(|e| MemoryError::StableMemoryError(e.to_string()))?;
+            .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
         reader
             .read_exact(buf)
-            .map_err(|e| MemoryError::StableMemoryError(e.to_string()))?;
+            .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
         Ok(())
     }
 
@@ -99,13 +99,13 @@ impl MemoryProvider for FileMemoryProvider {
 
         self.file
             .seek(SeekFrom::Start(offset))
-            .map_err(|e| MemoryError::StableMemoryError(e.to_string()))?;
+            .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
         self.file
             .write_all(buf)
-            .map_err(|e| MemoryError::StableMemoryError(e.to_string()))?;
+            .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
         self.file
             .flush()
-            .map_err(|e| MemoryError::StableMemoryError(e.to_string()))?;
+            .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
         Ok(())
     }
 }

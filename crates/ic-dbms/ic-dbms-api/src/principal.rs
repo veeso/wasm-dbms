@@ -61,8 +61,9 @@ impl Encode for Principal {
             return Err(MemoryError::DecodeError(DecodeError::TooShort));
         }
 
-        let principal = candid::Principal::try_from_slice(&data[1..1 + buf_len])
-            .map_err(|e| MemoryError::DecodeError(DecodeError::PrincipalError(e.to_string())))?;
+        let principal = candid::Principal::try_from_slice(&data[1..1 + buf_len]).map_err(|e| {
+            MemoryError::DecodeError(DecodeError::IdentityDecodeError(e.to_string()))
+        })?;
 
         Ok(Self(principal))
     }
