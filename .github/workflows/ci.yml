@@ -55,6 +55,12 @@ jobs:
           target: wasm32-unknown-unknown
           components: rustfmt, clippy
 
+      - name: Install Rust (wasm32-wasip2 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: $RUST_VERSION
+          target: wasm32-wasip2
+
       - name: check rust code style
         run: |
           just check_code
