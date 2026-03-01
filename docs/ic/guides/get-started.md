@@ -173,17 +173,17 @@ serde = "1"
 In `canister/src/lib.rs`:
 
 ```rust
-use ic_dbms_canister::prelude::DbmsCanister;
+use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
 use my_schema::{User, Post};
 
-#[derive(DbmsCanister)]
+#[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]
 pub struct MyDbmsCanister;
 
 ic_cdk::export_candid!();
 ```
 
-The `DbmsCanister` macro generates a complete canister API:
+The `DatabaseSchema` derive generates the `DatabaseSchema<M>` trait implementation that provides schema dispatch (routing operations to the correct table by name). The `DbmsCanister` derive generates the complete canister API:
 
 ```candid
 service : (IcDbmsCanisterArgs) -> {

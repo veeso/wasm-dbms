@@ -13,6 +13,7 @@
 //!
 //! - `Encode`: Automatically implements the `Encode` trait for structs.
 //! - `Table`: Automatically implements the `TableSchema` trait and associated types.
+//! - `DatabaseSchema`: Generates `DatabaseSchema<M>` trait dispatch and `register_tables`.
 //! - `DbmsCanister`: Automatically implements the API for the ic-dbms-canister.
 //!
 
@@ -28,6 +29,7 @@ use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
 mod custom_data_type;
+mod database_schema;
 mod dbms_canister;
 mod encode;
 mod table;
@@ -555,6 +557,28 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     self::table::table(input)
         .expect("failed to derive `Table`")
+        .into()
+}
+
+/// Generates a [`DatabaseSchema`] implementation for IC canister crates.
+///
+/// This macro uses `::ic_dbms_canister::prelude::` and
+/// `::ic_dbms_api::prelude::` paths so the generated code resolves
+/// correctly in crates that depend on `ic-dbms-canister` without
+/// requiring direct `wasm-dbms` dependencies.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// #[derive(DatabaseSchema, DbmsCanister)]
+/// #[tables(User = "users", Post = "posts")]
+/// pub struct MyCanister;
+/// ```
+#[proc_macro_derive(DatabaseSchema, attributes(tables))]
+pub fn derive_database_schema(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    self::database_schema::database_schema(input)
+        .expect("failed to derive `DatabaseSchema`")
         .into()
 }
 

@@ -7,6 +7,7 @@
 - [Define Your Schema](#define-your-schema)
   - [Create the Schema Crate](#create-the-schema-crate)
   - [Define Tables](#define-tables)
+- [Define a Database Schema](#define-a-database-schema)
 - [Using the Database](#using-the-database)
   - [Create a DbmsContext](#create-a-dbmscontext)
   - [Perform CRUD Operations](#perform-crud-operations)
@@ -130,6 +131,22 @@ The `Table` macro generates additional types for each table:
 
 ---
 
+## Define a Database Schema
+
+Once you've defined your tables, create a schema struct with `#[derive(DatabaseSchema)]` to wire them together:
+
+```rust
+use wasm_dbms::prelude::DatabaseSchema;
+
+#[derive(DatabaseSchema)]
+#[tables(User = "users", Post = "posts")]
+pub struct MySchema;
+```
+
+The `DatabaseSchema` derive macro auto-generates the `DatabaseSchema<M>` trait implementation and a `register_tables` method. This replaces what would otherwise be ~130+ lines of manual dispatch code.
+
+---
+
 ## Using the Database
 
 ### Create a DbmsContext
@@ -142,6 +159,9 @@ use wasm_dbms_api::prelude::*;
 
 // For testing, use HeapMemoryProvider
 let ctx = DbmsContext::new(HeapMemoryProvider::default());
+
+// Register tables from the schema
+MySchema::register_tables(&ctx).expect("failed to register tables");
 ```
 
 ### Perform CRUD Operations
@@ -153,7 +173,7 @@ use wasm_dbms::prelude::*;
 use my_schema::{User, UserInsertRequest};
 
 // Create a one-shot (non-transactional) database
-let database = WasmDbmsDatabase::oneshot(&ctx, my_schema);
+let database = WasmDbmsDatabase::oneshot(&ctx, MySchema);
 
 // Insert a record
 let user = UserInsertRequest {
@@ -224,12 +244,13 @@ For unit tests, use `HeapMemoryProvider` which stores data in heap memory:
 ```rust
 use wasm_dbms::prelude::*;
 use wasm_dbms_api::prelude::*;
-use my_schema::{User, UserInsertRequest};
+use my_schema::{User, UserInsertRequest, MySchema};
 
 #[test]
 fn test_insert_and_select() {
     let ctx = DbmsContext::new(HeapMemoryProvider::default());
-    let database = WasmDbmsDatabase::oneshot(&ctx, my_schema);
+    MySchema::register_tables(&ctx).expect("register failed");
+    let database = WasmDbmsDatabase::oneshot(&ctx, MySchema);
 
     let insert_req = UserInsertRequest {
         id: 1.into(),

@@ -15,7 +15,7 @@ use ::wasm_dbms::prelude::{DatabaseSchema as _, DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::*;
 
 use crate::file_provider::FileMemoryProvider;
-use crate::schema::{ExampleDatabaseSchema, register_tables};
+use crate::schema::ExampleDatabaseSchema;
 
 wit_bindgen::generate!({
     world: "dbms",
@@ -42,7 +42,7 @@ where
             let provider =
                 FileMemoryProvider::new(DB_FILE_PATH).expect("Failed to open database file");
             let dbms_ctx = DbmsContext::new(provider);
-            register_tables(&dbms_ctx).expect("Failed to register tables");
+            ExampleDatabaseSchema::register_tables(&dbms_ctx).expect("Failed to register tables");
             *ctx = Some(dbms_ctx);
         }
         f(ctx.as_ref().unwrap())

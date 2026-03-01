@@ -28,7 +28,7 @@
 //! ```rust
 //! use candid::CandidType;
 //! use ic_dbms_api::prelude::{Nullable, Text, Uint32, Uint64};
-//! use ic_dbms_canister::prelude::{DbmsCanister, Table};
+//! use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister, Table};
 //! use serde::Deserialize;
 //!
 //! // define a simple `User` table
@@ -58,7 +58,7 @@
 //!
 //! // Finally define the schema. This will generate the API for the canister.
 //!
-//! #[derive(DbmsCanister)]
+//! #[derive(DatabaseSchema, DbmsCanister)]
 //! #[tables(User = "users", Post = "posts")]
 //! pub struct IcDbmsCanisterGenerator;
 //! ```

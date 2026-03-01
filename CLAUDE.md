@@ -63,12 +63,12 @@ crates/
 │   ├── wasm-dbms-api/          # Shared types, traits, validators, sanitizers
 │   ├── wasm-dbms-memory/       # Memory abstraction and page management
 │   ├── wasm-dbms/              # Core DBMS engine (transactions, joins, integrity)
-│   └── wasm-dbms-macros/       # Procedural macros: Encode, Table, CustomDataType
+│   └── wasm-dbms-macros/       # Procedural macros: Encode, Table, CustomDataType, DatabaseSchema
 │
 └── ic-dbms/                    # IC-specific crates
     ├── ic-dbms-api/            # IC types (re-exports wasm-dbms-api)
     ├── ic-dbms-canister/       # IC canister DBMS implementation
-    ├── ic-dbms-macros/         # IC-specific macro: DbmsCanister
+    ├── ic-dbms-macros/         # IC-specific macros: DatabaseSchema, DbmsCanister
     ├── ic-dbms-client/         # Client libraries for canister interaction
     ├── example/                # Reference implementation
     └── integration-tests/      # PocketIC integration tests
@@ -84,12 +84,15 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
                    ic-dbms-client
 ```
 
-### Macro System (Three-Tier)
+### Macro System (Four-Tier)
 
 1. **`#[derive(Encode)]`** (wasm-dbms-macros): Binary serialization for memory storage
 2. **`#[derive(Table)]`** (wasm-dbms-macros): Generates `TableSchema`, `*Record`, `*InsertRequest`, `*UpdateRequest`,
    `*ForeignFetcher`
-3. **`#[derive(DbmsCanister)]`** (ic-dbms-macros): Generates complete IC canister API with all CRUD operations
+3. **`#[derive(DatabaseSchema)]`** (wasm-dbms-macros / ic-dbms-macros): Generates `DatabaseSchema<M>` trait
+   implementation for schema dispatch. Two variants exist: the generic one in wasm-dbms-macros (uses `::wasm_dbms::`
+   paths) and the IC-specific one in ic-dbms-macros (uses `::ic_dbms_canister::prelude::` paths).
+4. **`#[derive(DbmsCanister)]`** (ic-dbms-macros): Generates complete IC canister API with all CRUD operations
 
 ### Memory Model
 
@@ -147,7 +150,7 @@ Required derives: `Table`, `CandidType`, `Deserialize`, `Clone`
 ### Creating an IC Canister
 
 ```rust
-#[derive(DbmsCanister)]
+#[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]
 pub struct IcDbmsCanisterGenerator;
 

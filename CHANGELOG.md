@@ -13,6 +13,16 @@
 
 Released on 2026-02-27
 
+### Added
+
+- `#[derive(DatabaseSchema)]` macro for automatic `DatabaseSchema<M>` trait generation (#48)
+  > A new derive macro that auto-generates the `DatabaseSchema<M>` trait implementation
+  > from a `#[tables(...)]` attribute, eliminating ~130+ lines of boilerplate per schema.
+  > Two variants exist: a generic one in `wasm-dbms-macros` (for any WASM runtime) and
+  > an IC-specific one in `ic-dbms-macros` (uses IC crate paths so IC users don't need
+  > `wasm-dbms` as a direct dependency). The macro also generates a `register_tables`
+  > associated method for convenient table registration.
+
 ### Changed
 
 - Removed duplicated database engine from `ic-dbms-canister`

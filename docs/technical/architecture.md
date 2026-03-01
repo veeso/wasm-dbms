@@ -185,7 +185,7 @@ ic-dbms/
 │   │   ├── wasm-dbms-api/          # Shared types and traits
 │   │   ├── wasm-dbms-memory/       # Memory abstraction and page management
 │   │   ├── wasm-dbms/              # Core DBMS engine
-│   │   └── wasm-dbms-macros/       # Procedural macros (Encode, Table, CustomDataType)
+│   │   └── wasm-dbms-macros/       # Procedural macros (Encode, Table, CustomDataType, DatabaseSchema)
 │   │
 │   └── ic-dbms/                    # IC-specific crates
 │       ├── ic-dbms-api/            # IC-specific types (re-exports wasm-dbms-api)
@@ -258,6 +258,7 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 - `#[derive(Encode)]` - Binary serialization
 - `#[derive(Table)]` - Table schema and related types
 - `#[derive(CustomDataType)]` - Custom data type bridge
+- `#[derive(DatabaseSchema)]` - Generates `DatabaseSchema<M>` trait implementation for schema dispatch
 
 ### IC Layer (ic-dbms)
 
@@ -287,6 +288,7 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 **Purpose:** IC-specific code generation
 
 **Macros:**
+- `#[derive(DatabaseSchema)]` - Generates `DatabaseSchema<M>` trait implementation (IC-specific paths)
 - `#[derive(DbmsCanister)]` - Generates complete canister API
 
 #### ic-dbms-client

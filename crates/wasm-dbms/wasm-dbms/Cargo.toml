@@ -17,3 +17,4 @@ wasm-dbms-memory = { path = "../wasm-dbms-memory", version = "0.6.0" }
 [dev-dependencies]
 candid = { workspace = true }
 serde = { workspace = true }
+wasm-dbms-macros = { path = "../wasm-dbms-macros", version = "0.6.0" }

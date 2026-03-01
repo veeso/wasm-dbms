@@ -13,6 +13,7 @@
 //!
 //! - `Encode`: Automatically implements the `Encode` trait for structs.
 //! - `Table`: Automatically implements the `TableSchema` trait and associated types.
+//! - `DatabaseSchema`: Generates `DatabaseSchema<M>` trait dispatch and `register_tables`.
 //! - `CustomDataType`: Bridge user-defined types into the `Value` system.
 
 #![doc(html_playground_url = "https://play.rust-lang.org")]
@@ -27,6 +28,7 @@ use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
 mod custom_data_type;
+mod database_schema;
 mod encode;
 mod table;
 mod utils;
@@ -302,5 +304,42 @@ pub fn derive_custom_data_type(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     custom_data_type::custom_data_type(&input)
         .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Generates a [`DatabaseSchema`] implementation that dispatches generic
+/// DBMS operations to the correct concrete table types.
+///
+/// Given a struct annotated with `#[tables(User = "users", Post = "posts")]`,
+/// this macro produces:
+///
+/// - `impl<M: MemoryProvider> DatabaseSchema<M>` with match-arm dispatch
+///   for `select`, `insert`, `delete`, `update`, `validate_insert`,
+///   `validate_update`, and `referenced_tables`.
+/// - An inherent `register_tables` method that registers all tables in a
+///   [`DbmsContext`].
+///
+/// # Example
+///
+/// ```rust,ignore
+/// #[derive(DatabaseSchema)]
+/// #[tables(User = "users", Post = "posts")]
+/// pub struct MySchema;
+///
+/// // Register tables during initialization:
+/// MySchema::register_tables(&ctx)?;
+/// ```
+///
+/// # Requirements
+///
+/// - Each type in the `#[tables(...)]` attribute must implement
+///   [`TableSchema`].
+/// - The generated types (`UserInsertRequest`, `UserUpdateRequest`,
+///   `UserRecord`, etc.) must be in scope.
+#[proc_macro_derive(DatabaseSchema, attributes(tables))]
+pub fn derive_database_schema(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    self::database_schema::database_schema(input)
+        .expect("failed to derive `DatabaseSchema`")
         .into()
 }

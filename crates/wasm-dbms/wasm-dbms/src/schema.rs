@@ -1,4 +1,4 @@
-// Rust guideline compliant 2026-02-28
+// Rust guideline compliant 2026-03-01
 
 use wasm_dbms_api::prelude::{
     CandidColumnDef, ColumnDef, DbmsResult, DeleteBehavior, Filter, Query, Value,
@@ -14,7 +14,7 @@ use crate::database::WasmDbmsDatabase;
 /// appropriate typed methods on [`WasmDbmsDatabase`].
 ///
 /// This trait is typically implemented by generated code from the
-/// `#[derive(DbmsCanister)]` macro.
+/// `#[derive(DatabaseSchema)]` macro.
 pub trait DatabaseSchema<M: MemoryProvider> {
     /// Performs a generic select for the given table name and query.
     fn select(
@@ -80,4 +80,100 @@ pub trait DatabaseSchema<M: MemoryProvider> {
         record_values: &[(ColumnDef, Value)],
         old_pk: Value,
     ) -> DbmsResult<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use wasm_dbms_api::prelude::{
+        Database as _, InsertRecord as _, Query, TableSchema as _, Text, Uint32, Value,
+    };
+    use wasm_dbms_macros::{DatabaseSchema, Table};
+    use wasm_dbms_memory::prelude::HeapMemoryProvider;
+
+    use super::DatabaseSchema as _;
+    use crate::prelude::{DbmsContext, WasmDbmsDatabase};
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "items"]
+    pub struct Item {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(Item = "items")]
+    pub struct TestSchema;
+
+    fn setup() -> DbmsContext<HeapMemoryProvider> {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        TestSchema::register_tables(&ctx).unwrap();
+        ctx
+    }
+
+    #[test]
+    fn test_should_register_tables_via_macro() {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        TestSchema::register_tables(&ctx).unwrap();
+    }
+
+    #[test]
+    fn test_should_insert_and_select_via_schema() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let insert = ItemInsertRequest::from_values(&[
+            (Item::columns()[0], Value::Uint32(Uint32(1))),
+            (Item::columns()[1], Value::Text(Text("foo".to_string()))),
+        ])
+        .unwrap();
+        db.insert::<Item>(insert).unwrap();
+
+        let rows = TestSchema
+            .select(&db, "items", Query::builder().build())
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][1].1, Value::Text(Text("foo".to_string())));
+    }
+
+    #[test]
+    fn test_should_delete_via_schema() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let insert = ItemInsertRequest::from_values(&[
+            (Item::columns()[0], Value::Uint32(Uint32(1))),
+            (Item::columns()[1], Value::Text(Text("foo".to_string()))),
+        ])
+        .unwrap();
+        db.insert::<Item>(insert).unwrap();
+
+        let deleted = TestSchema
+            .delete(
+                &db,
+                "items",
+                wasm_dbms_api::prelude::DeleteBehavior::Restrict,
+                None,
+            )
+            .unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn test_should_return_error_for_unknown_table() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let result = TestSchema.select(&db, "nonexistent", Query::builder().build());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_should_return_referenced_tables() {
+        let refs = <TestSchema as super::DatabaseSchema<HeapMemoryProvider>>::referenced_tables(
+            &TestSchema,
+            "items",
+        );
+        assert!(refs.is_empty());
+    }
 }

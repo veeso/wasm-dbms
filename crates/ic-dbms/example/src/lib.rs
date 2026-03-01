@@ -1,7 +1,8 @@
 use candid::CandidType;
 use ic_dbms_api::prelude::{Principal, Text, Uint32};
 use ic_dbms_canister::prelude::{
-    DbmsCanister, EmailValidator, LowerCaseSanitizer, MaxStrlenValidator, Table, TrimSanitizer,
+    DatabaseSchema, DbmsCanister, EmailValidator, LowerCaseSanitizer, MaxStrlenValidator, Table,
+    TrimSanitizer,
 };
 use serde::Deserialize;
 
@@ -39,7 +40,7 @@ pub struct Project {
     pub owner: Principal,
 }
 
-#[derive(DbmsCanister)]
+#[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts", Project = "projects")]
 pub struct IcDbmsCanisterGenerator;
 

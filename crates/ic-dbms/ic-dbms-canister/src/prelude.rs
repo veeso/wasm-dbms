@@ -1,7 +1,7 @@
 //! Re-exports all the most commonly used items from this crate.
 
 pub use ic_dbms_api::prelude::*;
-pub use ic_dbms_macros::DbmsCanister;
+pub use ic_dbms_macros::{DatabaseSchema, DbmsCanister};
 // Re-export from wasm-dbms instead of deleted IC modules
 pub use wasm_dbms::prelude::{
     DatabaseSchema, DbmsContext, InsertIntegrityValidator, UpdateIntegrityValidator,
