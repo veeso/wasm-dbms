@@ -24,9 +24,9 @@ candid = { workspace = true }
 ic-cdk = { workspace = true }
 ic-dbms-api = { version = "0.6", path = "../ic-dbms-api" }
 ic-dbms-macros = { version = "0.6", path = "../ic-dbms-macros" }
+serde = { workspace = true }
 wasm-dbms = { version = "0.6", path = "../../wasm-dbms/wasm-dbms" }
 wasm-dbms-memory = { version = "0.6", path = "../../wasm-dbms/wasm-dbms-memory" }
-serde = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
