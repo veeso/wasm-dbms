@@ -157,14 +157,10 @@ pub struct MemoryManager<P: MemoryProvider> {
 }
 
 // Global instance (thread-local for IC)
+// All state is consolidated in a single DbmsContext:
 thread_local! {
-    #[cfg(target_family = "wasm")]
-    pub static MEMORY_MANAGER: RefCell<MemoryManager<IcMemoryProvider>> =
-        RefCell::new(MemoryManager::init(IcMemoryProvider::default()));
-
-    #[cfg(not(target_family = "wasm"))]
-    pub static MEMORY_MANAGER: RefCell<MemoryManager<HeapMemoryProvider>> =
-        RefCell::new(MemoryManager::init(HeapMemoryProvider::default()));
+    pub static DBMS_CONTEXT: DbmsContext<IcMemoryProvider> =
+        DbmsContext::new(IcMemoryProvider::default());
 }
 
 impl<P: MemoryProvider> MemoryManager<P> {

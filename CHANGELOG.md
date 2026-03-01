@@ -13,6 +13,15 @@
 
 Released on 2026-02-27
 
+### Changed
+
+- Removed duplicated database engine from `ic-dbms-canister`
+  > The IC layer now uses the generic `wasm-dbms` engine directly via `DbmsContext<IcMemoryProvider>`.
+  > The `IcDbmsDatabase` struct, IC-specific `DatabaseSchema` trait, and duplicated join engine,
+  > integrity validators, and transaction system have been removed. The `DbmsCanister` macro now
+  > generates `DatabaseSchema<M>` implementations on the annotated struct instead of a separate
+  > `CanisterDatabaseSchema` type.
+
 ### Breaking Changes
 
 - Removed `Value::Principal` and `DataTypeKind::Principal` built-in variants

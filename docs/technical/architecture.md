@@ -273,15 +273,14 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 
 #### ic-dbms-canister
 
-**Purpose:** Core IC database engine
+**Purpose:** Thin IC adapter over `wasm-dbms`
 
 **Contents:**
 - `IcMemoryProvider` (IC stable memory)
-- `IcDbmsDatabase` (IC-adapted DBMS operations)
-- Thread-local state management
+- `DBMS_CONTEXT` thread-local wrapping `DbmsContext<IcMemoryProvider>`
 - Canister API layer with ACL guards
 
-**Dependencies:** ic-dbms-api, ic-dbms-macros, wasm-dbms-memory, ic-cdk
+**Dependencies:** ic-dbms-api, ic-dbms-macros, wasm-dbms, wasm-dbms-memory, ic-cdk
 
 #### ic-dbms-macros
 
