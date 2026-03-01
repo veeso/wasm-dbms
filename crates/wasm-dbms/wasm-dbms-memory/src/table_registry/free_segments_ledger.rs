@@ -55,10 +55,7 @@ pub struct FreeSegmentsLedger {
 
 impl FreeSegmentsLedger {
     /// Loads the deleted records ledger from memory.
-    pub fn load(
-        free_segments_page: Page,
-        mm: &impl MemoryAccess,
-    ) -> MemoryResult<Self> {
+    pub fn load(free_segments_page: Page, mm: &impl MemoryAccess) -> MemoryResult<Self> {
         // read from memory
         let tables = mm.read_at(free_segments_page, 0)?;
 
@@ -164,10 +161,7 @@ impl FreeSegmentsLedger {
     }
 
     /// Creates a new page for storing additional [`FreeSegmentsTable`]s when needed.
-    fn create_new_page(
-        &mut self,
-        mm: &mut impl MemoryAccess,
-    ) -> MemoryResult<Page> {
+    fn create_new_page(&mut self, mm: &mut impl MemoryAccess) -> MemoryResult<Page> {
         let new_page = mm.allocate_page()?;
         self.tables.push(new_page);
         self.commit(mm).map(|_| new_page)

@@ -30,10 +30,7 @@ pub struct TableRegistry {
 
 impl TableRegistry {
     /// Loads the table registry from memory.
-    pub fn load(
-        table_pages: TableRegistryPage,
-        mm: &impl MemoryAccess,
-    ) -> MemoryResult<Self> {
+    pub fn load(table_pages: TableRegistryPage, mm: &impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
             free_segments_ledger: FreeSegmentsLedger::load(table_pages.free_segments_page, mm)?,
             page_ledger: PageLedger::load(table_pages.pages_list_page, mm)?,
@@ -43,11 +40,7 @@ impl TableRegistry {
     /// Inserts a new record into the table registry.
     ///
     /// NOTE: this function does NOT make any logical checks on the record being inserted.
-    pub fn insert<E>(
-        &mut self,
-        record: E,
-        mm: &mut impl MemoryAccess,
-    ) -> MemoryResult<()>
+    pub fn insert<E>(&mut self, record: E, mm: &mut impl MemoryAccess) -> MemoryResult<()>
     where
         E: Encode,
     {

@@ -41,8 +41,7 @@ impl Journal {
     /// Call this after a successful atomic operation to confirm that
     /// the writes should be kept.
     pub fn commit(self) {
-        // Dropping the entries is all that is needed.
-        drop(self);
+        // Dropping `self` discards all entries — nothing else needed.
     }
 
     /// Rolls back all recorded writes, restoring the original bytes.
@@ -142,12 +141,7 @@ where
         self.mm.zero(page, offset, data)
     }
 
-    fn read_at_raw(
-        &self,
-        page: Page,
-        offset: PageOffset,
-        buf: &mut [u8],
-    ) -> MemoryResult<usize> {
+    fn read_at_raw(&self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize> {
         self.mm.read_at_raw(page, offset, buf)
     }
 }
@@ -156,9 +150,7 @@ where
 mod tests {
     use std::borrow::Cow;
 
-    use wasm_dbms_api::prelude::{
-        DEFAULT_ALIGNMENT, DataSize, MSize, MemoryResult, PageOffset,
-    };
+    use wasm_dbms_api::prelude::{DEFAULT_ALIGNMENT, DataSize, MSize, MemoryResult, PageOffset};
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
     use super::*;
@@ -205,7 +197,9 @@ mod tests {
         let read_back: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
         assert_eq!(read_back, overwrite);
 
-        journal.rollback(&mut mm).expect("Failed to rollback journal");
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
 
         let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
         assert_eq!(restored, original);
@@ -227,7 +221,9 @@ mod tests {
                 .expect("Failed to zero data");
         }
 
-        journal.rollback(&mut mm).expect("Failed to rollback journal");
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
 
         let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
         assert_eq!(restored, original);
@@ -269,7 +265,9 @@ mod tests {
                 .expect("Failed to overwrite data_b");
         }
 
-        journal.rollback(&mut mm).expect("Failed to rollback journal");
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
 
         let restored_a: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
         let restored_b: FixedSizeData = mm.read_at(ACL_PAGE, 6).expect("Failed to read data");
@@ -298,7 +296,9 @@ mod tests {
                 .expect("Failed to write second overwrite");
         }
 
-        journal.rollback(&mut mm).expect("Failed to rollback journal");
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
 
         let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
         assert_eq!(restored, original);
@@ -340,7 +340,9 @@ mod tests {
             new_page = writer.allocate_page().expect("Failed to allocate page");
         }
 
-        journal.rollback(&mut mm).expect("Failed to rollback journal");
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
 
         // Page allocation is not journaled — verify we can still read from the page.
         let mut buf = vec![0u8; 8];
@@ -371,7 +373,9 @@ mod tests {
                 .expect("Failed to zero data_b");
         }
 
-        journal.rollback(&mut mm).expect("Failed to rollback journal");
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
 
         let restored_a: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
         let restored_b: FixedSizeData = mm.read_at(ACL_PAGE, 6).expect("Failed to read data");
@@ -400,7 +404,9 @@ mod tests {
                 .expect("Failed to overwrite");
         }
 
-        journal.rollback(&mut mm).expect("Failed to rollback journal");
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
 
         let mut restored_raw = vec![0u8; 32];
         mm.read_at_raw(ACL_PAGE, 0, &mut restored_raw)

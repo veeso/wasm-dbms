@@ -41,10 +41,5 @@ pub trait MemoryAccess {
     /// Reads raw bytes into `buf` at the specified page and offset.
     ///
     /// Returns the number of bytes actually read.
-    fn read_at_raw(
-        &self,
-        page: Page,
-        offset: PageOffset,
-        buf: &mut [u8],
-    ) -> MemoryResult<usize>;
+    fn read_at_raw(&self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize>;
 }

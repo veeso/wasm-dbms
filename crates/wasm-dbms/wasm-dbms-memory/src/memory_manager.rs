@@ -65,12 +65,7 @@ where
     ///
     /// This is used by the journal rollback path which already holds
     /// pre-captured byte buffers.
-    pub fn write_at_raw(
-        &mut self,
-        page: Page,
-        offset: PageOffset,
-        buf: &[u8],
-    ) -> MemoryResult<()> {
+    pub fn write_at_raw(&mut self, page: Page, offset: PageOffset, buf: &[u8]) -> MemoryResult<()> {
         let absolute_offset = self.absolute_offset(page, offset);
         self.provider.write(absolute_offset, buf)
     }
@@ -222,12 +217,7 @@ where
         self.provider.write(absolute_offset, buffer.as_ref())
     }
 
-    fn read_at_raw(
-        &self,
-        page: Page,
-        offset: PageOffset,
-        buf: &mut [u8],
-    ) -> MemoryResult<usize> {
+    fn read_at_raw(&self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize> {
         if self.last_page().is_none_or(|last_page| page > last_page) {
             return Err(MemoryError::SegmentationFault {
                 page,
@@ -481,9 +471,9 @@ mod tests {
     }
 
     #[derive(Debug, Clone, PartialEq)]
-    pub(crate) struct FixedSizeData {
-        pub a: u16,
-        pub b: u32,
+    struct FixedSizeData {
+        a: u16,
+        b: u32,
     }
 
     impl Encode for FixedSizeData {
@@ -512,9 +502,9 @@ mod tests {
     }
 
     #[derive(Debug, Clone, PartialEq)]
-    pub(crate) struct DataWithAlignment {
-        pub a: u16,
-        pub b: u32,
+    struct DataWithAlignment {
+        a: u16,
+        b: u32,
     }
 
     impl Encode for DataWithAlignment {

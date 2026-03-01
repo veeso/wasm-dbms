@@ -120,17 +120,13 @@ where
         }
         match f(self) {
             Ok(res) => {
-                if !nested
-                    && let Some(journal) = self.ctx.journal.borrow_mut().take()
-                {
+                if !nested && let Some(journal) = self.ctx.journal.borrow_mut().take() {
                     journal.commit();
                 }
                 Ok(res)
             }
             Err(err) => {
-                if !nested
-                    && let Some(journal) = self.ctx.journal.borrow_mut().take()
-                {
+                if !nested && let Some(journal) = self.ctx.journal.borrow_mut().take() {
                     journal
                         .rollback(&mut self.ctx.mm.borrow_mut())
                         .expect("critical: failed to rollback journal");
@@ -648,7 +644,9 @@ where
                 let record = T::Insert::from_values(&sanitized_values)?;
                 let mut mm = db.ctx.mm.borrow_mut();
                 let mut journal_ref = db.ctx.journal.borrow_mut();
-                let journal = journal_ref.as_mut().expect("journal must be active inside atomic");
+                let journal = journal_ref
+                    .as_mut()
+                    .expect("journal must be active inside atomic");
                 let mut writer = JournaledWriter::new(&mut *mm, journal);
                 table_registry
                     .insert(record.into_record(), &mut writer)
@@ -720,8 +718,9 @@ where
                 {
                     let mut mm = db.ctx.mm.borrow_mut();
                     let mut journal_ref = db.ctx.journal.borrow_mut();
-                    let journal =
-                        journal_ref.as_mut().expect("journal must be active inside atomic");
+                    let journal = journal_ref
+                        .as_mut()
+                        .expect("journal must be active inside atomic");
                     let mut writer = JournaledWriter::new(&mut *mm, journal);
                     table_registry
                         .update(
@@ -784,8 +783,9 @@ where
                 }
                 let mut mm = db.ctx.mm.borrow_mut();
                 let mut journal_ref = db.ctx.journal.borrow_mut();
-                let journal =
-                    journal_ref.as_mut().expect("journal must be active inside atomic");
+                let journal = journal_ref
+                    .as_mut()
+                    .expect("journal must be active inside atomic");
                 let mut writer = JournaledWriter::new(&mut *mm, journal);
                 table_registry
                     .delete(record.record, record.page, record.offset, &mut writer)
