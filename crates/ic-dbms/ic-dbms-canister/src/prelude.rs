@@ -8,6 +8,7 @@ pub use wasm_dbms::prelude::{
     DatabaseSchema, DbmsContext, InsertIntegrityValidator, UpdateIntegrityValidator,
     WasmDbmsDatabase, get_referenced_tables,
 };
+pub use wasm_dbms_memory::prelude::MemoryProvider;
 pub use wasm_dbms::transaction::session::TransactionSession;
 
 pub use crate::memory::{DBMS_CONTEXT, IcMemoryProvider};
