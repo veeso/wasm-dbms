@@ -1,4 +1,5 @@
-// Rust guideline compliant 2026-02-28
+// Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 //! WIT Component Model guest example for wasm-dbms.
 //!
@@ -13,6 +14,7 @@ use std::cell::RefCell;
 
 use ::wasm_dbms::prelude::{DatabaseSchema as _, DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::*;
+use wasm_dbms_memory::prelude::NoAccessControl;
 
 use crate::file_provider::FileMemoryProvider;
 use crate::schema::ExampleDatabaseSchema;
@@ -28,20 +30,20 @@ use crate::wasm_dbms::dbms::types as wit;
 const DB_FILE_PATH: &str = "wasm-dbms.db";
 
 thread_local! {
-    static DBMS_CTX: RefCell<Option<DbmsContext<FileMemoryProvider>>> = const { RefCell::new(None) };
+    static DBMS_CTX: RefCell<Option<DbmsContext<FileMemoryProvider, NoAccessControl>>> = const { RefCell::new(None) };
 }
 
 /// Runs `f` against the lazily initialised DBMS context.
 fn with_dbms<F, R>(f: F) -> R
 where
-    F: FnOnce(&DbmsContext<FileMemoryProvider>) -> R,
+    F: FnOnce(&DbmsContext<FileMemoryProvider, NoAccessControl>) -> R,
 {
     DBMS_CTX.with(|cell| {
         let mut ctx = cell.borrow_mut();
         if ctx.is_none() {
             let provider =
                 FileMemoryProvider::new(DB_FILE_PATH).expect("Failed to open database file");
-            let dbms_ctx = DbmsContext::new(provider);
+            let dbms_ctx = DbmsContext::with_acl(provider);
             ExampleDatabaseSchema::register_tables(&dbms_ctx).expect("Failed to register tables");
             *ctx = Some(dbms_ctx);
         }

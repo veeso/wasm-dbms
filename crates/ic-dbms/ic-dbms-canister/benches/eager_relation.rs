@@ -5,8 +5,8 @@ use ic_dbms_api::prelude::{
     UpdateRecord, Value, flatten_table_columns,
 };
 use ic_dbms_canister::prelude::{
-    DBMS_CONTEXT, DatabaseSchema, InsertIntegrityValidator, MemoryProvider, Table, Text, Uint32,
-    UpdateIntegrityValidator, WasmDbmsDatabase, get_referenced_tables,
+    AccessControl, DBMS_CONTEXT, DatabaseSchema, InsertIntegrityValidator, MemoryProvider, Table,
+    Text, Uint32, UpdateIntegrityValidator, WasmDbmsDatabase, get_referenced_tables,
 };
 use serde::Deserialize;
 
@@ -33,13 +33,14 @@ pub struct Post {
 
 pub struct BenchDatabaseSchema;
 
-impl<M> DatabaseSchema<M> for BenchDatabaseSchema
+impl<M, A> DatabaseSchema<M, A> for BenchDatabaseSchema
 where
     M: MemoryProvider,
+    A: AccessControl,
 {
     fn select(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &str,
         query: Query,
     ) -> ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
@@ -68,7 +69,7 @@ where
 
     fn insert(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
     ) -> ic_dbms_api::prelude::IcDbmsResult<()> {
@@ -89,7 +90,7 @@ where
 
     fn delete(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         delete_behavior: DeleteBehavior,
         filter: Option<Filter>,
@@ -105,7 +106,7 @@ where
 
     fn update(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         patch_values: &[(ColumnDef, Value)],
         filter: Option<Filter>,
@@ -127,16 +128,16 @@ where
 
     fn validate_insert(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
     ) -> ic_dbms_api::prelude::IcDbmsResult<()> {
         match table_name {
             name if name == User::table_name() => {
-                InsertIntegrityValidator::<User, M>::new(dbms).validate(record_values)
+                InsertIntegrityValidator::<User, M, A>::new(dbms).validate(record_values)
             }
             name if name == Post::table_name() => {
-                InsertIntegrityValidator::<Post, M>::new(dbms).validate(record_values)
+                InsertIntegrityValidator::<Post, M, A>::new(dbms).validate(record_values)
             }
             _ => Err(ic_dbms_api::prelude::IcDbmsError::Query(
                 QueryError::TableNotFound(table_name.to_string()),
@@ -146,17 +147,17 @@ where
 
     fn validate_update(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
         old_pk: Value,
     ) -> ic_dbms_api::prelude::IcDbmsResult<()> {
         match table_name {
             name if name == User::table_name() => {
-                UpdateIntegrityValidator::<User, M>::new(dbms, old_pk).validate(record_values)
+                UpdateIntegrityValidator::<User, M, A>::new(dbms, old_pk).validate(record_values)
             }
             name if name == Post::table_name() => {
-                UpdateIntegrityValidator::<Post, M>::new(dbms, old_pk).validate(record_values)
+                UpdateIntegrityValidator::<Post, M, A>::new(dbms, old_pk).validate(record_values)
             }
             _ => Err(ic_dbms_api::prelude::IcDbmsError::Query(
                 QueryError::TableNotFound(table_name.to_string()),

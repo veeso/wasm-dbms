@@ -1,11 +1,12 @@
-// Rust guideline compliant 2026-02-28
+// Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 //! Join execution engine for cross-table queries.
 
 use wasm_dbms_api::prelude::{
     CandidColumnDef, ColumnDef, DbmsResult, JoinType, OrderDirection, Query, Value,
 };
-use wasm_dbms_memory::prelude::MemoryProvider;
+use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
 
 use crate::database::WasmDbmsDatabase;
 use crate::schema::DatabaseSchema;
@@ -14,17 +15,21 @@ use crate::schema::DatabaseSchema;
 type JoinedRow = Vec<(String, Vec<(ColumnDef, Value)>)>;
 
 /// Engine that executes join queries using nested-loop join.
-pub struct JoinEngine<'a, Schema: ?Sized, M: MemoryProvider>
+pub struct JoinEngine<'a, Schema: ?Sized, M, A = AccessControlList>
 where
-    Schema: DatabaseSchema<M>,
+    Schema: DatabaseSchema<M, A>,
+    M: MemoryProvider,
+    A: AccessControl,
 {
     schema: &'a Schema,
-    _marker: std::marker::PhantomData<M>,
+    _marker: std::marker::PhantomData<(M, A)>,
 }
 
-impl<'a, Schema: ?Sized, M: MemoryProvider> JoinEngine<'a, Schema, M>
+impl<'a, Schema: ?Sized, M, A> JoinEngine<'a, Schema, M, A>
 where
-    Schema: DatabaseSchema<M>,
+    Schema: DatabaseSchema<M, A>,
+    M: MemoryProvider,
+    A: AccessControl,
 {
     pub fn new(schema: &'a Schema) -> Self {
         Self {
@@ -34,14 +39,16 @@ where
     }
 }
 
-impl<Schema: ?Sized, M: MemoryProvider> JoinEngine<'_, Schema, M>
+impl<Schema: ?Sized, M, A> JoinEngine<'_, Schema, M, A>
 where
-    Schema: DatabaseSchema<M>,
+    Schema: DatabaseSchema<M, A>,
+    M: MemoryProvider,
+    A: AccessControl,
 {
     /// Executes a join query using nested-loop join.
     pub fn join(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         from_table: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
@@ -222,7 +229,7 @@ where
             let a_val = self.find_value_in_joined_row(a, table, col);
             let b_val = self.find_value_in_joined_row(b, table, col);
 
-            WasmDbmsDatabase::<M>::sort_values_with_direction(a_val, b_val, direction)
+            WasmDbmsDatabase::<M, A>::sort_values_with_direction(a_val, b_val, direction)
         });
     }
 

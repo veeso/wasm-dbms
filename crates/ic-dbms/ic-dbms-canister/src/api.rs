@@ -1,3 +1,6 @@
+// Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-CANONICAL-DOCS
+
 //! API generic interface to be used by different DBMS canisters.
 
 mod inspect;
@@ -10,32 +13,25 @@ use ic_dbms_api::prelude::{
 use wasm_dbms::prelude::{DatabaseSchema, WasmDbmsDatabase};
 
 pub use self::inspect::inspect;
-use crate::memory::{DBMS_CONTEXT, IcMemoryProvider};
+use crate::memory::{DBMS_CONTEXT, IcAccessControlList, IcMemoryProvider};
 use crate::trap;
 
 /// Adds the given principal to the ACL of the canister.
 pub fn acl_add_principal(principal: Principal) -> IcDbmsResult<()> {
     assert_caller_is_allowed();
-    let identity = principal.as_slice().to_vec();
-    DBMS_CONTEXT.with(|ctx| ctx.acl_add(identity))
+    DBMS_CONTEXT.with(|ctx| ctx.acl_add(principal))
 }
 
 /// Removes the given principal from the ACL of the canister.
 pub fn acl_remove_principal(principal: Principal) -> IcDbmsResult<()> {
     assert_caller_is_allowed();
-    let identity = principal.as_slice();
-    DBMS_CONTEXT.with(|ctx| ctx.acl_remove(identity))
+    DBMS_CONTEXT.with(|ctx| ctx.acl_remove(&principal))
 }
 
 /// Lists all principals in the ACL of the canister.
 pub fn acl_allowed_principals() -> Vec<Principal> {
     assert_caller_is_allowed();
-    DBMS_CONTEXT.with(|ctx| {
-        ctx.acl_allowed()
-            .iter()
-            .filter_map(|bytes| Principal::try_from_slice(bytes).ok())
-            .collect()
-    })
+    DBMS_CONTEXT.with(|ctx| ctx.acl_allowed())
 }
 
 /// Begins a new transaction and returns its ID.
@@ -48,7 +44,7 @@ pub fn begin_transaction() -> TransactionId {
 /// Commits the transaction with the given ID.
 pub fn commit(
     transaction_id: TransactionId,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 ) -> IcDbmsResult<()> {
     assert_caller_is_allowed();
     assert_caller_owns_transaction(Some(&transaction_id));
@@ -61,7 +57,7 @@ pub fn commit(
 /// Rolls back the transaction with the given ID.
 pub fn rollback(
     transaction_id: TransactionId,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 ) -> IcDbmsResult<()> {
     assert_caller_is_allowed();
     assert_caller_owns_transaction(Some(&transaction_id));
@@ -75,7 +71,7 @@ pub fn rollback(
 pub fn select<T>(
     query: Query,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 ) -> IcDbmsResult<Vec<T::Record>>
 where
     T: TableSchema,
@@ -94,7 +90,7 @@ pub fn select_raw(
     table: &str,
     query: Query,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 ) -> IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
@@ -110,7 +106,7 @@ pub fn select_join(
     table: &str,
     query: Query,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 ) -> IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
@@ -123,7 +119,7 @@ pub fn select_join(
 pub fn insert<T>(
     record: T::Insert,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 ) -> IcDbmsResult<()>
 where
     T: TableSchema,
@@ -138,7 +134,7 @@ where
 pub fn update<T>(
     patch: T::Update,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 ) -> IcDbmsResult<u64>
 where
     T: TableSchema,
@@ -154,7 +150,7 @@ pub fn delete<T>(
     behaviour: DeleteBehavior,
     filter: Option<Filter>,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 ) -> IcDbmsResult<u64>
 where
     T: TableSchema,
@@ -173,11 +169,11 @@ where
 /// cannot outlive the `with` closure.
 fn with_database<F, R>(
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider> + 'static,
+    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
     f: F,
 ) -> R
 where
-    F: for<'a> FnOnce(&WasmDbmsDatabase<'a, IcMemoryProvider>) -> R,
+    F: for<'a> FnOnce(&WasmDbmsDatabase<'a, IcMemoryProvider, IcAccessControlList>) -> R,
 {
     DBMS_CONTEXT.with(|ctx| {
         let db = match transaction_id {
@@ -193,8 +189,7 @@ where
 /// Traps if the caller is not allowed.
 fn assert_caller_is_allowed() {
     let caller = crate::utils::caller();
-    let identity = caller.as_slice();
-    if !DBMS_CONTEXT.with(|ctx| ctx.acl_is_allowed(identity)) {
+    if !DBMS_CONTEXT.with(|ctx| ctx.acl_is_allowed(&caller)) {
         trap!("Caller {caller} is not allowed to perform this operation");
     }
 }
@@ -368,7 +363,7 @@ mod tests {
 
     fn init_acl() {
         DBMS_CONTEXT.with(|ctx| {
-            ctx.acl_add(alice().as_slice().to_vec()).unwrap();
+            ctx.acl_add(alice()).unwrap();
         });
     }
 }

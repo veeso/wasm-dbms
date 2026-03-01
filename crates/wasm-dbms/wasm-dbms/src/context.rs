@@ -1,4 +1,5 @@
-// Rust guideline compliant 2026-02-28
+// Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-PUBLIC-DEBUG, M-CANONICAL-DOCS
 
 //! DBMS context that owns all database state.
 //!
@@ -11,7 +12,8 @@ use std::cell::RefCell;
 
 use wasm_dbms_api::prelude::{DbmsResult, TransactionId};
 use wasm_dbms_memory::prelude::{
-    AccessControlList, MemoryManager, MemoryProvider, SchemaRegistry, TableRegistryPage,
+    AccessControl, AccessControlList, MemoryManager, MemoryProvider, SchemaRegistry,
+    TableRegistryPage,
 };
 
 use crate::transaction::session::TransactionSession;
@@ -22,37 +24,67 @@ use crate::transaction::session::TransactionSession;
 /// borrowing different components can coexist without requiring
 /// `&mut self` on the context.
 ///
+/// The access-control provider `A` defaults to [`AccessControlList`].
+/// Runtimes that do not need ACL can use [`NoAccessControl`](wasm_dbms_memory::NoAccessControl).
+///
 /// # IC integration
 ///
 /// On the Internet Computer the context lives in a `thread_local!`:
 ///
 /// ```ignore
 /// thread_local! {
-///     static DBMS: DbmsContext<IcMemoryProvider> =
-///         DbmsContext::new(IcMemoryProvider::default());
+///     static DBMS: DbmsContext<IcMemoryProvider, IcAccessControlList> =
+///         DbmsContext::with_acl(IcMemoryProvider::default());
 /// }
 /// ```
-pub struct DbmsContext<M: MemoryProvider> {
+pub struct DbmsContext<M, A = AccessControlList>
+where
+    M: MemoryProvider,
+    A: AccessControl,
+{
     /// Memory manager for page-level operations.
     pub(crate) mm: RefCell<MemoryManager<M>>,
 
     /// Schema registry mapping table names to page locations.
     pub(crate) schema_registry: RefCell<SchemaRegistry>,
 
-    /// Access-control list storing allowed identities.
-    pub(crate) acl: RefCell<AccessControlList>,
+    /// Access-control provider storing allowed identities.
+    pub(crate) acl: RefCell<A>,
 
     /// Active transaction sessions.
     pub(crate) transaction_session: RefCell<TransactionSession>,
 }
 
-impl<M: MemoryProvider> DbmsContext<M> {
-    /// Creates a new DBMS context, initializing the memory manager and
-    /// loading persisted schema and ACL data.
+impl<M> DbmsContext<M>
+where
+    M: MemoryProvider,
+{
+    /// Creates a new DBMS context with the default [`AccessControlList`],
+    /// initializing the memory manager and loading persisted state.
     pub fn new(memory: M) -> Self {
         let mm = MemoryManager::init(memory);
         let schema_registry = SchemaRegistry::load(&mm).unwrap_or_default();
         let acl = AccessControlList::load(&mm).unwrap_or_default();
+
+        Self {
+            mm: RefCell::new(mm),
+            schema_registry: RefCell::new(schema_registry),
+            acl: RefCell::new(acl),
+            transaction_session: RefCell::new(TransactionSession::default()),
+        }
+    }
+}
+
+impl<M, A> DbmsContext<M, A>
+where
+    M: MemoryProvider,
+    A: AccessControl,
+{
+    /// Creates a new DBMS context with a custom access control provider.
+    pub fn with_acl(memory: M) -> Self {
+        let mm = MemoryManager::init(memory);
+        let schema_registry = SchemaRegistry::load(&mm).unwrap_or_default();
+        let acl = A::load(&mm).unwrap_or_default();
 
         Self {
             mm: RefCell::new(mm),
@@ -72,27 +104,27 @@ impl<M: MemoryProvider> DbmsContext<M> {
     }
 
     /// Adds an identity to the access-control list.
-    pub fn acl_add(&self, identity: Vec<u8>) -> DbmsResult<()> {
+    pub fn acl_add(&self, identity: A::Id) -> DbmsResult<()> {
         let mut acl = self.acl.borrow_mut();
         let mut mm = self.mm.borrow_mut();
-        acl.add_principal(identity, &mut mm).map_err(Into::into)
+        acl.add_identity(identity, &mut mm).map_err(Into::into)
     }
 
     /// Removes an identity from the access-control list.
-    pub fn acl_remove(&self, identity: &[u8]) -> DbmsResult<()> {
+    pub fn acl_remove(&self, identity: &A::Id) -> DbmsResult<()> {
         let mut acl = self.acl.borrow_mut();
         let mut mm = self.mm.borrow_mut();
-        acl.remove_principal(identity, &mut mm).map_err(Into::into)
+        acl.remove_identity(identity, &mut mm).map_err(Into::into)
     }
 
     /// Returns all identities currently in the access-control list.
-    pub fn acl_allowed(&self) -> Vec<Vec<u8>> {
+    pub fn acl_allowed(&self) -> Vec<A::Id> {
         let acl = self.acl.borrow();
-        acl.allowed_principals().to_vec()
+        acl.allowed_identities()
     }
 
     /// Returns whether the given identity is allowed by the ACL.
-    pub fn acl_is_allowed(&self, identity: &[u8]) -> bool {
+    pub fn acl_is_allowed(&self, identity: &A::Id) -> bool {
         let acl = self.acl.borrow();
         acl.is_allowed(identity)
     }
@@ -110,7 +142,11 @@ impl<M: MemoryProvider> DbmsContext<M> {
     }
 }
 
-impl<M: MemoryProvider> std::fmt::Debug for DbmsContext<M> {
+impl<M, A> std::fmt::Debug for DbmsContext<M, A>
+where
+    M: MemoryProvider,
+    A: AccessControl + std::fmt::Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DbmsContext")
             .field("schema_registry", &self.schema_registry)
@@ -136,8 +172,8 @@ mod tests {
     fn test_should_add_acl_identity() {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
         ctx.acl_add(vec![1, 2, 3]).unwrap();
-        assert!(ctx.acl_is_allowed(&[1, 2, 3]));
-        assert!(!ctx.acl_is_allowed(&[4, 5, 6]));
+        assert!(ctx.acl_is_allowed(&vec![1, 2, 3]));
+        assert!(!ctx.acl_is_allowed(&vec![4, 5, 6]));
     }
 
     #[test]
@@ -145,9 +181,9 @@ mod tests {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
         ctx.acl_add(vec![1, 2, 3]).unwrap();
         ctx.acl_add(vec![4, 5, 6]).unwrap();
-        ctx.acl_remove(&[1, 2, 3]).unwrap();
-        assert!(!ctx.acl_is_allowed(&[1, 2, 3]));
-        assert!(ctx.acl_is_allowed(&[4, 5, 6]));
+        ctx.acl_remove(&vec![1, 2, 3]).unwrap();
+        assert!(!ctx.acl_is_allowed(&vec![1, 2, 3]));
+        assert!(ctx.acl_is_allowed(&vec![4, 5, 6]));
     }
 
     #[test]

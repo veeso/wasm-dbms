@@ -1,4 +1,5 @@
-// Rust guideline compliant 2026-02-28
+// Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 //! Core DBMS database struct providing CRUD and transaction operations.
 
@@ -11,7 +12,9 @@ use wasm_dbms_api::prelude::{
     TableColumns, TableError, TableRecord, TableSchema, TransactionError, TransactionId,
     UpdateRecord, Value, ValuesSource,
 };
-use wasm_dbms_memory::prelude::{MemoryProvider, NextRecord, TableRegistry};
+use wasm_dbms_memory::prelude::{
+    AccessControl, AccessControlList, MemoryProvider, NextRecord, TableRegistry,
+};
 
 use crate::context::DbmsContext;
 use crate::schema::DatabaseSchema;
@@ -20,22 +23,31 @@ use crate::transaction::{DatabaseOverlay, Transaction, TransactionOp};
 /// Default capacity for SELECT queries.
 const DEFAULT_SELECT_CAPACITY: usize = 128;
 
-/// The main DBMS database struct, generic over `MemoryProvider`.
+/// The main DBMS database struct, generic over `MemoryProvider` and
+/// `AccessControl`.
 ///
 /// This struct borrows from a [`DbmsContext`] and provides all CRUD
 /// operations, transaction management, and query execution.
-pub struct WasmDbmsDatabase<'ctx, M: MemoryProvider> {
+pub struct WasmDbmsDatabase<'ctx, M, A = AccessControlList>
+where
+    M: MemoryProvider,
+    A: AccessControl,
+{
     /// Reference to the DBMS context owning all state.
-    ctx: &'ctx DbmsContext<M>,
+    ctx: &'ctx DbmsContext<M, A>,
     /// Schema for dynamic dispatch of table operations.
-    schema: Box<dyn DatabaseSchema<M> + 'ctx>,
+    schema: Box<dyn DatabaseSchema<M, A> + 'ctx>,
     /// Active transaction ID, if any.
     transaction: Option<TransactionId>,
 }
 
-impl<'ctx, M: MemoryProvider> WasmDbmsDatabase<'ctx, M> {
+impl<'ctx, M, A> WasmDbmsDatabase<'ctx, M, A>
+where
+    M: MemoryProvider,
+    A: AccessControl,
+{
     /// Creates a one-shot (non-transactional) database instance.
-    pub fn oneshot(ctx: &'ctx DbmsContext<M>, schema: impl DatabaseSchema<M> + 'ctx) -> Self {
+    pub fn oneshot(ctx: &'ctx DbmsContext<M, A>, schema: impl DatabaseSchema<M, A> + 'ctx) -> Self {
         Self {
             ctx,
             schema: Box::new(schema),
@@ -45,8 +57,8 @@ impl<'ctx, M: MemoryProvider> WasmDbmsDatabase<'ctx, M> {
 
     /// Creates a transactional database instance.
     pub fn from_transaction(
-        ctx: &'ctx DbmsContext<M>,
-        schema: impl DatabaseSchema<M> + 'ctx,
+        ctx: &'ctx DbmsContext<M, A>,
+        schema: impl DatabaseSchema<M, A> + 'ctx,
         transaction_id: TransactionId,
     ) -> Self {
         Self {
@@ -90,7 +102,7 @@ impl<'ctx, M: MemoryProvider> WasmDbmsDatabase<'ctx, M> {
     /// (analogous to IC canister trapping).
     fn atomic<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&WasmDbmsDatabase<'ctx, M>) -> DbmsResult<R>,
+        F: FnOnce(&WasmDbmsDatabase<'ctx, M, A>) -> DbmsResult<R>,
     {
         match f(self) {
             Ok(res) => res,
@@ -537,7 +549,11 @@ where
     Ok(record)
 }
 
-impl<M: MemoryProvider> Database for WasmDbmsDatabase<'_, M> {
+impl<M, A> Database for WasmDbmsDatabase<'_, M, A>
+where
+    M: MemoryProvider,
+    A: AccessControl,
+{
     fn select<T>(&self, query: Query) -> DbmsResult<Vec<T::Record>>
     where
         T: TableSchema,

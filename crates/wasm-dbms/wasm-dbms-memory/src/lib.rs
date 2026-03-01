@@ -8,7 +8,9 @@
 //! - [`HeapMemoryProvider`] for testing
 //! - [`MemoryManager`] for page-level memory operations
 //! - [`SchemaRegistry`] for table schema persistence
+//! - [`AccessControl`] trait for pluggable access control
 //! - [`AccessControlList`] for identity-based access control
+//! - [`NoAccessControl`] for runtimes without access control
 //! - [`TableRegistry`] for record-level storage and retrieval
 
 extern crate self as wasm_dbms_memory;
@@ -19,7 +21,7 @@ mod provider;
 mod schema_registry;
 pub mod table_registry;
 
-pub use self::acl::AccessControlList;
+pub use self::acl::{AccessControl, AccessControlList, NoAccessControl};
 pub use self::memory_manager::{MemoryManager, align_up};
 pub use self::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
 pub use self::schema_registry::{SchemaRegistry, TableRegistryPage};
@@ -27,7 +29,7 @@ pub use self::table_registry::{NextRecord, TableReader, TableRegistry};
 
 /// Prelude re-exports for convenient use.
 pub mod prelude {
-    pub use super::acl::AccessControlList;
+    pub use super::acl::{AccessControl, AccessControlList, NoAccessControl};
     pub use super::memory_manager::{MemoryManager, align_up};
     pub use super::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
     pub use super::schema_registry::{SchemaRegistry, TableRegistryPage};

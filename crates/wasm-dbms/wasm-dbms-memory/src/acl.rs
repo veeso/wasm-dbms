@@ -1,4 +1,5 @@
-// Rust guideline compliant 2026-02-28
+// Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-PUBLIC-DEBUG, M-CANONICAL-DOCS
 
 use wasm_dbms_api::prelude::{
     DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, PageOffset,
@@ -6,49 +7,140 @@ use wasm_dbms_api::prelude::{
 
 use crate::{MemoryManager, MemoryProvider};
 
-/// Access control list module.
+/// Trait for access control providers.
 ///
-/// Takes care of storing and retrieving the list of caller identities
-/// that have access to the database.
+/// Each implementation specifies its own `Id` type so that runtimes
+/// can use native identity representations (e.g. `Principal` on IC,
+/// raw bytes elsewhere).
 ///
-/// Identities are stored as raw byte slices (`Vec<u8>`) so that the
-/// memory layer stays runtime-agnostic (no dependency on `candid::Principal`).
+/// Runtimes that need ACL use [`AccessControlList`] (the default).
+/// Runtimes without ACL use [`NoAccessControl`] which allows everything.
+pub trait AccessControl: Default {
+    /// The identity type used by this access control provider.
+    type Id;
+
+    /// Loads ACL state from persisted memory.
+    fn load<M>(mm: &MemoryManager<M>) -> MemoryResult<Self>
+    where
+        M: MemoryProvider,
+        Self: Sized;
+
+    /// Checks whether an identity is allowed.
+    fn is_allowed(&self, identity: &Self::Id) -> bool;
+
+    /// Returns all allowed identities.
+    fn allowed_identities(&self) -> Vec<Self::Id>;
+
+    /// Adds an identity and persists the change.
+    fn add_identity<M>(
+        &mut self,
+        identity: Self::Id,
+        mm: &mut MemoryManager<M>,
+    ) -> MemoryResult<()>
+    where
+        M: MemoryProvider;
+
+    /// Removes an identity and persists the change.
+    fn remove_identity<M>(
+        &mut self,
+        identity: &Self::Id,
+        mm: &mut MemoryManager<M>,
+    ) -> MemoryResult<()>
+    where
+        M: MemoryProvider;
+}
+
+/// ACL provider that allows all identities unconditionally.
+///
+/// Use this for runtimes that handle authorization externally
+/// or do not need access control.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct NoAccessControl;
+
+impl AccessControl for NoAccessControl {
+    type Id = ();
+
+    fn load<M>(_mm: &MemoryManager<M>) -> MemoryResult<Self>
+    where
+        M: MemoryProvider,
+    {
+        Ok(Self)
+    }
+
+    fn is_allowed(&self, _identity: &Self::Id) -> bool {
+        true
+    }
+
+    fn allowed_identities(&self) -> Vec<Self::Id> {
+        vec![]
+    }
+
+    fn add_identity<M>(
+        &mut self,
+        _identity: Self::Id,
+        _mm: &mut MemoryManager<M>,
+    ) -> MemoryResult<()>
+    where
+        M: MemoryProvider,
+    {
+        Ok(())
+    }
+
+    fn remove_identity<M>(
+        &mut self,
+        _identity: &Self::Id,
+        _mm: &mut MemoryManager<M>,
+    ) -> MemoryResult<()>
+    where
+        M: MemoryProvider,
+    {
+        Ok(())
+    }
+}
+
+/// Access control list storing allowed identities as raw bytes.
+///
+/// Identities are stored as `Vec<u8>` so that the memory layer stays
+/// runtime-agnostic (no dependency on `candid::Principal`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AccessControlList {
     allowed: Vec<Vec<u8>>,
 }
 
 impl AccessControlList {
-    /// Load [`AccessControlList`] from memory.
-    pub fn load(mm: &MemoryManager<impl MemoryProvider>) -> MemoryResult<Self> {
-        // read memory location from MemoryManager
+    /// Saves the current ACL state to memory.
+    fn save<M>(&self, mm: &mut MemoryManager<M>) -> MemoryResult<()>
+    where
+        M: MemoryProvider,
+    {
+        mm.write_at(mm.acl_page(), 0, self)
+    }
+}
+
+impl AccessControl for AccessControlList {
+    type Id = Vec<u8>;
+
+    fn load<M>(mm: &MemoryManager<M>) -> MemoryResult<Self>
+    where
+        M: MemoryProvider,
+    {
         mm.read_at(mm.acl_page(), 0)
     }
 
-    /// Save [`AccessControlList`] to memory.
-    pub fn save(&self, mm: &mut MemoryManager<impl MemoryProvider>) -> MemoryResult<()> {
-        mm.write_at(mm.acl_page(), 0, self)
+    fn is_allowed(&self, identity: &Self::Id) -> bool {
+        self.allowed
+            .iter()
+            .any(|a| a.as_slice() == identity.as_slice())
     }
 
-    /// Get the list of allowed caller identities.
-    pub fn allowed_principals(&self) -> &[Vec<u8>] {
-        &self.allowed
+    fn allowed_identities(&self) -> Vec<Self::Id> {
+        self.allowed.clone()
     }
 
-    /// Get whether a caller identity is allowed.
-    pub fn is_allowed(&self, identity: &[u8]) -> bool {
-        self.allowed.iter().any(|a| a.as_slice() == identity)
-    }
-
-    /// Add a caller identity to the allowed list.
-    ///
-    /// If the identity is already present, do nothing.
-    /// Otherwise, add the identity and write the updated ACL to memory.
-    pub fn add_principal(
-        &mut self,
-        identity: Vec<u8>,
-        mm: &mut MemoryManager<impl MemoryProvider>,
-    ) -> MemoryResult<()> {
+    fn add_identity<M>(&mut self, identity: Self::Id, mm: &mut MemoryManager<M>) -> MemoryResult<()>
+    where
+        M: MemoryProvider,
+    {
         if !self.is_allowed(&identity) {
             self.allowed.push(identity);
             self.save(mm)?;
@@ -57,16 +149,19 @@ impl AccessControlList {
         Ok(())
     }
 
-    /// Remove a caller identity from the allowed list.
-    ///
-    /// If the identity is not present, do nothing.
-    /// Otherwise, remove the identity and write the updated ACL to memory.
-    pub fn remove_principal(
+    fn remove_identity<M>(
         &mut self,
-        identity: &[u8],
-        mm: &mut MemoryManager<impl MemoryProvider>,
-    ) -> MemoryResult<()> {
-        if let Some(pos) = self.allowed.iter().position(|p| p.as_slice() == identity) {
+        identity: &Self::Id,
+        mm: &mut MemoryManager<M>,
+    ) -> MemoryResult<()>
+    where
+        M: MemoryProvider,
+    {
+        if let Some(pos) = self
+            .allowed
+            .iter()
+            .position(|p| p.as_slice() == identity.as_slice())
+        {
             self.allowed.swap_remove(pos);
             self.save(mm)?;
         }
@@ -160,56 +255,63 @@ mod tests {
     }
 
     #[test]
-    fn test_acl_add_remove_principal() {
+    fn test_acl_add_remove_identity() {
         let mut mm = make_mm();
         let mut acl = AccessControlList::default();
         let identity = vec![0x00, 0x00, 0x00, 0x00, 0x01, 0x01];
         assert!(!acl.is_allowed(&identity));
-        acl.add_principal(identity.clone(), &mut mm).unwrap();
+        acl.add_identity(identity.clone(), &mut mm).unwrap();
         let other = vec![0xDE, 0xAD, 0xBE, 0xEF];
-        acl.add_principal(other.clone(), &mut mm).unwrap();
+        acl.add_identity(other.clone(), &mut mm).unwrap();
         assert!(acl.is_allowed(&identity));
         assert!(acl.is_allowed(&other));
-        assert_eq!(acl.allowed.len(), 2);
-        acl.remove_principal(&other, &mut mm).unwrap();
+        assert_eq!(acl.allowed_identities().len(), 2);
+        acl.remove_identity(&other, &mut mm).unwrap();
     }
 
     #[test]
     #[should_panic(expected = "ACL cannot be empty")]
-    fn test_remove_last_principal_traps() {
+    fn test_remove_last_identity_traps() {
         let mut mm = make_mm();
         let mut acl = AccessControlList::default();
         let identity = vec![0x00, 0x00, 0x00, 0x00, 0x01, 0x01];
-        acl.add_principal(identity.clone(), &mut mm).unwrap();
+        acl.add_identity(identity.clone(), &mut mm).unwrap();
         assert!(acl.is_allowed(&identity));
-        acl.remove_principal(&identity, &mut mm).unwrap(); // should panic
+        acl.remove_identity(&identity, &mut mm).unwrap(); // should panic
     }
 
     #[test]
-    fn test_should_add_more_principals() {
+    fn test_should_add_more_identities() {
         let mut mm = make_mm();
         let mut acl = AccessControlList::default();
         let identity1 = vec![0x00, 0x00, 0x00, 0x00, 0x01, 0x01];
         let identity2 = vec![0xDE, 0xAD, 0xBE, 0xEF];
-        acl.add_principal(identity1.clone(), &mut mm).unwrap();
-        acl.add_principal(identity2.clone(), &mut mm).unwrap();
+        acl.add_identity(identity1.clone(), &mut mm).unwrap();
+        acl.add_identity(identity2.clone(), &mut mm).unwrap();
         assert!(acl.is_allowed(&identity1));
         assert!(acl.is_allowed(&identity2));
         assert_eq!(
-            acl.allowed_principals(),
-            &[identity1.clone(), identity2.clone()]
+            acl.allowed_identities(),
+            vec![identity1.clone(), identity2.clone()]
         );
     }
 
     #[test]
-    fn test_add_principal_should_write_to_memory() {
+    fn test_add_identity_should_write_to_memory() {
         let mut mm = make_mm();
         let mut acl = AccessControlList::default();
         let identity = vec![0x00, 0x00, 0x00, 0x00, 0x01, 0x01];
-        acl.add_principal(identity.clone(), &mut mm).unwrap();
+        acl.add_identity(identity.clone(), &mut mm).unwrap();
 
         // Load from memory and check if the identity is present
         let loaded_acl = AccessControlList::load(&mm).unwrap();
         assert!(loaded_acl.is_allowed(&identity));
+    }
+
+    #[test]
+    fn test_no_access_control_allows_everything() {
+        let acl = NoAccessControl;
+        assert!(acl.is_allowed(&()));
+        assert!(acl.allowed_identities().is_empty());
     }
 }

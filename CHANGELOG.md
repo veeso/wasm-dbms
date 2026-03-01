@@ -15,6 +15,14 @@ Released on 2026-02-27
 
 ### Added
 
+- `AccessControl` trait with associated `type Id` for runtime-agnostic ACL (#48)
+  > Introduced the `AccessControl` trait in `wasm-dbms-memory` to abstract access control behind
+  > a generic interface. Different runtimes can now use different identity types: `Vec<u8>` for
+  > the default `AccessControlList`, `Principal` for IC (`IcAccessControlList`), or `()` for
+  > `NoAccessControl` (runtimes that don't need ACL). The `A: AccessControl` generic parameter
+  > is propagated through `DbmsContext<M, A>`, `WasmDbmsDatabase<'ctx, M, A>`,
+  > `DatabaseSchema<M, A>`, and all integrity validators and join engine types. Default type
+  > parameters preserve backward compatibility.
 - `#[derive(DatabaseSchema)]` macro for automatic `DatabaseSchema<M>` trait generation (#48)
   > A new derive macro that auto-generates the `DatabaseSchema<M>` trait implementation
   > from a `#[tables(...)]` attribute, eliminating ~130+ lines of boilerplate per schema.
@@ -34,6 +42,13 @@ Released on 2026-02-27
 
 ### Breaking Changes
 
+- `AccessControlList` methods renamed: `add_principal` → `add_identity`, `remove_principal` → `remove_identity`, `allowed_principals` → `allowed_identities`
+  > These methods are now part of the `AccessControl` trait and use generic identity types
+  > instead of being hardcoded to `Principal`. Direct callers of `AccessControlList` must update
+  > method names. IC users interacting through the canister API are unaffected.
+- `DbmsContext`, `WasmDbmsDatabase`, `DatabaseSchema`, integrity validators, and join engine gain a second generic parameter `A: AccessControl`
+  > All types now carry `A: AccessControl` (defaulting to `AccessControlList`), which may require
+  > updating type annotations that previously only specified `M: MemoryProvider`.
 - Removed `Value::Principal` and `DataTypeKind::Principal` built-in variants
   > Principal is no longer a first-class data type. Use the `#[custom_type]` field annotation
   > on Principal fields instead, which treats Principal as a custom data type.

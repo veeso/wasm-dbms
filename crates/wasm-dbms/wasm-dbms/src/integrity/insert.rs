@@ -1,32 +1,35 @@
-// Rust guideline compliant 2026-02-28
+// Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 //! Integrity validator for insert operations.
 
 use wasm_dbms_api::prelude::{
     ColumnDef, Database as _, DbmsError, DbmsResult, Filter, Query, QueryError, TableSchema, Value,
 };
-use wasm_dbms_memory::prelude::MemoryProvider;
+use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
 
 use super::common;
 use crate::database::WasmDbmsDatabase;
 
 /// Integrity validator for insert operations.
-pub struct InsertIntegrityValidator<'a, T, M>
+pub struct InsertIntegrityValidator<'a, T, M, A = AccessControlList>
 where
     T: TableSchema,
     M: MemoryProvider,
+    A: AccessControl,
 {
-    database: &'a WasmDbmsDatabase<'a, M>,
+    database: &'a WasmDbmsDatabase<'a, M, A>,
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<'a, T, M> InsertIntegrityValidator<'a, T, M>
+impl<'a, T, M, A> InsertIntegrityValidator<'a, T, M, A>
 where
     T: TableSchema,
     M: MemoryProvider,
+    A: AccessControl,
 {
     /// Creates a new insert integrity validator.
-    pub fn new(dbms: &'a WasmDbmsDatabase<'a, M>) -> Self {
+    pub fn new(dbms: &'a WasmDbmsDatabase<'a, M, A>) -> Self {
         Self {
             database: dbms,
             _marker: std::marker::PhantomData,
@@ -34,10 +37,11 @@ where
     }
 }
 
-impl<T, M> InsertIntegrityValidator<'_, T, M>
+impl<T, M, A> InsertIntegrityValidator<'_, T, M, A>
 where
     T: TableSchema,
     M: MemoryProvider,
+    A: AccessControl,
 {
     /// Verifies whether the given insert record is valid.
     pub fn validate(&self, record_values: &[(ColumnDef, Value)]) -> DbmsResult<()> {

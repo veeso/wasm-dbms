@@ -1,9 +1,10 @@
 // Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 use wasm_dbms_api::prelude::{
     CandidColumnDef, ColumnDef, DbmsResult, DeleteBehavior, Filter, Query, Value,
 };
-use wasm_dbms_memory::prelude::MemoryProvider;
+use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
 
 use crate::database::WasmDbmsDatabase;
 
@@ -15,11 +16,15 @@ use crate::database::WasmDbmsDatabase;
 ///
 /// This trait is typically implemented by generated code from the
 /// `#[derive(DatabaseSchema)]` macro.
-pub trait DatabaseSchema<M: MemoryProvider> {
+pub trait DatabaseSchema<M, A = AccessControlList>
+where
+    M: MemoryProvider,
+    A: AccessControl,
+{
     /// Performs a generic select for the given table name and query.
     fn select(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>>;
@@ -28,7 +33,7 @@ pub trait DatabaseSchema<M: MemoryProvider> {
     /// that include source table names.
     fn select_join(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         from_table: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
@@ -41,7 +46,7 @@ pub trait DatabaseSchema<M: MemoryProvider> {
     /// Performs an insert for the given table name.
     fn insert(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
     ) -> DbmsResult<()>;
@@ -49,7 +54,7 @@ pub trait DatabaseSchema<M: MemoryProvider> {
     /// Performs a delete for the given table name.
     fn delete(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         delete_behavior: DeleteBehavior,
         filter: Option<Filter>,
@@ -58,7 +63,7 @@ pub trait DatabaseSchema<M: MemoryProvider> {
     /// Performs an update for the given table name.
     fn update(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         patch_values: &[(ColumnDef, Value)],
         filter: Option<Filter>,
@@ -67,7 +72,7 @@ pub trait DatabaseSchema<M: MemoryProvider> {
     /// Validates an insert operation.
     fn validate_insert(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
     ) -> DbmsResult<()>;
@@ -75,7 +80,7 @@ pub trait DatabaseSchema<M: MemoryProvider> {
     /// Validates an update operation.
     fn validate_update(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M>,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
         old_pk: Value,

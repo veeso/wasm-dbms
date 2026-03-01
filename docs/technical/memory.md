@@ -261,27 +261,34 @@ pub struct SchemaRegistry {
 
 ## ACL Storage
 
-The Access Control List is stored in Page 1:
+The Access Control List is stored in Page 1. Access control is abstracted
+behind the `AccessControl` trait, which allows different runtimes to use
+different identity types (e.g., `Principal` on IC, `Vec<u8>` for generic use).
 
 ```rust
-pub struct AccessControlList {
-    allowed: Vec<Principal>,
-}
+pub trait AccessControl: Default {
+    type Id;
 
-impl AccessControlList {
-    /// Load from stable memory
-    pub fn load() -> MemoryResult<Self>;
+    fn load<M>(mm: &MemoryManager<M>) -> MemoryResult<Self>
+    where
+        M: MemoryProvider,
+        Self: Sized;
 
-    /// Check if principal is allowed
-    pub fn is_allowed(&self, principal: &Principal) -> bool;
-
-    /// Add principal (writes to memory)
-    pub fn add_principal(&mut self, principal: Principal) -> MemoryResult<()>;
-
-    /// Remove principal (writes to memory)
-    pub fn remove_principal(&mut self, principal: &Principal) -> MemoryResult<()>;
+    fn is_allowed(&self, identity: &Self::Id) -> bool;
+    fn allowed_identities(&self) -> Vec<Self::Id>;
+    fn add_identity<M>(&mut self, identity: Self::Id, mm: &mut MemoryManager<M>) -> MemoryResult<()>
+    where
+        M: MemoryProvider;
+    fn remove_identity<M>(&mut self, identity: &Self::Id, mm: &mut MemoryManager<M>) -> MemoryResult<()>
+    where
+        M: MemoryProvider;
 }
 ```
+
+The default implementation `AccessControlList` uses `Vec<u8>` as its identity
+type. `NoAccessControl` is a no-op implementation (with `type Id = ()`) for
+runtimes that don't require ACL. The IC layer provides `IcAccessControlList`
+which wraps `AccessControlList` and uses `Principal` as its identity type.
 
 ---
 

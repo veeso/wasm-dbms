@@ -50,8 +50,7 @@ fn impl_init(tables: &[TableMetadata]) -> TokenStream2 {
             let args = args.unwrap_init();
             ::ic_dbms_canister::prelude::DBMS_CONTEXT.with(|ctx| {
                 for principal in args.allowed_principals {
-                    let identity = principal.as_slice().to_vec();
-                    if let Err(err) = ctx.acl_add(identity) {
+                    if let Err(err) = ctx.acl_add(principal) {
                         ::ic_cdk::trap(&format!(
                             "Failed to add principal to ACL during init: {}",
                             err

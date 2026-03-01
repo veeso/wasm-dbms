@@ -10,7 +10,7 @@ use self::metadata::TableEntry;
 
 /// Entry point for the IC `#[derive(DatabaseSchema)]` macro.
 ///
-/// Generates `impl<M> DatabaseSchema<M> for #struct` using
+/// Generates `impl<M, A> DatabaseSchema<M, A> for #struct` using
 /// `::ic_dbms_canister::prelude::` and `::ic_dbms_api::prelude::` paths
 /// so the macro works in IC canister crates that depend on
 /// `ic-dbms-canister` without requiring direct `wasm-dbms` dependencies.
@@ -27,7 +27,7 @@ pub fn database_schema(input: DeriveInput) -> syn::Result<TokenStream2> {
     })
 }
 
-/// Generates `impl<M> DatabaseSchema<M> for #struct_ident` with all
+/// Generates `impl<M, A> DatabaseSchema<M, A> for #struct_ident` with all
 /// seven required trait methods using IC crate paths.
 fn impl_database_schema(struct_ident: &syn::Ident, tables: &[TableEntry]) -> TokenStream2 {
     let select_fn = impl_select(tables);
@@ -39,9 +39,10 @@ fn impl_database_schema(struct_ident: &syn::Ident, tables: &[TableEntry]) -> Tok
     let validate_update_fn = impl_validate_update(tables);
 
     quote::quote! {
-        impl<M> ::ic_dbms_canister::prelude::DatabaseSchema<M> for #struct_ident
+        impl<M, A> ::ic_dbms_canister::prelude::DatabaseSchema<M, A> for #struct_ident
         where
             M: ::ic_dbms_canister::prelude::MemoryProvider,
+            A: ::ic_dbms_canister::prelude::AccessControl,
         {
             #select_fn
             #referenced_tables_fn
@@ -62,11 +63,12 @@ fn impl_register_tables(struct_ident: &syn::Ident, tables: &[TableEntry]) -> Tok
         impl #struct_ident {
             /// Registers all tables managed by this schema in the given
             /// DBMS context.
-            pub fn register_tables<M>(
-                ctx: &::ic_dbms_canister::prelude::DbmsContext<M>,
+            pub fn register_tables<M, A>(
+                ctx: &::ic_dbms_canister::prelude::DbmsContext<M, A>,
             ) -> ::ic_dbms_api::prelude::IcDbmsResult<()>
             where
                 M: ::ic_dbms_canister::prelude::MemoryProvider,
+                A: ::ic_dbms_canister::prelude::AccessControl,
             {
                 #( ctx.register_table::<#table_idents>()?; )*
                 Ok(())
@@ -94,7 +96,7 @@ fn impl_select(tables: &[TableEntry]) -> TokenStream2 {
     quote::quote! {
         fn select(
             &self,
-            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M, A>,
             table_name: &str,
             query: ::ic_dbms_api::prelude::Query,
         ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)>>> {
@@ -153,7 +155,7 @@ fn impl_insert(tables: &[TableEntry]) -> TokenStream2 {
     quote::quote! {
         fn insert(
             &self,
-            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M, A>,
             table_name: &'static str,
             record_values: &[(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)],
         ) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
@@ -187,7 +189,7 @@ fn impl_delete(tables: &[TableEntry]) -> TokenStream2 {
     quote::quote! {
         fn delete(
             &self,
-            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M, A>,
             table_name: &'static str,
             delete_behavior: ::ic_dbms_api::prelude::DeleteBehavior,
             filter: Option<::ic_dbms_api::prelude::Filter>,
@@ -223,7 +225,7 @@ fn impl_update(tables: &[TableEntry]) -> TokenStream2 {
     quote::quote! {
         fn update(
             &self,
-            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M, A>,
             table_name: &'static str,
             patch_values: &[(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)],
             filter: Option<::ic_dbms_api::prelude::Filter>,
@@ -249,7 +251,7 @@ fn impl_validate_insert(tables: &[TableEntry]) -> TokenStream2 {
             let entity = &t.table;
             quote::quote! {
                 name if name == #entity::table_name() => {
-                    ::ic_dbms_canister::prelude::InsertIntegrityValidator::<#entity, M>::new(dbms).validate(record_values)
+                    ::ic_dbms_canister::prelude::InsertIntegrityValidator::<#entity, M, A>::new(dbms).validate(record_values)
                 }
             }
         })
@@ -258,7 +260,7 @@ fn impl_validate_insert(tables: &[TableEntry]) -> TokenStream2 {
     quote::quote! {
         fn validate_insert(
             &self,
-            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M, A>,
             table_name: &'static str,
             record_values: &[(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)],
         ) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
@@ -281,7 +283,7 @@ fn impl_validate_update(tables: &[TableEntry]) -> TokenStream2 {
             let entity = &t.table;
             quote::quote! {
                 name if name == #entity::table_name() => {
-                    ::ic_dbms_canister::prelude::UpdateIntegrityValidator::<#entity, M>::new(dbms, old_pk).validate(record_values)
+                    ::ic_dbms_canister::prelude::UpdateIntegrityValidator::<#entity, M, A>::new(dbms, old_pk).validate(record_values)
                 }
             }
         })
@@ -290,7 +292,7 @@ fn impl_validate_update(tables: &[TableEntry]) -> TokenStream2 {
     quote::quote! {
         fn validate_update(
             &self,
-            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M, A>,
             table_name: &'static str,
             record_values: &[(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)],
             old_pk: ::ic_dbms_api::prelude::Value,
