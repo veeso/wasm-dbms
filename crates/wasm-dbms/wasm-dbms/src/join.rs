@@ -229,7 +229,7 @@ where
             let a_val = self.find_value_in_joined_row(a, table, col);
             let b_val = self.find_value_in_joined_row(b, table, col);
 
-            WasmDbmsDatabase::<M, A>::sort_values_with_direction(a_val, b_val, direction)
+            crate::database::sort_values_with_direction(a_val, b_val, direction)
         });
     }
 

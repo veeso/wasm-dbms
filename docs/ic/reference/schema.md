@@ -50,17 +50,39 @@ Without `CandidType` and `Deserialize`, the generated canister API will not comp
 
 ---
 
+## DatabaseSchema Macro
+
+The `DatabaseSchema` derive macro generates a `DatabaseSchema<M, A>` trait implementation that provides schema dispatch -- routing database operations to the correct table by name at runtime. This is required by the `DbmsCanister` macro.
+
+The IC variant of `DatabaseSchema` (provided by `ic-dbms-macros`) uses IC-specific crate paths (`::ic_dbms_canister::prelude::`) so that IC users do not need `wasm-dbms` as a direct dependency. A generic variant also exists in `wasm-dbms-macros` for non-IC runtimes.
+
+```rust
+use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
+use my_schema::{User, Post};
+
+#[derive(DatabaseSchema, DbmsCanister)]
+#[tables(User = "users", Post = "posts")]
+pub struct MyDbmsCanister;
+```
+
+The macro reads the `#[tables(...)]` attribute and generates:
+
+- A `DatabaseSchema<M, A>` trait implementation that dispatches `select`, `insert`, `update`, `delete`, and `select_raw` calls to the correct table by name
+- A `register_tables` associated method for convenient table registration during canister initialization
+
+---
+
 ## DbmsCanister Macro
 
-The `DbmsCanister` macro is an IC-specific procedural macro that generates a complete Internet Computer canister API from your table definitions. It is provided by the `ic-dbms-canister` crate.
+The `DbmsCanister` macro is an IC-specific procedural macro that generates a complete Internet Computer canister API from your table definitions. It is provided by the `ic-dbms-canister` crate. It requires the `DatabaseSchema` derive to also be present on the same struct.
 
 ### Basic Usage
 
 ```rust
-use ic_dbms_canister::prelude::DbmsCanister;
+use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
 use my_schema::{User, Post, Comment};
 
-#[derive(DbmsCanister)]
+#[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts", Comment = "comments")]
 pub struct MyDbmsCanister;
 
@@ -161,10 +183,10 @@ The `ic_cdk::export_candid!()` macro at the end of your canister `lib.rs` genera
 
 ```rust
 // canister/src/lib.rs
-use ic_dbms_canister::prelude::DbmsCanister;
+use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
 use my_schema::{User, Post};
 
-#[derive(DbmsCanister)]
+#[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]
 pub struct MyDbmsCanister;
 
@@ -222,10 +244,10 @@ pub struct Post {
 
 ```rust
 // canister/src/lib.rs
-use ic_dbms_canister::prelude::DbmsCanister;
+use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
 use my_schema::{User, Post};
 
-#[derive(DbmsCanister)]
+#[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]
 pub struct BlogDbmsCanister;
 

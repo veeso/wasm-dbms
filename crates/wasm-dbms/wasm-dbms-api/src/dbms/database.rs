@@ -67,7 +67,7 @@ pub trait Database {
     ///
     /// The transaction is consumed.
     ///
-    /// Any error during commit will trap the canister to ensure consistency.
+    /// Any error during commit will panic to ensure consistency.
     fn commit(&mut self) -> DbmsResult<()>;
 
     /// Rolls back the current transaction.

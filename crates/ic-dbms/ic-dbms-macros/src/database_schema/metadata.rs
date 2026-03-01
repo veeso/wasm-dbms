@@ -42,8 +42,7 @@ pub fn collect_schema_metadata(attrs: &[syn::Attribute]) -> syn::Result<SchemaMe
                 names.push((ident, value));
 
                 Ok(())
-            })
-            .expect("invalid syntax in #[tables]");
+            })?;
         }
     }
 

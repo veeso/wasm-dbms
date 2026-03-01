@@ -6,7 +6,7 @@ use crate::prelude::PageOffset;
 /// Default alignment in bytes for [`DataSize::Dynamic`] data types.
 pub const DEFAULT_ALIGNMENT: MSize = 32;
 
-/// This trait defines the encoding and decoding behaviour for data types used in the DBMS canister.
+/// This trait defines the encoding and decoding behaviour for data types used in the DBMS.
 pub trait Encode: Clone {
     /// The size characteristic of the data type.
     ///
@@ -36,7 +36,7 @@ pub trait Encode: Clone {
     fn size(&self) -> MSize;
 }
 
-/// Represents the size of data types used in the DBMS canister.
+/// Represents the size of data types used in the DBMS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataSize {
     /// A fixed size in bytes.

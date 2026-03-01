@@ -1,4 +1,4 @@
-//! This module exposes the data types used in the DBMS canister.
+//! This module exposes the data types used in the DBMS.
 
 use serde::{Deserialize, Serialize};
 

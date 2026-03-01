@@ -1,4 +1,4 @@
-// Rust guideline compliant 2026-02-28
+// Rust guideline compliant 2026-03-01
 
 //! Overlay reader that merges base table data with overlay changes.
 
@@ -13,7 +13,9 @@ where
     T: TableSchema,
     P: MemoryProvider,
 {
-    /// Track the position in the new rows.
+    /// Pre-collected inserted rows from the overlay.
+    inserted_rows: Vec<Vec<(ColumnDef, Value)>>,
+    /// Track the position in the inserted rows.
     new_rows_cursor: usize,
     /// Reference to the table overlay.
     table_overlay: &'a TableOverlay,
@@ -29,7 +31,9 @@ where
 {
     /// Creates a new overlay reader.
     pub fn new(table_overlay: &'a TableOverlay, table_reader: TableReader<'a, T, P>) -> Self {
+        let inserted_rows: Vec<_> = table_overlay.iter_inserted().collect();
         Self {
+            inserted_rows,
             new_rows_cursor: 0,
             table_overlay,
             table_reader,
@@ -56,10 +60,10 @@ where
         }
     }
 
-    /// Get the next row from the overlay's inserted records.
+    /// Gets the next row from the pre-collected inserted records.
     fn next_overlay_row(&mut self) -> Option<Vec<(ColumnDef, Value)>> {
-        let row_to_get = self.new_rows_cursor;
+        let row = self.inserted_rows.get(self.new_rows_cursor)?.clone();
         self.new_rows_cursor += 1;
-        self.table_overlay.iter_inserted().nth(row_to_get)
+        Some(row)
     }
 }

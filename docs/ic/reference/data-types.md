@@ -31,6 +31,7 @@ use ic_dbms_api::prelude::*;
 pub struct User {
     #[primary_key]
     pub id: Uint32,
+    #[custom_type]
     pub owner: Principal,  // IC principal who owns this record
 }
 ```
@@ -75,7 +76,9 @@ pub struct Document {
     #[primary_key]
     pub id: Uuid,
     pub title: Text,
+    #[custom_type]
     pub owner: Principal,      // Who created this
+    #[custom_type]
     pub last_editor: Principal, // Who last modified this
 }
 ```
@@ -84,7 +87,7 @@ pub struct Document {
 
 ```rust
 // Find all documents owned by the caller
-let filter = Filter::eq("owner", Value::Principal(ic_cdk::caller()));
+let filter = Filter::eq("owner", ic_cdk::caller().into());
 let query = Query::builder().filter(filter).build();
 let my_docs = client.select::<Document>(Document::table_name(), query, None).await??;
 ```
@@ -98,6 +101,7 @@ pub struct Task {
     #[primary_key]
     pub id: Uint32,
     pub title: Text,
+    #[custom_type]
     pub assignee: Nullable<Principal>,  // May be unassigned
 }
 ```

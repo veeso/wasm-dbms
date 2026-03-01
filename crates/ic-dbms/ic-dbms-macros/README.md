@@ -20,8 +20,7 @@ required by the `ic-dbms-canister`.
 
 ## Provided Derive Macros
 
-- `Encode`: Automatically implements the `Encode` trait for structs.
-- `Table`: Automatically implements the `TableSchema` trait and associated types.
+- `DatabaseSchema`: Automatically implements the `DatabaseSchema` trait for schema dispatch (IC variant, uses IC crate paths).
 - `DbmsCanister`: Automatically implements the API for the ic-dbms-canister.
 
 ## License

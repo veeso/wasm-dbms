@@ -51,7 +51,7 @@ Define your database schema using Rust structs:
 ```rust
 use candid::CandidType;
 use ic_dbms_api::prelude::{Text, Uint32};
-use ic_dbms_canister::prelude::{DbmsCanister, Table};
+use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister, Table};
 use serde::Deserialize;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
@@ -89,7 +89,7 @@ pub struct Post {
 Instantiate the database canister:
 
 ```rust
-#[derive(DbmsCanister)]
+#[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]
 pub struct IcDbmsCanisterGenerator;
 ```

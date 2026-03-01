@@ -161,22 +161,22 @@ fn impl_table_api(table: &TableMetadata, struct_ident: &syn::Ident) -> TokenStre
     quote::quote! {
         #[::ic_cdk::query]
         fn #select_fn_name(query: ::ic_dbms_api::prelude::Query, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<#record>> {
-            ::ic_dbms_canister::api::select::<#entity>(query, transaction_id, #struct_ident)
+            ::ic_dbms_canister::api::select::<#entity, #struct_ident>(query, transaction_id, #struct_ident)
         }
 
         #[::ic_cdk::update]
         fn #insert_fn_name(record: #insert, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
-            ::ic_dbms_canister::api::insert::<#entity>(record, transaction_id, #struct_ident)
+            ::ic_dbms_canister::api::insert::<#entity, #struct_ident>(record, transaction_id, #struct_ident)
         }
 
         #[::ic_cdk::update]
         fn #update_fn_name(patch: #update, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<u64> {
-            ::ic_dbms_canister::api::update::<#entity>(patch, transaction_id, #struct_ident)
+            ::ic_dbms_canister::api::update::<#entity, #struct_ident>(patch, transaction_id, #struct_ident)
         }
 
         #[::ic_cdk::update]
         fn #delete_fn_name(delete_behavior: ::ic_dbms_api::prelude::DeleteBehavior, filter: Option<::ic_dbms_api::prelude::Filter>, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<u64> {
-            ::ic_dbms_canister::api::delete::<#entity>(delete_behavior, filter, transaction_id, #struct_ident)
+            ::ic_dbms_canister::api::delete::<#entity, #struct_ident>(delete_behavior, filter, transaction_id, #struct_ident)
         }
     }
 }

@@ -7,11 +7,19 @@ description = "Memory abstraction and page management for the wasm-dbms framewor
 license = { workspace = true }
 repository = { workspace = true }
 readme = "README.md"
+rust-version = { workspace = true }
+documentation = "https://docs.rs/wasm-dbms-memory"
 categories = ["database", "wasm"]
 keywords = ["database", "wasm", "memory"]
+include = [
+  "src/**/*",
+  "../../../LICENSE",
+  "README.md",
+  "../../../CHANGELOG.md",
+]
 
 [dependencies]
-wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.6.0" }
+wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.6" }
 
 [dev-dependencies]
 candid = { workspace = true }

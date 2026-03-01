@@ -7,14 +7,22 @@ description = "Runtime-agnostic DBMS engine for WASM environments"
 license = { workspace = true }
 repository = { workspace = true }
 readme = "../../../README.md"
+rust-version = { workspace = true }
+documentation = "https://docs.rs/wasm-dbms"
 categories = ["database", "wasm"]
 keywords = ["database", "wasm", "dbms"]
+include = [
+  "src/**/*",
+  "../../../LICENSE",
+  "README.md",
+  "../../../CHANGELOG.md",
+]
 
 [dependencies]
-wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.6.0" }
-wasm-dbms-memory = { path = "../wasm-dbms-memory", version = "0.6.0" }
+wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.6" }
+wasm-dbms-memory = { path = "../wasm-dbms-memory", version = "0.6" }
 
 [dev-dependencies]
 candid = { workspace = true }
 serde = { workspace = true }
-wasm-dbms-macros = { path = "../wasm-dbms-macros", version = "0.6.0" }
+wasm-dbms-macros = { path = "../wasm-dbms-macros", version = "0.6" }

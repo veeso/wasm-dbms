@@ -45,20 +45,19 @@ pub fn collect_schema_metadata(attrs: &[syn::Attribute]) -> syn::Result<SchemaMe
                 names.push((ident, value));
 
                 Ok(())
-            })
-            .expect("invalid syntax in #[tables]");
+            })?;
         }
     }
 
-    for (ident, name) in names {
-        tables.push(collect_table_entry(ident, name)?);
+    for (ident, _name) in names {
+        tables.push(collect_table_entry(ident)?);
     }
 
     Ok(SchemaMetadata { tables })
 }
 
 /// Derives associated type identifiers for a single table entry.
-fn collect_table_entry(table: Ident, _name: String) -> syn::Result<TableEntry> {
+fn collect_table_entry(table: Ident) -> syn::Result<TableEntry> {
     let insert_ident = Ident::new(&format!("{table}InsertRequest"), table.span());
     let update_ident = Ident::new(&format!("{table}UpdateRequest"), table.span());
 

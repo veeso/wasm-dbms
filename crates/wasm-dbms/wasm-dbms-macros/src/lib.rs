@@ -33,7 +33,7 @@ mod encode;
 mod table;
 mod utils;
 
-/// Automatically implements the `Encode`` trait for a struct.
+/// Automatically implements the `Encode` trait for a struct.
 ///
 /// This derive macro generates two methods required by the `Encode` trait:
 ///

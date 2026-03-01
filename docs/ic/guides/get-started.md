@@ -20,7 +20,7 @@
 - [Integration Testing](#integration-testing)
 - [Next Steps](#next-steps)
 
-This guide walks you through setting up a complete database canister on the Internet Computer using ic-dbms. The ic-dbms framework is built on top of the [wasm-dbms](https://github.com/nicvhine/wasm-dbms) core engine, adding IC-specific functionality such as Candid serialization, canister lifecycle management, ACL-based access control, and inter-canister communication. By the end of this guide, you will have a working canister with CRUD operations, transactions, and access control.
+This guide walks you through setting up a complete database canister on the Internet Computer using ic-dbms. The ic-dbms framework is built on top of the [wasm-dbms](https://github.com/veeso/wasm-dbms) core engine, adding IC-specific functionality such as Candid serialization, canister lifecycle management, ACL-based access control, and inter-canister communication. By the end of this guide, you will have a working canister with CRUD operations, transactions, and access control.
 
 ---
 

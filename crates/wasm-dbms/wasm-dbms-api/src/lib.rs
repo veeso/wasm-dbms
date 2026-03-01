@@ -28,7 +28,6 @@
 // Makes the crate accessible as `wasm_dbms_api` in macros.
 extern crate self as wasm_dbms_api;
 
-mod caller_context;
 pub mod dbms;
 pub mod error;
 pub mod memory;

@@ -98,8 +98,7 @@ where
 
     /// Executes a closure atomically.
     ///
-    /// If the closure returns an error, panics to ensure consistency
-    /// (analogous to IC canister trapping).
+    /// If the closure returns an error, panics to ensure consistency.
     fn atomic<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&WasmDbmsDatabase<'ctx, M, A>) -> DbmsResult<R>,
@@ -110,6 +109,31 @@ where
         }
     }
 
+    /// Checks whether any foreign key references exist for the given record.
+    ///
+    /// Returns `true` if at least one referencing row exists in any table.
+    fn has_foreign_key_references<T>(
+        &self,
+        record_values: &[(ColumnDef, Value)],
+    ) -> DbmsResult<bool>
+    where
+        T: TableSchema,
+    {
+        let pk = Self::extract_pk::<T>(record_values)?;
+
+        for (table, columns) in self.schema.referenced_tables(T::table_name()) {
+            for column in columns.iter() {
+                let filter = Filter::eq(column, pk.clone());
+                let query = Query::builder().field(column).filter(Some(filter)).build();
+                let rows = self.schema.select(self, table, query)?;
+                if !rows.is_empty() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// Deletes foreign key related records recursively for cascade deletes.
     fn delete_foreign_keys_cascade<T>(
         &self,
@@ -118,14 +142,7 @@ where
     where
         T: TableSchema,
     {
-        let pk = record_values
-            .iter()
-            .find(|(col_def, _)| col_def.primary_key)
-            .ok_or(DbmsError::Query(QueryError::UnknownColumn(
-                T::primary_key().to_string(),
-            )))?
-            .1
-            .clone();
+        let pk = Self::extract_pk::<T>(record_values)?;
 
         let mut count = 0;
         for (table, columns) in self.schema.referenced_tables(T::table_name()) {
@@ -138,6 +155,20 @@ where
             }
         }
         Ok(count)
+    }
+
+    /// Extracts the primary key value from a record's column-value pairs.
+    fn extract_pk<T>(record_values: &[(ColumnDef, Value)]) -> DbmsResult<Value>
+    where
+        T: TableSchema,
+    {
+        record_values
+            .iter()
+            .find(|(col_def, _)| col_def.primary_key)
+            .ok_or(DbmsError::Query(QueryError::UnknownColumn(
+                T::primary_key().to_string(),
+            )))
+            .map(|(_, v)| v.clone())
     }
 
     /// Retrieves the current overlay from the active transaction.
@@ -370,25 +401,8 @@ where
             let a_value = get_value(a, column);
             let b_value = get_value(b, column);
 
-            Self::sort_values_with_direction(a_value, b_value, direction)
+            sort_values_with_direction(a_value, b_value, direction)
         });
-    }
-
-    /// Provides ordering for two optional values by direction.
-    pub fn sort_values_with_direction(
-        a: Option<&Value>,
-        b: Option<&Value>,
-        direction: OrderDirection,
-    ) -> Ordering {
-        match (a, b) {
-            (Some(a_val), Some(b_val)) => match direction {
-                OrderDirection::Ascending => a_val.cmp(b_val),
-                OrderDirection::Descending => b_val.cmp(a_val),
-            },
-            (Some(_), None) => std::cmp::Ordering::Greater,
-            (None, Some(_)) => std::cmp::Ordering::Less,
-            (None, None) => std::cmp::Ordering::Equal,
-        }
     }
 
     /// Core select logic returning intermediate `TableColumns`.
@@ -537,6 +551,23 @@ where
             records.push((values, record_values));
         }
         Ok(records)
+    }
+}
+
+/// Provides ordering for two optional values by direction.
+pub fn sort_values_with_direction(
+    a: Option<&Value>,
+    b: Option<&Value>,
+    direction: OrderDirection,
+) -> Ordering {
+    match (a, b) {
+        (Some(a_val), Some(b_val)) => match direction {
+            OrderDirection::Ascending => a_val.cmp(b_val),
+            OrderDirection::Descending => b_val.cmp(a_val),
+        },
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (None, None) => std::cmp::Ordering::Equal,
     }
 }
 
@@ -705,7 +736,7 @@ where
                         count += self.delete_foreign_keys_cascade::<T>(&record_values)?;
                     }
                     DeleteBehavior::Restrict => {
-                        if self.delete_foreign_keys_cascade::<T>(&record_values)? > 0 {
+                        if self.has_foreign_key_references::<T>(&record_values)? {
                             return Err(DbmsError::Query(
                                 QueryError::ForeignKeyConstraintViolation {
                                     referencing_table: T::table_name().to_string(),

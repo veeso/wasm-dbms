@@ -12,9 +12,9 @@ documentation = "https://docs.rs/wasm-dbms-api/"
 description = "Runtime-agnostic API types and traits for the wasm-dbms DBMS engine."
 include = [
   "src/**/*",
-  "../../LICENSE",
+  "../../../LICENSE",
   "README.md",
-  "../../CHANGELOG.md",
+  "../../../CHANGELOG.md",
 ]
 readme = "README.md"
 
@@ -26,8 +26,8 @@ rust_decimal = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-uuid = { workspace = true }
 url = { workspace = true }
+uuid = { workspace = true }
 
 [features]
 default = []

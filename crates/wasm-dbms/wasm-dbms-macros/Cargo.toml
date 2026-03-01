@@ -12,9 +12,9 @@ documentation = "https://docs.rs/wasm-dbms-macros/"
 description = "Runtime-agnostic procedural macros for the wasm-dbms DBMS engine."
 include = [
   "src/**/*",
-  "../../LICENSE",
+  "../../../LICENSE",
   "README.md",
-  "../../CHANGELOG.md",
+  "../../../CHANGELOG.md",
 ]
 readme = "README.md"
 

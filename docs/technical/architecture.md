@@ -19,7 +19,7 @@
 
 ## Overview
 
-ic-dbms is built as a layered architecture where each layer has specific responsibilities and builds upon the layer below. The core DBMS engine is runtime-agnostic (`wasm-dbms-*` crates), while the IC-specific adapter layer (`ic-dbms-*` crates) provides Internet Computer integration.
+wasm-dbms is built as a layered architecture where each layer has specific responsibilities and builds upon the layer below. The core DBMS engine is runtime-agnostic (`wasm-dbms-*` crates), while the IC-specific adapter layer (`ic-dbms-*` crates) provides Internet Computer integration.
 
 This design provides:
 
@@ -179,7 +179,7 @@ acl_allowed_principals() -> Vec<Principal>
 ## Crate Organization
 
 ```
-ic-dbms/
+wasm-dbms/
 ├── crates/
 │   ├── wasm-dbms/                  # Generic WASM DBMS crates
 │   │   ├── wasm-dbms-api/          # Shared types and traits
@@ -190,7 +190,7 @@ ic-dbms/
 │   └── ic-dbms/                    # IC-specific crates
 │       ├── ic-dbms-api/            # IC-specific types (re-exports wasm-dbms-api)
 │       ├── ic-dbms-canister/       # Core IC canister implementation
-│       ├── ic-dbms-macros/         # IC-specific macros (DbmsCanister)
+│       ├── ic-dbms-macros/         # IC-specific macros (DatabaseSchema, DbmsCanister)
 │       ├── ic-dbms-client/         # Client libraries
 │       ├── example/                # Reference implementation
 │       └── integration-tests/      # PocketIC integration tests
@@ -219,7 +219,6 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 - `Value` enum for runtime values
 - Filter, Query, and Join types
 - `Database` trait
-- `CallerContext` trait for identity abstraction
 - Sanitizer and Validator traits
 - `CustomDataType` trait and `CustomValue`
 - Error types (`DbmsError`, `DbmsResult`)

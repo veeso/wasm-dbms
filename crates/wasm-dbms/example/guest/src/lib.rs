@@ -11,6 +11,7 @@ pub mod file_provider;
 pub mod schema;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use ::wasm_dbms::prelude::{DatabaseSchema as _, DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::*;
@@ -119,13 +120,13 @@ fn dbms_error_to_wit(e: DbmsError) -> wit::DbmsError {
 
 // ── Query conversion ────────────────────────────────────────────────
 
-fn wit_query_to_dbms(q: wit::Query) -> Query {
+fn wit_query_to_dbms(q: wit::Query) -> Result<Query, String> {
     let mut builder = Query::builder();
 
     if let Some(filter_json) = q.filter {
-        if let Ok(filter) = serde_json::from_str::<Filter>(&filter_json) {
-            builder = builder.filter(Some(filter));
-        }
+        let filter = serde_json::from_str::<Filter>(&filter_json)
+            .map_err(|e| format!("invalid filter JSON: {e}"))?;
+        builder = builder.filter(Some(filter));
     }
 
     if let Some(ref order_col) = q.order_by {
@@ -143,7 +144,7 @@ fn wit_query_to_dbms(q: wit::Query) -> Query {
         builder = builder.offset(offset as usize);
     }
 
-    builder.build()
+    Ok(builder.build())
 }
 
 // ── Row conversion ──────────────────────────────────────────────────
@@ -193,14 +194,24 @@ fn table_columns(table: &str) -> DbmsResult<&'static [ColumnDef]> {
     }
 }
 
-/// Leaks a string into `&'static str`.
+thread_local! {
+    static INTERNED_STRINGS: RefCell<HashMap<String, &'static str>> = RefCell::new(HashMap::new());
+}
+
+/// Interns a string into `&'static str`, reusing previously leaked copies.
 ///
 /// `DatabaseSchema` methods require `&'static str` table names, but the
-/// WIT boundary delivers owned `String`s. Leaking is acceptable in a WASM
-/// component where the process lifetime is bounded and the leaked strings
-/// are small table names.
-fn leak_str(s: &str) -> &'static str {
-    Box::leak(s.to_string().into_boxed_str())
+/// WIT boundary delivers owned `String`s. This function ensures each
+/// unique string value is leaked at most once.
+fn intern_str(s: &str) -> &'static str {
+    INTERNED_STRINGS.with_borrow_mut(|map| {
+        if let Some(existing) = map.get(s) {
+            return *existing;
+        }
+        let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
+        map.insert(s.to_string(), leaked);
+        leaked
+    })
 }
 
 // ── Guest implementation ────────────────────────────────────────────
@@ -211,7 +222,7 @@ export!(GuestDbms);
 
 impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     fn select(table: String, query: wit::Query) -> Result<Vec<wit::Row>, wit::DbmsError> {
-        let query = wit_query_to_dbms(query);
+        let query = wit_query_to_dbms(query).map_err(wit::DbmsError::ValidationError)?;
         with_dbms(|ctx| {
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.select_raw(&table, query)
@@ -228,7 +239,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         let named_values = wit_row_to_named_values(values);
         with_dbms(|ctx| {
             let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
-            let table_name = leak_str(&table);
+            let table_name = intern_str(&table);
 
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
@@ -252,7 +263,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         let named_values = wit_row_to_named_values(values);
         with_dbms(|ctx| {
             let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
-            let table_name = leak_str(&table);
+            let table_name = intern_str(&table);
 
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
@@ -273,9 +284,15 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         filter: Option<String>,
         tx: Option<wit::TransactionId>,
     ) -> Result<u64, wit::DbmsError> {
-        let filter = filter.and_then(|f| serde_json::from_str::<Filter>(&f).ok());
+        let filter = filter
+            .map(|f| {
+                serde_json::from_str::<Filter>(&f).map_err(|e| {
+                    wit::DbmsError::ValidationError(format!("invalid filter JSON: {e}"))
+                })
+            })
+            .transpose()?;
         with_dbms(|ctx| {
-            let table_name = leak_str(&table);
+            let table_name = intern_str(&table);
 
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);

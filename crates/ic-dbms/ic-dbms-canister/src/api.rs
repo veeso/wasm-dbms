@@ -42,10 +42,10 @@ pub fn begin_transaction() -> TransactionId {
 }
 
 /// Commits the transaction with the given ID.
-pub fn commit(
-    transaction_id: TransactionId,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
-) -> IcDbmsResult<()> {
+pub fn commit<S>(transaction_id: TransactionId, database_schema: S) -> IcDbmsResult<()>
+where
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+{
     assert_caller_is_allowed();
     assert_caller_owns_transaction(Some(&transaction_id));
     DBMS_CONTEXT.with(|ctx| {
@@ -55,10 +55,10 @@ pub fn commit(
 }
 
 /// Rolls back the transaction with the given ID.
-pub fn rollback(
-    transaction_id: TransactionId,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
-) -> IcDbmsResult<()> {
+pub fn rollback<S>(transaction_id: TransactionId, database_schema: S) -> IcDbmsResult<()>
+where
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+{
     assert_caller_is_allowed();
     assert_caller_owns_transaction(Some(&transaction_id));
     DBMS_CONTEXT.with(|ctx| {
@@ -68,13 +68,14 @@ pub fn rollback(
 }
 
 /// Executes a select query against the database schema, optionally within a transaction.
-pub fn select<T>(
+pub fn select<T, S>(
     query: Query,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+    database_schema: S,
 ) -> IcDbmsResult<Vec<T::Record>>
 where
     T: TableSchema,
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 {
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
@@ -86,12 +87,15 @@ where
 /// Unlike [`select`], this method does not require a concrete table type.
 /// It takes a table name as a string and dispatches internally, returning
 /// rows as column-value pairs.
-pub fn select_raw(
+pub fn select_raw<S>(
     table: &str,
     query: Query,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
-) -> IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
+    database_schema: S,
+) -> IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>>
+where
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+{
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
     with_database(transaction_id, database_schema, |db| {
@@ -102,12 +106,15 @@ pub fn select_raw(
 /// Executes a join query through the raw/untyped select path.
 ///
 /// Returns rows with [`CandidColumnDef`] that include the source table name.
-pub fn select_join(
+pub fn select_join<S>(
     table: &str,
     query: Query,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
-) -> IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
+    database_schema: S,
+) -> IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>>
+where
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+{
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
     with_database(transaction_id, database_schema, |db| {
@@ -116,14 +123,15 @@ pub fn select_join(
 }
 
 /// Executes an insert query against the database schema, optionally within a transaction.
-pub fn insert<T>(
+pub fn insert<T, S>(
     record: T::Insert,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+    database_schema: S,
 ) -> IcDbmsResult<()>
 where
     T: TableSchema,
     T::Insert: InsertRecord<Schema = T>,
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 {
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
@@ -131,14 +139,15 @@ where
 }
 
 /// Executes an update query against the database schema, optionally within a transaction.
-pub fn update<T>(
+pub fn update<T, S>(
     patch: T::Update,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+    database_schema: S,
 ) -> IcDbmsResult<u64>
 where
     T: TableSchema,
     T::Update: UpdateRecord<Schema = T>,
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 {
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
@@ -146,14 +155,15 @@ where
 }
 
 /// Executes a delete query against the database schema, optionally within a transaction.
-pub fn delete<T>(
+pub fn delete<T, S>(
     behaviour: DeleteBehavior,
     filter: Option<Filter>,
     transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+    database_schema: S,
 ) -> IcDbmsResult<u64>
 where
     T: TableSchema,
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 {
     assert_caller_is_allowed();
     assert_caller_owns_transaction(transaction_id.as_ref());
@@ -167,12 +177,9 @@ where
 ///
 /// Because [`WasmDbmsDatabase`] borrows [`DbmsContext`], the database
 /// cannot outlive the `with` closure.
-fn with_database<F, R>(
-    transaction_id: Option<TransactionId>,
-    database_schema: impl DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
-    f: F,
-) -> R
+fn with_database<S, F, R>(transaction_id: Option<TransactionId>, database_schema: S, f: F) -> R
 where
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
     F: for<'a> FnOnce(&WasmDbmsDatabase<'a, IcMemoryProvider, IcAccessControlList>) -> R,
 {
     DBMS_CONTEXT.with(|ctx| {
@@ -274,7 +281,7 @@ mod tests {
             age: 25u32.into(),
         };
 
-        let res = insert::<crate::tests::User>(record, None, crate::tests::TestDatabaseSchema);
+        let res = insert::<crate::tests::User, _>(record, None, crate::tests::TestDatabaseSchema);
         assert!(res.is_ok());
     }
 
@@ -283,7 +290,7 @@ mod tests {
         init_acl();
         load_fixtures();
         let query = Query::builder().all().limit(10).build();
-        let res = select::<crate::tests::User>(query, None, crate::tests::TestDatabaseSchema);
+        let res = select::<crate::tests::User, _>(query, None, crate::tests::TestDatabaseSchema);
         assert!(res.is_ok());
         let records = res.unwrap();
         assert!(!records.is_empty());
@@ -301,7 +308,7 @@ mod tests {
             age: None,
             where_clause: Some(Filter::Eq("id".to_string(), Uint32::from(1u32).into())),
         };
-        let res = update::<crate::tests::User>(patch, None, crate::tests::TestDatabaseSchema);
+        let res = update::<crate::tests::User, _>(patch, None, crate::tests::TestDatabaseSchema);
         assert!(res.is_ok());
     }
 
@@ -311,7 +318,7 @@ mod tests {
         load_fixtures();
 
         let filter = Some(Filter::Eq("id".to_string(), Uint32::from(2u32).into()));
-        let res = delete::<crate::tests::User>(
+        let res = delete::<crate::tests::User, _>(
             DeleteBehavior::Cascade,
             filter,
             None,

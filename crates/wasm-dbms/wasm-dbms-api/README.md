@@ -35,7 +35,6 @@ use wasm_dbms_api::prelude::*;
 #### Database
 
 - [`Database`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/trait.Database.html)
-- [`CallerContext`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/struct.CallerContext.html)
 
 #### Query
 

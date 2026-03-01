@@ -316,7 +316,7 @@ Combine `limit` and `offset` for pagination:
 ```rust
 const PAGE_SIZE: u64 = 20;
 
-fn get_page_query(page: u64) -> Query<User> {
+fn get_page_query(page: u64) -> Query {
     Query::builder()
         .all()
         .order_by("id", OrderDirection::Ascending)  // Consistent ordering is important
