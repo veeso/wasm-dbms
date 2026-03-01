@@ -8,14 +8,15 @@ use self::metadata::TableMetadata;
 
 pub fn dbms_canister(input: DeriveInput) -> syn::Result<TokenStream2> {
     let metadata = self::metadata::collect_canister_metadata(&input.attrs)?;
+    let struct_ident = &input.ident;
 
+    let database_schema_impl = impl_database_schema(struct_ident, &metadata.tables);
     let init_fn = impl_init(&metadata.tables);
     let inspect_fn = impl_inspect();
     let acl_api = impl_acl_api();
-    let transaction_api = impl_transaction_api();
-    let tables_api = impl_tables_api(&metadata.tables);
-    let select_raw_api = impl_select_raw_api();
-    let database_schema_impl = impl_database_schema(&metadata.tables);
+    let transaction_api = impl_transaction_api(struct_ident);
+    let tables_api = impl_tables_api(&metadata.tables, struct_ident);
+    let select_raw_api = impl_select_raw_api(struct_ident);
 
     Ok(quote::quote! {
         #database_schema_impl
@@ -34,16 +35,13 @@ fn impl_init(tables: &[TableMetadata]) -> TokenStream2 {
         let table_name = &table.table;
         let table_str = table_name.to_string();
         init_tables.push(quote::quote! {
-            ::ic_dbms_canister::prelude::SCHEMA_REGISTRY.with_borrow_mut(|registry| {
-                ::ic_dbms_canister::prelude::MEMORY_MANAGER.with_borrow_mut(|mm| {
-                    if let Err(err) = registry.register_table::<#table_name>(mm) {
-                        ::ic_cdk::trap(&format!(
-                            "Failed to register table {} during init: {}",
-                            #table_str,
-                            err
-                        ));
-                    }
-                });
+            ::ic_dbms_canister::prelude::DBMS_CONTEXT.with(|ctx| {
+                if let Err(err) = ctx.register_table::<#table_name>() {
+                    ::ic_cdk::trap(&format!(
+                        "Failed to register table {} during init: {}",
+                        #table_str, err
+                    ));
+                }
             });
         });
     }
@@ -52,21 +50,17 @@ fn impl_init(tables: &[TableMetadata]) -> TokenStream2 {
         #[::ic_cdk::init]
         fn init(args: ::ic_dbms_api::prelude::IcDbmsCanisterArgs) {
             let args = args.unwrap_init();
-            ::ic_dbms_canister::prelude::ACL.with_borrow_mut(|acl| {
-                ::ic_dbms_canister::prelude::MEMORY_MANAGER.with_borrow_mut(|mm| {
-                    for principal in args.allowed_principals {
-                        let identity = principal.as_slice().to_vec();
-                        if let Err(err) = acl.add_principal(identity, mm) {
-                            ::ic_cdk::trap(&format!(
-                                "Failed to add principal to ACL during init: {}",
-                                err
-                            ));
-                        }
+            ::ic_dbms_canister::prelude::DBMS_CONTEXT.with(|ctx| {
+                for principal in args.allowed_principals {
+                    let identity = principal.as_slice().to_vec();
+                    if let Err(err) = ctx.acl_add(identity) {
+                        ::ic_cdk::trap(&format!(
+                            "Failed to add principal to ACL during init: {}",
+                            err
+                        ));
                     }
-                });
+                }
             });
-
-            // init tables
             #(#init_tables)*
         }
     }
@@ -100,18 +94,18 @@ fn impl_inspect() -> TokenStream2 {
     }
 }
 
-fn impl_tables_api(tables: &[TableMetadata]) -> TokenStream2 {
-    let mut table_apis = vec![];
-    for table in tables {
-        table_apis.push(impl_table_api(table));
-    }
+fn impl_tables_api(tables: &[TableMetadata], struct_ident: &syn::Ident) -> TokenStream2 {
+    let table_apis: Vec<_> = tables
+        .iter()
+        .map(|table| impl_table_api(table, struct_ident))
+        .collect();
 
     quote::quote! {
         #(#table_apis)*
     }
 }
 
-fn impl_transaction_api() -> TokenStream2 {
+fn impl_transaction_api(struct_ident: &syn::Ident) -> TokenStream2 {
     quote::quote! {
         #[::ic_cdk::update]
         fn begin_transaction() -> ::ic_dbms_api::prelude::TransactionId {
@@ -120,17 +114,17 @@ fn impl_transaction_api() -> TokenStream2 {
 
         #[::ic_cdk::update]
         fn commit(transaction_id: ::ic_dbms_api::prelude::TransactionId) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
-            ::ic_dbms_canister::api::commit(transaction_id, CanisterDatabaseSchema)
+            ::ic_dbms_canister::api::commit(transaction_id, #struct_ident)
         }
 
         #[::ic_cdk::update]
         fn rollback(transaction_id: ::ic_dbms_api::prelude::TransactionId) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
-            ::ic_dbms_canister::api::rollback(transaction_id, CanisterDatabaseSchema)
+            ::ic_dbms_canister::api::rollback(transaction_id, #struct_ident)
         }
     }
 }
 
-fn impl_select_raw_api() -> TokenStream2 {
+fn impl_select_raw_api(struct_ident: &syn::Ident) -> TokenStream2 {
     quote::quote! {
         #[::ic_cdk::query]
         fn select(
@@ -139,9 +133,9 @@ fn impl_select_raw_api() -> TokenStream2 {
             transaction_id: Option<::ic_dbms_api::prelude::TransactionId>,
         ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(::ic_dbms_api::prelude::CandidColumnDef, ::ic_dbms_api::prelude::Value)>>> {
             if query.has_joins() {
-                ::ic_dbms_canister::api::select_join(&table, query, transaction_id, CanisterDatabaseSchema)
+                ::ic_dbms_canister::api::select_join(&table, query, transaction_id, #struct_ident)
             } else {
-                ::ic_dbms_canister::api::select_raw(&table, query, transaction_id, CanisterDatabaseSchema)
+                ::ic_dbms_canister::api::select_raw(&table, query, transaction_id, #struct_ident)
                     .map(|rows| {
                         rows.into_iter()
                             .map(|row| {
@@ -156,7 +150,7 @@ fn impl_select_raw_api() -> TokenStream2 {
     }
 }
 
-fn impl_table_api(table: &TableMetadata) -> TokenStream2 {
+fn impl_table_api(table: &TableMetadata, struct_ident: &syn::Ident) -> TokenStream2 {
     let table_name = &table.name;
     let entity = &table.table;
     let record = &table.record;
@@ -170,27 +164,30 @@ fn impl_table_api(table: &TableMetadata) -> TokenStream2 {
     quote::quote! {
         #[::ic_cdk::query]
         fn #select_fn_name(query: ::ic_dbms_api::prelude::Query, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<#record>> {
-            ::ic_dbms_canister::api::select::<#entity>(query, transaction_id, CanisterDatabaseSchema)
+            ::ic_dbms_canister::api::select::<#entity>(query, transaction_id, #struct_ident)
         }
 
         #[::ic_cdk::update]
         fn #insert_fn_name(record: #insert, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
-            ::ic_dbms_canister::api::insert::<#entity>(record, transaction_id, CanisterDatabaseSchema)
+            ::ic_dbms_canister::api::insert::<#entity>(record, transaction_id, #struct_ident)
         }
 
         #[::ic_cdk::update]
         fn #update_fn_name(patch: #update, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<u64> {
-            ::ic_dbms_canister::api::update::<#entity>(patch, transaction_id, CanisterDatabaseSchema)
+            ::ic_dbms_canister::api::update::<#entity>(patch, transaction_id, #struct_ident)
         }
 
         #[::ic_cdk::update]
         fn #delete_fn_name(delete_behavior: ::ic_dbms_api::prelude::DeleteBehavior, filter: Option<::ic_dbms_api::prelude::Filter>, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<u64> {
-            ::ic_dbms_canister::api::delete::<#entity>(delete_behavior, filter, transaction_id, CanisterDatabaseSchema)
+            ::ic_dbms_canister::api::delete::<#entity>(delete_behavior, filter, transaction_id, #struct_ident)
         }
     }
 }
 
-fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
+fn impl_database_schema(
+    struct_ident: &syn::Ident,
+    tables: &[TableMetadata],
+) -> TokenStream2 {
     let mut tables_for_ref = vec![];
     for table in tables {
         let entity = &table.table;
@@ -216,7 +213,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
     let select_fn = quote::quote! {
         fn select(
             &self,
-            dbms: &::ic_dbms_canister::prelude::IcDbmsDatabase,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
             table_name: &str,
             query: ::ic_dbms_api::prelude::Query,
         ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)>>> {
@@ -259,7 +256,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
     let insert_tables_fn = quote::quote! {
         fn insert(
             &self,
-            dbms: &::ic_dbms_canister::prelude::IcDbmsDatabase,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
             table_name: &'static str,
             record_values: &[(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)],
         ) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
@@ -289,7 +286,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
     let delete_tables_fn = quote::quote! {
         fn delete(
             &self,
-            dbms: &::ic_dbms_canister::prelude::IcDbmsDatabase,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
             table_name: &'static str,
             delete_behavior: ::ic_dbms_api::prelude::DeleteBehavior,
             filter: Option<::ic_dbms_api::prelude::Filter>,
@@ -320,7 +317,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
     let update_tables_fn = quote::quote! {
         fn update(
             &self,
-            dbms: &::ic_dbms_canister::prelude::IcDbmsDatabase,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
             table_name: &'static str,
             patch_values: &[(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)],
             filter: Option<::ic_dbms_api::prelude::Filter>,
@@ -343,7 +340,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
         let table_name = &table.table;
         validate_insert_arms.push(quote::quote! {
             name if name == #table_name::table_name() => {
-                ::ic_dbms_canister::prelude::InsertIntegrityValidator::<#table_name>::new(dbms).validate(record_values)
+                ::ic_dbms_canister::prelude::InsertIntegrityValidator::<#table_name, M>::new(dbms).validate(record_values)
             }
         });
     }
@@ -351,7 +348,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
     let validate_insert_fn = quote::quote! {
         fn validate_insert(
             &self,
-            dbms: &::ic_dbms_canister::prelude::IcDbmsDatabase,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
             table_name: &'static str,
             record_values: &[(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)],
         ) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
@@ -370,7 +367,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
         let table_name = &table.table;
         validate_update_arms.push(quote::quote! {
             name if name == #table_name::table_name() => {
-                ::ic_dbms_canister::prelude::UpdateIntegrityValidator::<#table_name>::new(dbms, old_pk).validate(record_values)
+                ::ic_dbms_canister::prelude::UpdateIntegrityValidator::<#table_name, M>::new(dbms, old_pk).validate(record_values)
             }
         });
     }
@@ -378,7 +375,7 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
     let validate_update_fn = quote::quote! {
         fn validate_update(
             &self,
-            dbms: &::ic_dbms_canister::prelude::IcDbmsDatabase,
+            dbms: &::ic_dbms_canister::prelude::WasmDbmsDatabase<'_, M>,
             table_name: &'static str,
             record_values: &[(::ic_dbms_api::prelude::ColumnDef, ::ic_dbms_api::prelude::Value)],
             old_pk: ::ic_dbms_api::prelude::Value,
@@ -394,9 +391,10 @@ fn impl_database_schema(tables: &[TableMetadata]) -> TokenStream2 {
     };
 
     quote::quote! {
-        pub struct CanisterDatabaseSchema;
-
-        impl ::ic_dbms_canister::prelude::DatabaseSchema for CanisterDatabaseSchema {
+        impl<M> ::ic_dbms_canister::prelude::DatabaseSchema<M> for #struct_ident
+        where
+            M: ::ic_dbms_canister::prelude::MemoryProvider,
+        {
             #select_fn
             #referenced_tables_fn
             #insert_tables_fn
