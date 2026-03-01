@@ -2,6 +2,7 @@
 
 //! Transaction management for the DBMS engine.
 
+pub(crate) mod journal;
 mod overlay;
 pub mod session;
 

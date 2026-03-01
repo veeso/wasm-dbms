@@ -7,7 +7,7 @@ use wasm_dbms_api::prelude::{
     TableSchema,
 };
 
-use crate::{MemoryManager, MemoryProvider};
+use crate::{MemoryAccess, MemoryManager, MemoryProvider};
 
 /// Data regarding the table registry page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -11,7 +11,7 @@ pub use self::free_segment::FreeSegment;
 use self::free_segments_table::FreeSegmentsTable;
 use self::pages_table::PagesTable;
 use self::tables_iter::TablesIter;
-use crate::{MemoryManager, MemoryProvider, align_up};
+use crate::{MemoryAccess, align_up};
 
 /// A ticket representing a reusable free segment.
 ///
@@ -54,10 +54,10 @@ pub struct FreeSegmentsLedger {
 }
 
 impl FreeSegmentsLedger {
-    /// Loads the deleted records ledger from memory
+    /// Loads the deleted records ledger from memory.
     pub fn load(
         free_segments_page: Page,
-        mm: &MemoryManager<impl MemoryProvider>,
+        mm: &impl MemoryAccess,
     ) -> MemoryResult<Self> {
         // read from memory
         let tables = mm.read_at(free_segments_page, 0)?;
@@ -78,7 +78,7 @@ impl FreeSegmentsLedger {
         page: Page,
         offset: PageOffset,
         record: &E,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()>
     where
         E: Encode,
@@ -108,7 +108,7 @@ impl FreeSegmentsLedger {
     pub fn find_reusable_segment<E>(
         &self,
         record: &E,
-        mm: &MemoryManager<impl MemoryProvider>,
+        mm: &impl MemoryAccess,
     ) -> MemoryResult<Option<FreeSegmentTicket>>
     where
         E: Encode,
@@ -134,7 +134,7 @@ impl FreeSegmentsLedger {
         &mut self,
         record: &E,
         segment: FreeSegmentTicket,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()>
     where
         E: Encode,
@@ -159,14 +159,14 @@ impl FreeSegmentsLedger {
     }
 
     /// Writes the current state of the free segments table back to memory.
-    fn commit(&self, mm: &mut MemoryManager<impl MemoryProvider>) -> MemoryResult<()> {
+    fn commit(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
         mm.write_at(self.free_segments_page, 0, &self.tables)
     }
 
     /// Creates a new page for storing additional [`FreeSegmentsTable`]s when needed.
     fn create_new_page(
         &mut self,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<Page> {
         let new_page = mm.allocate_page()?;
         self.tables.push(new_page);
@@ -174,7 +174,10 @@ impl FreeSegmentsLedger {
     }
 
     /// Returns an iterator over the [`FreeSegmentsTable`]s in the ledger.
-    fn tables<'a, P: MemoryProvider>(&'a self, mm: &'a MemoryManager<P>) -> TablesIter<'a, P> {
+    fn tables<'a, MA>(&'a self, mm: &'a MA) -> TablesIter<'a, MA>
+    where
+        MA: MemoryAccess,
+    {
         TablesIter::new(self.tables.pages(), mm)
     }
 }
@@ -184,7 +187,7 @@ mod tests {
     use wasm_dbms_api::prelude::{DEFAULT_ALIGNMENT, DataSize, DecodeError, MSize};
 
     use super::*;
-    use crate::HeapMemoryProvider;
+    use crate::{HeapMemoryProvider, MemoryManager};
 
     #[test]
     fn test_should_load_free_segments_ledger() {

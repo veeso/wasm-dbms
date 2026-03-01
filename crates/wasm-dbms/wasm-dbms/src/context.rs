@@ -15,6 +15,7 @@ use wasm_dbms_memory::prelude::{
     TableRegistryPage,
 };
 
+use crate::transaction::journal::Journal;
 use crate::transaction::session::TransactionSession;
 
 /// Owns all mutable DBMS state behind interior-mutable wrappers.
@@ -50,6 +51,9 @@ where
 
     /// Active transaction sessions.
     pub(crate) transaction_session: RefCell<TransactionSession>,
+
+    /// Active write-ahead journal for atomic operations.
+    pub(crate) journal: RefCell<Option<Journal>>,
 }
 
 impl<M> DbmsContext<M>
@@ -68,6 +72,7 @@ where
             schema_registry: RefCell::new(schema_registry),
             acl: RefCell::new(acl),
             transaction_session: RefCell::new(TransactionSession::default()),
+            journal: RefCell::new(None),
         }
     }
 }
@@ -88,6 +93,7 @@ where
             schema_registry: RefCell::new(schema_registry),
             acl: RefCell::new(acl),
             transaction_session: RefCell::new(TransactionSession::default()),
+            journal: RefCell::new(None),
         }
     }
 

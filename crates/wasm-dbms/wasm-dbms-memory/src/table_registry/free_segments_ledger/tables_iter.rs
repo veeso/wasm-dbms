@@ -3,27 +3,27 @@
 use wasm_dbms_api::prelude::{MemoryResult, Page};
 
 use super::FreeSegmentsTable;
-use crate::{MemoryManager, MemoryProvider};
+use crate::MemoryAccess;
 
 /// An iterator which yields all the [`FreeSegmentsTable`]s.
-pub struct TablesIter<'a, P>
+pub struct TablesIter<'a, MA>
 where
-    P: MemoryProvider,
+    MA: MemoryAccess,
 {
     /// Tracks the current index.
     index: usize,
-    /// Reference to the memory manager.
-    mm: &'a MemoryManager<P>,
+    /// Reference to the memory access implementor.
+    mm: &'a MA,
     /// The pages to iterate over.
     pages: &'a [Page],
 }
 
-impl<'a, P> TablesIter<'a, P>
+impl<'a, MA> TablesIter<'a, MA>
 where
-    P: MemoryProvider,
+    MA: MemoryAccess,
 {
     /// Creates a new [`TablesIter`].
-    pub fn new(pages: &'a [Page], mm: &'a MemoryManager<P>) -> Self {
+    pub fn new(pages: &'a [Page], mm: &'a MA) -> Self {
         Self {
             index: 0,
             mm,
@@ -32,9 +32,9 @@ where
     }
 }
 
-impl<P> Iterator for TablesIter<'_, P>
+impl<MA> Iterator for TablesIter<'_, MA>
 where
-    P: MemoryProvider,
+    MA: MemoryAccess,
 {
     type Item = MemoryResult<FreeSegmentsTable>;
 
@@ -53,7 +53,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HeapMemoryProvider;
+    use crate::{HeapMemoryProvider, MemoryManager};
 
     #[test]
     fn test_tables_iter_empty() {

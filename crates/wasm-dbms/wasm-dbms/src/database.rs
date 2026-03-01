@@ -18,6 +18,7 @@ use wasm_dbms_memory::prelude::{
 
 use crate::context::DbmsContext;
 use crate::schema::DatabaseSchema;
+use crate::transaction::journal::{Journal, JournaledWriter};
 use crate::transaction::{DatabaseOverlay, Transaction, TransactionOp};
 
 /// Default capacity for SELECT queries.
@@ -113,23 +114,25 @@ where
     where
         F: FnOnce(&WasmDbmsDatabase<'ctx, M, A>) -> DbmsResult<R>,
     {
-        let nested = self.ctx.mm.borrow().is_journal_active();
+        let nested = self.ctx.journal.borrow().is_some();
         if !nested {
-            self.ctx.mm.borrow_mut().begin_journal();
+            *self.ctx.journal.borrow_mut() = Some(Journal::new());
         }
         match f(self) {
             Ok(res) => {
-                if !nested {
-                    self.ctx.mm.borrow_mut().commit_journal();
+                if !nested
+                    && let Some(journal) = self.ctx.journal.borrow_mut().take()
+                {
+                    journal.commit();
                 }
                 Ok(res)
             }
             Err(err) => {
-                if !nested {
-                    self.ctx
-                        .mm
-                        .borrow_mut()
-                        .rollback_journal()
+                if !nested
+                    && let Some(journal) = self.ctx.journal.borrow_mut().take()
+                {
+                    journal
+                        .rollback(&mut self.ctx.mm.borrow_mut())
                         .expect("critical: failed to rollback journal");
                 }
                 Err(err)
@@ -644,8 +647,11 @@ where
                 let mut table_registry = db.load_table_registry::<T>()?;
                 let record = T::Insert::from_values(&sanitized_values)?;
                 let mut mm = db.ctx.mm.borrow_mut();
+                let mut journal_ref = db.ctx.journal.borrow_mut();
+                let journal = journal_ref.as_mut().expect("journal must be active inside atomic");
+                let mut writer = JournaledWriter::new(&mut *mm, journal);
                 table_registry
-                    .insert(record.into_record(), &mut *mm)
+                    .insert(record.into_record(), &mut writer)
                     .map_err(DbmsError::from)?;
                 Ok(())
             })?;
@@ -713,13 +719,17 @@ where
                 let updated_record = values_to_schema_entity::<T>(record_values)?;
                 {
                     let mut mm = db.ctx.mm.borrow_mut();
+                    let mut journal_ref = db.ctx.journal.borrow_mut();
+                    let journal =
+                        journal_ref.as_mut().expect("journal must be active inside atomic");
+                    let mut writer = JournaledWriter::new(&mut *mm, journal);
                     table_registry
                         .update(
                             updated_record,
                             previous_record,
                             record.page,
                             record.offset,
-                            &mut *mm,
+                            &mut writer,
                         )
                         .map_err(DbmsError::from)?;
                 }
@@ -773,8 +783,12 @@ where
                     }
                 }
                 let mut mm = db.ctx.mm.borrow_mut();
+                let mut journal_ref = db.ctx.journal.borrow_mut();
+                let journal =
+                    journal_ref.as_mut().expect("journal must be active inside atomic");
+                let mut writer = JournaledWriter::new(&mut *mm, journal);
                 table_registry
-                    .delete(record.record, record.page, record.offset, &mut *mm)
+                    .delete(record.record, record.page, record.offset, &mut writer)
                     .map_err(DbmsError::from)?;
             }
 
@@ -793,7 +807,7 @@ where
             ts.take_transaction(&txid)?
         };
 
-        self.ctx.mm.borrow_mut().begin_journal();
+        *self.ctx.journal.borrow_mut() = Some(Journal::new());
 
         for op in transaction.operations {
             let result = match op {
@@ -817,16 +831,18 @@ where
             };
 
             if let Err(err) = result {
-                self.ctx
-                    .mm
-                    .borrow_mut()
-                    .rollback_journal()
-                    .expect("critical: failed to rollback journal");
+                if let Some(journal) = self.ctx.journal.borrow_mut().take() {
+                    journal
+                        .rollback(&mut self.ctx.mm.borrow_mut())
+                        .expect("critical: failed to rollback journal");
+                }
                 return Err(err);
             }
         }
 
-        self.ctx.mm.borrow_mut().commit_journal();
+        if let Some(journal) = self.ctx.journal.borrow_mut().take() {
+            journal.commit();
+        }
         Ok(())
     }
 

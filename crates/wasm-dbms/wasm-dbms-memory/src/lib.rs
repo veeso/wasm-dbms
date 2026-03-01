@@ -16,12 +16,14 @@
 extern crate self as wasm_dbms_memory;
 
 mod acl;
+mod memory_access;
 mod memory_manager;
 mod provider;
 mod schema_registry;
 pub mod table_registry;
 
 pub use self::acl::{AccessControl, AccessControlList, NoAccessControl};
+pub use self::memory_access::MemoryAccess;
 pub use self::memory_manager::{MemoryManager, align_up};
 pub use self::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
 pub use self::schema_registry::{SchemaRegistry, TableRegistryPage};
@@ -30,6 +32,7 @@ pub use self::table_registry::{NextRecord, TableReader, TableRegistry};
 /// Prelude re-exports for convenient use.
 pub mod prelude {
     pub use super::acl::{AccessControl, AccessControlList, NoAccessControl};
+    pub use super::memory_access::MemoryAccess;
     pub use super::memory_manager::{MemoryManager, align_up};
     pub use super::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
     pub use super::schema_registry::{SchemaRegistry, TableRegistryPage};

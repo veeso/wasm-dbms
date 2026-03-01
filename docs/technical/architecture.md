@@ -69,8 +69,9 @@ This design provides:
 
 | Component | Purpose |
 |-----------|---------|
-| `MemoryProvider` | Abstract interface for memory access |
-| `MemoryManager` | Allocates and manages pages |
+| `MemoryProvider` | Abstract interface for raw memory I/O |
+| `MemoryAccess` | Trait for page-level read/write operations (implemented by `MemoryManager`, interceptable by DBMS layer) |
+| `MemoryManager` | Allocates and manages pages, implements `MemoryAccess` |
 | `Encode` trait | Binary serialization for all stored types |
 | `PageLedger` | Tracks which pages belong to which table |
 | `FreeSegmentsLedger` | Tracks free space for reuse |
@@ -100,11 +101,13 @@ See [Memory Documentation](./memory.md) for detailed technical information.
 
 | Component | Purpose |
 |-----------|---------|
-| `DbmsContext<M>` | Owns all DBMS state (memory, schema, ACL, transactions) |
+| `DbmsContext<M>` | Owns all DBMS state (memory, schema, ACL, transactions, journal) |
 | `WasmDbmsDatabase` | Session-scoped DBMS operations |
 | `TableRegistry` | Manages records for a single table |
 | `TransactionSession` | Handles transaction lifecycle |
 | `Transaction` | Overlay for uncommitted changes |
+| `Journal` | Write-ahead journal recording original bytes for rollback |
+| `JournaledWriter` | Wraps `MemoryManager` + `Journal`, implements `MemoryAccess` to intercept writes |
 | `JoinEngine` | Executes cross-table join queries |
 
 **Transaction model:**

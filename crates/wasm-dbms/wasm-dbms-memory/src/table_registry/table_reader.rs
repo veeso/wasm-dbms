@@ -8,7 +8,7 @@ use wasm_dbms_api::prelude::{
 
 use super::page_ledger::PageLedger;
 use super::raw_record::{RAW_RECORD_HEADER_SIZE, RawRecord};
-use crate::{MemoryManager, MemoryProvider, align_up};
+use crate::{MemoryAccess, align_up};
 
 /// Stores the current position to read/write in memory.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -43,15 +43,15 @@ where
 ///
 /// The table reader provides methods to read records from the table registry one by one,
 /// using the underlying [`PageLedger`] to locate the records in memory.
-pub struct TableReader<'a, E, P>
+pub struct TableReader<'a, E, MA>
 where
     E: Encode,
-    P: MemoryProvider,
+    MA: MemoryAccess,
 {
     /// Buffer used to read records from memory.
     buffer: Vec<u8>,
-    /// Reference to the memory manager.
-    mm: &'a MemoryManager<P>,
+    /// Reference to the memory access implementor.
+    mm: &'a MA,
     page_ledger: &'a PageLedger,
     page_size: usize,
     phantom: PhantomData<E>,
@@ -60,13 +60,13 @@ where
     position: Option<Position>,
 }
 
-impl<'a, E, P> TableReader<'a, E, P>
+impl<'a, E, MA> TableReader<'a, E, MA>
 where
     E: Encode,
-    P: MemoryProvider,
+    MA: MemoryAccess,
 {
     /// Creates a new table reader starting from the beginning of the table registry.
-    pub fn new(page_ledger: &'a PageLedger, mm: &'a MemoryManager<P>) -> Self {
+    pub fn new(page_ledger: &'a PageLedger, mm: &'a MA) -> Self {
         // init position
         let position = page_ledger.pages().first().map(|page_record| Position {
             page: page_record.page,
@@ -227,7 +227,7 @@ mod tests {
 
     use super::*;
     use crate::table_registry::test_utils::User;
-    use crate::{HeapMemoryProvider, TableRegistry, TableRegistryPage};
+    use crate::{HeapMemoryProvider, MemoryManager, TableRegistry, TableRegistryPage};
 
     #[test]
     fn test_should_read_all_records() {
@@ -367,7 +367,7 @@ mod tests {
     fn mocked<'a>(
         table_registry: &'a TableRegistry,
         mm: &'a MemoryManager<HeapMemoryProvider>,
-    ) -> TableReader<'a, User, HeapMemoryProvider> {
+    ) -> TableReader<'a, User, MemoryManager<HeapMemoryProvider>> {
         TableReader::new(&table_registry.page_ledger, mm)
     }
 }

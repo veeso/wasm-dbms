@@ -1,4 +1,5 @@
 // Rust guideline compliant 2026-03-01
+// X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 //! Memory manager for page-level memory operations.
 
@@ -6,24 +7,13 @@ use wasm_dbms_api::prelude::{
     DataSize, Encode, MSize, MemoryError, MemoryResult, Page, PageOffset,
 };
 
+use crate::memory_access::MemoryAccess;
 use crate::provider::MemoryProvider;
 
 /// Schema page (reserved page 0).
 pub const SCHEMA_PAGE: Page = 0;
 /// ACL page (reserved page 1).
 pub const ACL_PAGE: Page = 1;
-
-/// A single journal entry recording original bytes before a write.
-///
-/// Used by the write-ahead journal to restore memory to its pre-write state
-/// on rollback.
-#[derive(Debug)]
-struct JournalEntry {
-    /// Absolute offset in memory where the write occurred.
-    offset: u64,
-    /// Original bytes at `offset` before the write.
-    original_bytes: Vec<u8>,
-}
 
 /// The memory manager handles page-level memory operations on top of a
 /// [`MemoryProvider`].
@@ -32,11 +22,6 @@ where
     P: MemoryProvider,
 {
     provider: P,
-    /// Active write-ahead journal, if any.
-    ///
-    /// When `Some`, all writes via [`Self::write_at`] and [`Self::zero`] are
-    /// recorded so they can be rolled back on error.
-    journal: Option<Vec<JournalEntry>>,
 }
 
 impl<P> MemoryManager<P>
@@ -50,10 +35,7 @@ where
     ///
     /// Panics if the memory provider fails to initialize.
     pub fn init(provider: P) -> Self {
-        let mut manager = MemoryManager {
-            provider,
-            journal: None,
-        };
+        let mut manager = MemoryManager { provider };
 
         // Check whether two pages are already allocated.
         if manager.provider.pages() >= 2 {
@@ -68,11 +50,6 @@ where
         manager
     }
 
-    /// Returns the size of a memory page.
-    pub const fn page_size(&self) -> u64 {
-        P::PAGE_SIZE
-    }
-
     /// Returns the ACL page number.
     pub const fn acl_page(&self) -> Page {
         ACL_PAGE
@@ -83,182 +60,19 @@ where
         SCHEMA_PAGE
     }
 
-    /// Allocates an additional page in memory.
+    /// Writes raw bytes at the specified page and offset, bypassing
+    /// alignment and encoding checks.
     ///
-    /// On success returns the [`Page`] number.
-    pub fn allocate_page(&mut self) -> MemoryResult<Page> {
-        self.provider.grow(1)?;
-
-        // Zero the newly allocated page.
-        self.provider.write(
-            self.absolute_offset(self.last_page().unwrap_or(0), 0),
-            &vec![0u8; P::PAGE_SIZE as usize],
-        )?;
-
-        match self.last_page() {
-            Some(page) => Ok(page),
-            None => Err(MemoryError::FailedToAllocatePage),
-        }
-    }
-
-    /// Begins a new journal session, recording all writes for potential
-    /// rollback.
-    ///
-    /// While a journal is active, every call to [`Self::write_at`] and
-    /// [`Self::zero`] saves the original bytes so they can be restored by
-    /// [`Self::rollback_journal`].
-    pub fn begin_journal(&mut self) {
-        assert!(
-            self.journal.is_none(),
-            "begin_journal called while a journal is already active"
-        );
-        self.journal = Some(Vec::new());
-    }
-
-    /// Returns `true` if a journal session is currently active.
-    pub fn is_journal_active(&self) -> bool {
-        self.journal.is_some()
-    }
-
-    /// Commits the journal, discarding all recorded entries.
-    ///
-    /// Call this after a successful atomic operation to confirm that the
-    /// writes should be kept.
-    pub fn commit_journal(&mut self) {
-        self.journal = None;
-    }
-
-    /// Rolls back all writes recorded in the journal, restoring original
-    /// bytes.
-    ///
-    /// Entries are replayed in reverse order so that overlapping writes are
-    /// undone correctly.
-    pub fn rollback_journal(&mut self) -> MemoryResult<()> {
-        if let Some(journal) = self.journal.take() {
-            for entry in journal.into_iter().rev() {
-                self.provider.write(entry.offset, &entry.original_bytes)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Writes `buf` at `offset`, recording the original bytes if a journal
-    /// is active.
-    fn journaled_write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()> {
-        if let Some(journal) = &mut self.journal {
-            let mut original = vec![0u8; buf.len()];
-            self.provider.read(offset, &mut original)?;
-            journal.push(JournalEntry {
-                offset,
-                original_bytes: original,
-            });
-        }
-        self.provider.write(offset, buf)
-    }
-
-    /// Reads data as an [`Encode`] implementor at the specified page and
-    /// offset.
-    pub fn read_at<D>(&self, page: Page, offset: PageOffset) -> MemoryResult<D>
-    where
-        D: Encode,
-    {
-        self.check_alignment::<D>(offset)?;
-
-        let mut buf = vec![
-            0u8;
-            match D::SIZE {
-                DataSize::Fixed(size) => size as usize,
-                DataSize::Dynamic => (P::PAGE_SIZE as usize).saturating_sub(offset as usize),
-            }
-        ];
-
-        self.read_at_raw(page, offset, &mut buf)?;
-
-        D::decode(std::borrow::Cow::Owned(buf))
-    }
-
-    /// Writes data as an [`Encode`] implementor at the specified page and
-    /// offset.
-    pub fn write_at<E>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>
-    where
-        E: Encode,
-    {
-        self.check_unallocated_page(page, offset, data.size())?;
-        self.check_alignment::<E>(offset)?;
-
-        let encoded = data.encode();
-
-        if offset as u64 + encoded.len() as u64 > P::PAGE_SIZE {
-            return Err(MemoryError::SegmentationFault {
-                page,
-                offset,
-                data_size: encoded.len() as u64,
-                page_size: P::PAGE_SIZE,
-            });
-        }
-
-        let absolute_offset = self.absolute_offset(page, offset);
-        self.journaled_write(absolute_offset, encoded.as_ref())?;
-
-        // Zero padding bytes if any.
-        let padding = align_up::<E>(encoded.len()) - encoded.len();
-        if padding > 0 {
-            let padding_offset = absolute_offset + encoded.len() as u64;
-            let padding_buffer = vec![0u8; padding];
-            self.journaled_write(padding_offset, padding_buffer.as_ref())?;
-        }
-
-        Ok(())
-    }
-
-    /// Zeros out data at the specified page and offset.
-    pub fn zero<E>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>
-    where
-        E: Encode,
-    {
-        self.check_unallocated_page(page, offset, data.size())?;
-        self.check_alignment::<E>(offset)?;
-
-        let length = align_up::<E>(data.size() as usize);
-
-        if offset as u64 + (length as u64) > P::PAGE_SIZE {
-            return Err(MemoryError::SegmentationFault {
-                page,
-                offset,
-                data_size: data.size() as u64,
-                page_size: P::PAGE_SIZE,
-            });
-        }
-
-        let absolute_offset = self.absolute_offset(page, offset);
-        let buffer = vec![0u8; length];
-        self.journaled_write(absolute_offset, buffer.as_ref())
-    }
-
-    /// Reads raw bytes into the provided buffer at the specified page and
-    /// offset.
-    pub fn read_at_raw(
-        &self,
+    /// This is used by the journal rollback path which already holds
+    /// pre-captured byte buffers.
+    pub fn write_at_raw(
+        &mut self,
         page: Page,
         offset: PageOffset,
-        buf: &mut [u8],
-    ) -> MemoryResult<usize> {
-        if self.last_page().is_none_or(|last_page| page > last_page) {
-            return Err(MemoryError::SegmentationFault {
-                page,
-                offset,
-                data_size: buf.len() as u64,
-                page_size: P::PAGE_SIZE,
-            });
-        }
-
-        let read_len = ((P::PAGE_SIZE - offset as u64) as usize).min(buf.len());
-
+        buf: &[u8],
+    ) -> MemoryResult<()> {
         let absolute_offset = self.absolute_offset(page, offset);
-        self.provider
-            .read(absolute_offset, buf[..read_len].as_mut())?;
-
-        Ok(read_len)
+        self.provider.write(absolute_offset, buf)
     }
 
     /// Gets the last allocated page number.
@@ -307,6 +121,129 @@ where
             return Err(MemoryError::OffsetNotAligned { offset, alignment });
         }
         Ok(())
+    }
+}
+
+impl<P> MemoryAccess for MemoryManager<P>
+where
+    P: MemoryProvider,
+{
+    fn page_size(&self) -> u64 {
+        P::PAGE_SIZE
+    }
+
+    fn allocate_page(&mut self) -> MemoryResult<Page> {
+        self.provider.grow(1)?;
+
+        // Zero the newly allocated page.
+        self.provider.write(
+            self.absolute_offset(self.last_page().unwrap_or(0), 0),
+            &vec![0u8; P::PAGE_SIZE as usize],
+        )?;
+
+        match self.last_page() {
+            Some(page) => Ok(page),
+            None => Err(MemoryError::FailedToAllocatePage),
+        }
+    }
+
+    fn read_at<D>(&self, page: Page, offset: PageOffset) -> MemoryResult<D>
+    where
+        D: Encode,
+    {
+        self.check_alignment::<D>(offset)?;
+
+        let mut buf = vec![
+            0u8;
+            match D::SIZE {
+                DataSize::Fixed(size) => size as usize,
+                DataSize::Dynamic => (P::PAGE_SIZE as usize).saturating_sub(offset as usize),
+            }
+        ];
+
+        self.read_at_raw(page, offset, &mut buf)?;
+
+        D::decode(std::borrow::Cow::Owned(buf))
+    }
+
+    fn write_at<E>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>
+    where
+        E: Encode,
+    {
+        self.check_unallocated_page(page, offset, data.size())?;
+        self.check_alignment::<E>(offset)?;
+
+        let encoded = data.encode();
+
+        if offset as u64 + encoded.len() as u64 > P::PAGE_SIZE {
+            return Err(MemoryError::SegmentationFault {
+                page,
+                offset,
+                data_size: encoded.len() as u64,
+                page_size: P::PAGE_SIZE,
+            });
+        }
+
+        let absolute_offset = self.absolute_offset(page, offset);
+        self.provider.write(absolute_offset, encoded.as_ref())?;
+
+        // Zero padding bytes if any.
+        let padding = align_up::<E>(encoded.len()) - encoded.len();
+        if padding > 0 {
+            let padding_offset = absolute_offset + encoded.len() as u64;
+            let padding_buffer = vec![0u8; padding];
+            self.provider
+                .write(padding_offset, padding_buffer.as_ref())?;
+        }
+
+        Ok(())
+    }
+
+    fn zero<E>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>
+    where
+        E: Encode,
+    {
+        self.check_unallocated_page(page, offset, data.size())?;
+        self.check_alignment::<E>(offset)?;
+
+        let length = align_up::<E>(data.size() as usize);
+
+        if offset as u64 + (length as u64) > P::PAGE_SIZE {
+            return Err(MemoryError::SegmentationFault {
+                page,
+                offset,
+                data_size: data.size() as u64,
+                page_size: P::PAGE_SIZE,
+            });
+        }
+
+        let absolute_offset = self.absolute_offset(page, offset);
+        let buffer = vec![0u8; length];
+        self.provider.write(absolute_offset, buffer.as_ref())
+    }
+
+    fn read_at_raw(
+        &self,
+        page: Page,
+        offset: PageOffset,
+        buf: &mut [u8],
+    ) -> MemoryResult<usize> {
+        if self.last_page().is_none_or(|last_page| page > last_page) {
+            return Err(MemoryError::SegmentationFault {
+                page,
+                offset,
+                data_size: buf.len() as u64,
+                page_size: P::PAGE_SIZE,
+            });
+        }
+
+        let read_len = ((P::PAGE_SIZE - offset as u64) as usize).min(buf.len());
+
+        let absolute_offset = self.absolute_offset(page, offset);
+        self.provider
+            .read(absolute_offset, buf[..read_len].as_mut())?;
+
+        Ok(read_len)
     }
 }
 
@@ -483,8 +420,7 @@ mod tests {
     fn test_should_read_raw() {
         let mut mm = make_mm();
         let data_to_write = vec![1u8, 2, 3, 4, 5];
-        mm.provider
-            .write(mm.absolute_offset(ACL_PAGE, 20), &data_to_write)
+        mm.write_at_raw(ACL_PAGE, 20, &data_to_write)
             .expect("Failed to write raw data to ACL page");
 
         let mut buf = vec![0u8; 5];
@@ -545,9 +481,9 @@ mod tests {
     }
 
     #[derive(Debug, Clone, PartialEq)]
-    struct FixedSizeData {
-        a: u16,
-        b: u32,
+    pub(crate) struct FixedSizeData {
+        pub a: u16,
+        pub b: u32,
     }
 
     impl Encode for FixedSizeData {
@@ -576,9 +512,9 @@ mod tests {
     }
 
     #[derive(Debug, Clone, PartialEq)]
-    struct DataWithAlignment {
-        a: u16,
-        b: u32,
+    pub(crate) struct DataWithAlignment {
+        pub a: u16,
+        pub b: u32,
     }
 
     impl Encode for DataWithAlignment {
@@ -604,269 +540,5 @@ mod tests {
         fn size(&self) -> MSize {
             6
         }
-    }
-
-    // -- journal tests -------------------------------------------------------
-
-    #[test]
-    fn test_journal_begin_commit_clears_journal() {
-        let mut mm = make_mm();
-        mm.begin_journal();
-        assert!(mm.journal.is_some());
-
-        let data = FixedSizeData { a: 1, b: 2 };
-        mm.write_at(ACL_PAGE, 0, &data)
-            .expect("Failed to write data");
-
-        mm.commit_journal();
-        assert!(mm.journal.is_none());
-    }
-
-    #[test]
-    fn test_journal_rollback_restores_write_at() {
-        let mut mm = make_mm();
-
-        let original = FixedSizeData { a: 10, b: 20 };
-        mm.write_at(ACL_PAGE, 0, &original)
-            .expect("Failed to write original data");
-
-        mm.begin_journal();
-
-        let overwrite = FixedSizeData { a: 99, b: 100 };
-        mm.write_at(ACL_PAGE, 0, &overwrite)
-            .expect("Failed to overwrite data");
-
-        let read_back: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        assert_eq!(read_back, overwrite);
-
-        mm.rollback_journal().expect("Failed to rollback journal");
-
-        let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        assert_eq!(restored, original);
-    }
-
-    #[test]
-    fn test_journal_rollback_restores_zero() {
-        let mut mm = make_mm();
-
-        let original = FixedSizeData { a: 42, b: 1337 };
-        mm.write_at(ACL_PAGE, 0, &original)
-            .expect("Failed to write original data");
-
-        mm.begin_journal();
-
-        mm.zero(ACL_PAGE, 0, &original)
-            .expect("Failed to zero data");
-
-        mm.rollback_journal().expect("Failed to rollback journal");
-
-        let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        assert_eq!(restored, original);
-    }
-
-    #[test]
-    fn test_writes_without_journal_work_normally() {
-        let mut mm = make_mm();
-        assert!(mm.journal.is_none());
-
-        let data = FixedSizeData { a: 5, b: 10 };
-        mm.write_at(ACL_PAGE, 0, &data)
-            .expect("Failed to write data");
-
-        let read_back: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        assert_eq!(read_back, data);
-    }
-
-    #[test]
-    fn test_journal_rollback_multiple_writes_in_reverse() {
-        let mut mm = make_mm();
-
-        let data_a = FixedSizeData { a: 1, b: 2 };
-        let data_b = FixedSizeData { a: 3, b: 4 };
-        mm.write_at(ACL_PAGE, 0, &data_a)
-            .expect("Failed to write data_a");
-        mm.write_at(ACL_PAGE, 6, &data_b)
-            .expect("Failed to write data_b");
-
-        mm.begin_journal();
-
-        let overwrite_a = FixedSizeData { a: 100, b: 200 };
-        let overwrite_b = FixedSizeData { a: 300, b: 400 };
-        mm.write_at(ACL_PAGE, 0, &overwrite_a)
-            .expect("Failed to overwrite data_a");
-        mm.write_at(ACL_PAGE, 6, &overwrite_b)
-            .expect("Failed to overwrite data_b");
-
-        mm.rollback_journal().expect("Failed to rollback journal");
-
-        let restored_a: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        let restored_b: FixedSizeData = mm.read_at(ACL_PAGE, 6).expect("Failed to read data");
-        assert_eq!(restored_a, data_a);
-        assert_eq!(restored_b, data_b);
-    }
-
-    #[test]
-    fn test_journal_rollback_with_no_active_journal_is_noop() {
-        let mut mm = make_mm();
-        assert!(mm.journal.is_none());
-
-        let data = FixedSizeData { a: 7, b: 8 };
-        mm.write_at(ACL_PAGE, 0, &data)
-            .expect("Failed to write data");
-
-        // Rollback without begin should be a no-op.
-        mm.rollback_journal()
-            .expect("Rollback without journal should succeed");
-
-        let read_back: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        assert_eq!(read_back, data);
-    }
-
-    #[test]
-    fn test_journal_commit_with_no_active_journal_is_noop() {
-        let mut mm = make_mm();
-        assert!(mm.journal.is_none());
-
-        // Commit without begin should be a no-op (no panic, no error).
-        mm.commit_journal();
-        assert!(mm.journal.is_none());
-    }
-
-    #[test]
-    fn test_journal_rollback_overlapping_writes_restores_original() {
-        let mut mm = make_mm();
-
-        let original = FixedSizeData { a: 10, b: 20 };
-        mm.write_at(ACL_PAGE, 0, &original)
-            .expect("Failed to write original");
-
-        mm.begin_journal();
-
-        // First overwrite.
-        let first = FixedSizeData { a: 50, b: 60 };
-        mm.write_at(ACL_PAGE, 0, &first)
-            .expect("Failed to write first overwrite");
-
-        // Second overwrite at the same offset.
-        let second = FixedSizeData { a: 90, b: 100 };
-        mm.write_at(ACL_PAGE, 0, &second)
-            .expect("Failed to write second overwrite");
-
-        mm.rollback_journal().expect("Failed to rollback journal");
-
-        // Should restore to the state before `begin_journal`, not to the
-        // intermediate state.
-        let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        assert_eq!(restored, original);
-    }
-
-    #[test]
-    fn test_journal_committed_writes_persist() {
-        let mut mm = make_mm();
-
-        let original = FixedSizeData { a: 1, b: 2 };
-        mm.write_at(ACL_PAGE, 0, &original)
-            .expect("Failed to write original");
-
-        mm.begin_journal();
-
-        let updated = FixedSizeData { a: 99, b: 100 };
-        mm.write_at(ACL_PAGE, 0, &updated)
-            .expect("Failed to write updated data");
-
-        mm.commit_journal();
-
-        // After commit, the updated data should persist.
-        let read_back: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        assert_eq!(read_back, updated);
-    }
-
-    #[test]
-    fn test_journal_is_none_after_rollback() {
-        let mut mm = make_mm();
-
-        mm.begin_journal();
-        assert!(mm.journal.is_some());
-
-        let data = FixedSizeData { a: 1, b: 2 };
-        mm.write_at(ACL_PAGE, 0, &data)
-            .expect("Failed to write data");
-
-        mm.rollback_journal().expect("Failed to rollback journal");
-        assert!(mm.journal.is_none());
-    }
-
-    #[test]
-    fn test_journal_allocate_page_is_not_rolled_back() {
-        let mut mm = make_mm();
-        let pages_before = mm.last_page().unwrap();
-
-        mm.begin_journal();
-
-        let new_page = mm.allocate_page().expect("Failed to allocate page");
-        assert_eq!(new_page, pages_before + 1);
-
-        mm.rollback_journal().expect("Failed to rollback journal");
-
-        // Page allocation is not journaled — the page still exists.
-        assert_eq!(mm.last_page().unwrap(), pages_before + 1);
-    }
-
-    #[test]
-    fn test_journal_rollback_mixed_write_at_and_zero() {
-        let mut mm = make_mm();
-
-        let data_a = FixedSizeData { a: 11, b: 22 };
-        let data_b = FixedSizeData { a: 33, b: 44 };
-        mm.write_at(ACL_PAGE, 0, &data_a)
-            .expect("Failed to write data_a");
-        mm.write_at(ACL_PAGE, 6, &data_b)
-            .expect("Failed to write data_b");
-
-        mm.begin_journal();
-
-        // Overwrite slot A, zero slot B.
-        let overwrite = FixedSizeData { a: 77, b: 88 };
-        mm.write_at(ACL_PAGE, 0, &overwrite)
-            .expect("Failed to overwrite data_a");
-        mm.zero(ACL_PAGE, 6, &data_b)
-            .expect("Failed to zero data_b");
-
-        mm.rollback_journal().expect("Failed to rollback journal");
-
-        let restored_a: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        let restored_b: FixedSizeData = mm.read_at(ACL_PAGE, 6).expect("Failed to read data");
-        assert_eq!(restored_a, data_a);
-        assert_eq!(restored_b, data_b);
-    }
-
-    #[test]
-    fn test_journal_rollback_restores_padding_bytes() {
-        let mut mm = make_mm();
-
-        // Write aligned data that uses padding (DataWithAlignment has
-        // ALIGNMENT = 32).
-        let original = DataWithAlignment { a: 10, b: 20 };
-        mm.write_at(ACL_PAGE, 0, &original)
-            .expect("Failed to write original");
-
-        // Read raw bytes to capture the full padded region.
-        let mut original_raw = vec![0u8; 32];
-        mm.read_at_raw(ACL_PAGE, 0, &mut original_raw)
-            .expect("Failed to read raw");
-
-        mm.begin_journal();
-
-        let overwrite = DataWithAlignment { a: 99, b: 100 };
-        mm.write_at(ACL_PAGE, 0, &overwrite)
-            .expect("Failed to overwrite");
-
-        mm.rollback_journal().expect("Failed to rollback journal");
-
-        // Verify the full padded region is restored, not just the data bytes.
-        let mut restored_raw = vec![0u8; 32];
-        mm.read_at_raw(ACL_PAGE, 0, &mut restored_raw)
-            .expect("Failed to read raw");
-        assert_eq!(restored_raw, original_raw);
     }
 }

@@ -3,15 +3,15 @@
 //! Overlay reader that merges base table data with overlay changes.
 
 use wasm_dbms_api::prelude::{ColumnDef, DbmsResult, TableSchema, Value};
-use wasm_dbms_memory::prelude::{MemoryProvider, TableReader};
+use wasm_dbms_memory::prelude::{MemoryAccess, TableReader};
 
 use super::table::TableOverlay;
 
 /// A reader that merges base table data with overlay changes.
-pub struct DatabaseOverlayReader<'a, T, P>
+pub struct DatabaseOverlayReader<'a, T, MA>
 where
     T: TableSchema,
-    P: MemoryProvider,
+    MA: MemoryAccess,
 {
     /// Pre-collected inserted rows from the overlay.
     inserted_rows: Vec<Vec<(ColumnDef, Value)>>,
@@ -20,17 +20,17 @@ where
     /// Reference to the table overlay.
     table_overlay: &'a TableOverlay,
     /// The underlying table reader.
-    table_reader: TableReader<'a, T, P>,
+    table_reader: TableReader<'a, T, MA>,
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<'a, T, P> DatabaseOverlayReader<'a, T, P>
+impl<'a, T, MA> DatabaseOverlayReader<'a, T, MA>
 where
     T: TableSchema,
-    P: MemoryProvider,
+    MA: MemoryAccess,
 {
     /// Creates a new overlay reader.
-    pub fn new(table_overlay: &'a TableOverlay, table_reader: TableReader<'a, T, P>) -> Self {
+    pub fn new(table_overlay: &'a TableOverlay, table_reader: TableReader<'a, T, MA>) -> Self {
         let inserted_rows: Vec<_> = table_overlay.iter_inserted().collect();
         Self {
             inserted_rows,

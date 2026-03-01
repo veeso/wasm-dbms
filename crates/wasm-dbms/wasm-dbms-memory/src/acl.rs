@@ -5,7 +5,7 @@ use wasm_dbms_api::prelude::{
     DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryError, MemoryResult, PageOffset,
 };
 
-use crate::{MemoryManager, MemoryProvider};
+use crate::{MemoryAccess, MemoryManager, MemoryProvider};
 
 /// Trait for access control providers.
 ///

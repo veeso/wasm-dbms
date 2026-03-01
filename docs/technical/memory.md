@@ -147,9 +147,27 @@ pub struct HeapMemoryProvider {
 
 ---
 
-## Memory Manager
+## Memory Manager and MemoryAccess
 
-The `MemoryManager` builds on `MemoryProvider` to handle page allocation:
+The `MemoryManager` builds on `MemoryProvider` to handle page allocation. Its page-level
+read/write operations are exposed through the `MemoryAccess` trait, which allows the DBMS layer
+to substitute a journaled writer for atomic transactions (see [Atomicity](./atomicity.md)).
+
+```rust
+/// Abstracts page-level read/write operations.
+///
+/// `MemoryManager` implements this trait directly. The DBMS layer provides
+/// `JournaledWriter`, which wraps a `MemoryManager` and records original
+/// bytes before each write for rollback support.
+pub trait MemoryAccess {
+    fn page_size(&self) -> u64;
+    fn allocate_page(&mut self) -> MemoryResult<Page>;
+    fn read_at<D: Encode>(&self, page: Page, offset: PageOffset) -> MemoryResult<D>;
+    fn write_at<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
+    fn zero<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
+    fn read_at_raw(&self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize>;
+}
+```
 
 ```rust
 pub struct MemoryManager<P: MemoryProvider> {
@@ -167,25 +185,21 @@ impl<P: MemoryProvider> MemoryManager<P> {
     /// Initialize and allocate reserved pages
     fn init(provider: P) -> Self;
 
-    /// Page size in bytes
-    pub const fn page_size(&self) -> u64;
-
     /// ACL page number (always 1)
     pub const fn acl_page(&self) -> Page;
 
     /// Schema registry page (always 0)
     pub const fn schema_page(&self) -> Page;
-
-    /// Allocate a new page, returns page number
-    pub fn allocate_page(&mut self) -> MemoryResult<Page>;
-
-    /// Read data at page + offset
-    pub fn read_at<D: Encode>(&self, page: Page, offset: PageOffset) -> MemoryResult<D>;
-
-    /// Write data at page + offset
-    pub fn write_at<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
 }
+
+// MemoryAccess is implemented for MemoryManager<P>,
+// delegating directly to the underlying MemoryProvider.
+impl<P: MemoryProvider> MemoryAccess for MemoryManager<P> { /* ... */ }
 ```
+
+All table-registry and ledger functions are generic over `impl MemoryAccess` rather than
+taking `&[mut] MemoryManager` directly. This makes it possible to intercept writes at the
+DBMS layer without modifying any memory-crate code.
 
 ---
 

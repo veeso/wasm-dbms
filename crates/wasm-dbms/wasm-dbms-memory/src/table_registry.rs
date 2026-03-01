@@ -13,7 +13,7 @@ use self::page_ledger::PageLedger;
 use self::raw_record::RawRecord;
 pub use self::table_reader::{NextRecord, TableReader};
 use self::write_at::WriteAt;
-use crate::{MemoryManager, MemoryProvider, TableRegistryPage, align_up};
+use crate::{MemoryAccess, TableRegistryPage, align_up};
 
 /// The table registry takes care of storing the records for each table,
 /// using the [`FreeSegmentsLedger`] and [`PageLedger`] to derive exactly where to read/write.
@@ -29,10 +29,10 @@ pub struct TableRegistry {
 }
 
 impl TableRegistry {
-    /// Loads the table registry from memory
+    /// Loads the table registry from memory.
     pub fn load(
         table_pages: TableRegistryPage,
-        mm: &MemoryManager<impl MemoryProvider>,
+        mm: &impl MemoryAccess,
     ) -> MemoryResult<Self> {
         Ok(Self {
             free_segments_ledger: FreeSegmentsLedger::load(table_pages.free_segments_page, mm)?,
@@ -46,7 +46,7 @@ impl TableRegistry {
     pub fn insert<E>(
         &mut self,
         record: E,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()>
     where
         E: Encode,
@@ -68,12 +68,10 @@ impl TableRegistry {
     /// Creates a [`TableReader`] to read records from the table registry.
     ///
     /// Use [`TableReader::try_next`] to read records one by one.
-    pub fn read<'a, E, P: MemoryProvider>(
-        &'a self,
-        mm: &'a MemoryManager<P>,
-    ) -> TableReader<'a, E, P>
+    pub fn read<'a, E, MA>(&'a self, mm: &'a MA) -> TableReader<'a, E, MA>
     where
         E: Encode,
+        MA: MemoryAccess,
     {
         TableReader::new(&self.page_ledger, mm)
     }
@@ -86,7 +84,7 @@ impl TableRegistry {
         record: impl Encode,
         page: Page,
         offset: PageOffset,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
         let raw_record = RawRecord::new(record);
 
@@ -110,7 +108,7 @@ impl TableRegistry {
         old_record: impl Encode,
         old_page: Page,
         old_offset: PageOffset,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
         if new_record.size() == old_record.size() {
             self.update_in_place(new_record, old_page, old_offset, mm)
@@ -127,7 +125,7 @@ impl TableRegistry {
         record: impl Encode,
         page: Page,
         offset: PageOffset,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
         let raw_record = RawRecord::new(record);
         mm.write_at(page, offset, &raw_record)
@@ -142,7 +140,7 @@ impl TableRegistry {
         old_record: impl Encode,
         old_page: Page,
         old_offset: PageOffset,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
         // delete old record
         self.delete(old_record, old_page, old_offset, mm)?;
@@ -155,7 +153,7 @@ impl TableRegistry {
     fn get_write_position<E>(
         &mut self,
         record: &RawRecord<E>,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<WriteAt>
     where
         E: Encode,
@@ -182,7 +180,7 @@ impl TableRegistry {
         &mut self,
         write_at: WriteAt,
         record: &RawRecord<E>,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()>
     where
         E: Encode,

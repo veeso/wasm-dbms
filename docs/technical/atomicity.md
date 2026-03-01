@@ -4,12 +4,13 @@
   - [Overview](#overview)
   - [The Problem](#the-problem)
   - [Write-Ahead Journal](#write-ahead-journal)
+    - [Architecture](#architecture)
     - [Journal Flow](#journal-flow)
     - [What is Journaled](#what-is-journaled)
   - [Transaction Commit Atomicity](#transaction-commit-atomicity)
   - [Edge Cases](#edge-cases)
     - [Page Allocation](#page-allocation)
-    - [Nested Journals](#nested-journals)
+    - [Nested Atomic Calls](#nested-atomic-calls)
     - [Rollback Failure](#rollback-failure)
 
 ---
@@ -42,32 +43,51 @@ On the Internet Computer, a panic (trap) automatically reverts all stable-memory
 
 ## Write-Ahead Journal
 
-The fix is a **write-ahead journal** inside `MemoryManager`. Before overwriting any bytes, the journal saves the original content at that offset. On error, the journal replays saved entries in reverse order, restoring every modified byte.
+The fix is a **write-ahead journal**. Before overwriting any bytes, the journal saves the original content at that offset. On error, the journal replays saved entries in reverse order, restoring every modified byte.
+
+### Architecture
+
+The journal lives in the `wasm-dbms` crate's transaction module, not in the memory layer. This separation keeps the memory crate (`wasm-dbms-memory`) focused on page-level I/O while the DBMS layer owns the transaction concern.
+
+The key types are:
+
+- **`MemoryAccess` trait** (in `wasm-dbms-memory`): Abstracts page-level read/write operations. `MemoryManager` implements this trait with direct writes.
+- **`Journal`** (in `wasm-dbms`): A heap-only collection of `JournalEntry` records. Each entry stores the page, offset, and original bytes before a write.
+- **`JournaledWriter`** (in `wasm-dbms`): Wraps a `&mut MemoryManager` and a `&mut Journal`, implementing `MemoryAccess`. Every `write_at` or `zero` call reads the original bytes first, records them in the journal, then delegates to the underlying `MemoryManager`.
+
+All memory-crate functions that perform writes (in `TableRegistry`, `PageLedger`, `FreeSegmentsLedger`, etc.) are generic over `impl MemoryAccess`. When called with a plain `MemoryManager`, writes go directly to memory. When called with a `JournaledWriter`, writes are automatically recorded for rollback.
 
 ### Journal Flow
 
 ```txt
+┌─────────────────┐
+│  Journal::new() │   Creates empty journal
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│  JournaledWriter wraps  │
+│  MemoryManager + Journal│
+└────────┬────────────────┘
+         │
+         ▼
 ┌──────────────┐
-│ begin_journal│   Activates recording
+│   write_at   │──► Reads original bytes, records in journal, then writes new data
+│     zero     │──► Reads original bytes, records in journal, then writes zeros
 └──────┬───────┘
        │
-       ▼
-┌──────────────┐
-│   write_at   │──► Saves original bytes, then writes new data
-│     zero     │──► Saves original bytes, then writes zeros
-└──────┬───────┘
+       ├── success ──► journal.commit()   ──► Drops entries (no-op)
        │
-       ├── success ──► commit_journal()  ──► Discards entries
-       │
-       └── error   ──► rollback_journal() ──► Replays entries in reverse
+       └── error   ──► journal.rollback() ──► Replays entries in reverse via MemoryManager
 ```
 
 Each journal entry is:
 
 ```rust
 struct JournalEntry {
-    offset: u64,          // absolute byte offset in memory
-    original_bytes: Vec<u8>, // bytes that were there before the write
+    page: Page,
+    offset: PageOffset,
+    original_bytes: Vec<u8>,
 }
 ```
 
@@ -91,20 +111,24 @@ Now, `commit()` uses a **single journal** spanning all operations:
 fn commit(&mut self) -> DbmsResult<()> {
     // ... take transaction ...
 
-    self.ctx.mm.borrow_mut().begin_journal();
+    *self.ctx.journal.borrow_mut() = Some(Journal::new());
 
     for op in transaction.operations {
         let result = match op { /* execute insert/update/delete */ };
 
         if let Err(err) = result {
-            self.ctx.mm.borrow_mut()
-                .rollback_journal()
-                .expect("critical: failed to rollback journal");
+            if let Some(journal) = self.ctx.journal.borrow_mut().take() {
+                journal
+                    .rollback(&mut self.ctx.mm.borrow_mut())
+                    .expect("critical: failed to rollback journal");
+            }
             return Err(err);
         }
     }
 
-    self.ctx.mm.borrow_mut().commit_journal();
+    if let Some(journal) = self.ctx.journal.borrow_mut().take() {
+        journal.commit();
+    }
     Ok(())
 }
 ```
@@ -121,10 +145,8 @@ This ensures that either **all** transaction operations are applied, or **none**
 
 ### Nested Atomic Calls
 
-During `commit()`, each transaction operation is dispatched through the `Database` trait methods (`insert`, `update`, `delete`), which internally call `atomic()`. Since `commit()` has already started a journal, `atomic()` detects this via `is_journal_active()` and delegates to the outer journal instead of starting its own. This ensures a single journal spans the entire commit, and a `debug_assert!` in `begin_journal()` guards against accidental double-begin in debug builds.
-
-Calling `begin_journal()` directly while a journal is already active panics unconditionally (per M-PANIC-ON-BUG), since discarding an active journal would make prior writes unrollbackable.
+During `commit()`, each transaction operation is dispatched through the `Database` trait methods (`insert`, `update`, `delete`), which internally call `atomic()`. Since `commit()` has already placed a `Journal` in `DbmsContext`, `atomic()` detects this via `self.ctx.journal.borrow().is_some()` and delegates to the outer journal instead of starting its own. This ensures a single journal spans the entire commit.
 
 ### Rollback Failure
 
-If `rollback_journal()` itself fails (e.g., the memory provider returns an I/O error during the restore writes), the program **panics**. A failed rollback means memory is in an indeterminate state — some bytes restored, some not. There is no recovery path, so immediate termination is the only safe response (per M-PANIC-ON-BUG).
+If `journal.rollback()` itself fails (e.g., the memory provider returns an I/O error during the restore writes), the program **panics**. A failed rollback means memory is in an indeterminate state — some bytes restored, some not. There is no recovery path, so immediate termination is the only safe response (per M-PANIC-ON-BUG).

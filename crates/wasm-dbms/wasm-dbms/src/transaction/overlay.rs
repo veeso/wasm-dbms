@@ -8,7 +8,7 @@ mod table;
 use std::collections::HashMap;
 
 use wasm_dbms_api::prelude::{ColumnDef, DbmsError, DbmsResult, QueryError, TableSchema, Value};
-use wasm_dbms_memory::prelude::{MemoryProvider, TableReader};
+use wasm_dbms_memory::prelude::{MemoryAccess, TableReader};
 
 pub use self::reader::DatabaseOverlayReader;
 pub(crate) use self::table::TableOverlay;
@@ -24,13 +24,13 @@ pub struct DatabaseOverlay {
 
 impl DatabaseOverlay {
     /// Returns a reader that merges base table data with overlay changes.
-    pub fn reader<'a, T, P>(
+    pub fn reader<'a, T, MA>(
         &'a mut self,
-        table_reader: TableReader<'a, T, P>,
-    ) -> DatabaseOverlayReader<'a, T, P>
+        table_reader: TableReader<'a, T, MA>,
+    ) -> DatabaseOverlayReader<'a, T, MA>
     where
         T: TableSchema,
-        P: MemoryProvider,
+        MA: MemoryAccess,
     {
         let table_name = T::table_name();
         let table_overlay = self.tables.entry(table_name.to_string()).or_default();

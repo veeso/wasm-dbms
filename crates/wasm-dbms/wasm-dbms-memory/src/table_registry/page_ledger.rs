@@ -7,7 +7,7 @@ use wasm_dbms_api::prelude::{Encode, MemoryResult, Page, PageOffset};
 pub use self::page_table::PageRecord;
 use self::page_table::PageTable;
 use super::raw_record::RawRecord;
-use crate::{MemoryManager, MemoryProvider, align_up};
+use crate::{MemoryAccess, align_up};
 
 /// Takes care of storing the pages for each table
 #[derive(Debug)]
@@ -20,7 +20,7 @@ pub struct PageLedger {
 
 impl PageLedger {
     /// Load the page ledger from memory at the given [`Page`].
-    pub fn load(page: Page, mm: &MemoryManager<impl MemoryProvider>) -> MemoryResult<Self> {
+    pub fn load(page: Page, mm: &impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
             pages: mm.read_at(page, 0)?,
             ledger_page: page,
@@ -35,7 +35,7 @@ impl PageLedger {
     pub fn get_page_and_offset_for_record<R>(
         &mut self,
         record: &R,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<(Page, PageOffset)>
     where
         R: Encode,
@@ -81,7 +81,7 @@ impl PageLedger {
         &mut self,
         page: Page,
         record: &R,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()>
     where
         R: Encode,
@@ -112,7 +112,7 @@ impl PageLedger {
     }
 
     /// Write the page ledger to memory.
-    fn write(&self, mm: &mut MemoryManager<impl MemoryProvider>) -> MemoryResult<()> {
+    fn write(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
         mm.write_at(self.ledger_page, 0, &self.pages)
     }
 }
@@ -124,7 +124,7 @@ mod tests {
     use super::super::raw_record::RAW_RECORD_HEADER_SIZE;
     use super::page_table::PageRecord;
     use super::*;
-    use crate::{HeapMemoryProvider, MemoryProvider};
+    use crate::{HeapMemoryProvider, MemoryManager, MemoryProvider};
 
     #[test]
     fn test_should_store_pages_and_load_back() {

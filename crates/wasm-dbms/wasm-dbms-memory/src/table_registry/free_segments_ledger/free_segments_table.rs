@@ -5,7 +5,7 @@ use wasm_dbms_api::prelude::{
 };
 
 use super::FreeSegment;
-use crate::{MemoryManager, MemoryProvider};
+use crate::MemoryAccess;
 
 const TABLE_LEN_SIZE: MSize = 2;
 
@@ -22,7 +22,7 @@ struct FreeSegmentsList(Vec<FreeSegment>);
 
 impl FreeSegmentsTable {
     /// Loads the [`FreeSegmentsTable`] from the given page.
-    pub fn load(page: Page, mm: &MemoryManager<impl MemoryProvider>) -> MemoryResult<Self> {
+    pub fn load(page: Page, mm: &impl MemoryAccess) -> MemoryResult<Self> {
         let records = mm.read_at(page, 0)?;
         let max_records = Self::max_segments(mm);
         Ok(Self {
@@ -52,7 +52,7 @@ impl FreeSegmentsTable {
         page: Page,
         offset: PageOffset,
         size: MSize,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
         assert!(
             !self.is_full(),
@@ -98,7 +98,7 @@ impl FreeSegmentsTable {
         &mut self,
         FreeSegment { page, offset, size }: FreeSegment,
         used_size: MSize,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
         if let Some(pos) = self
             .records
@@ -126,7 +126,7 @@ impl FreeSegmentsTable {
     }
 
     /// Commits the current state of the table back to memory.
-    fn commit(&self, mm: &mut MemoryManager<impl MemoryProvider>) -> MemoryResult<()> {
+    fn commit(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
         mm.write_at(self.page, 0, &self.records)
     }
 
@@ -163,7 +163,7 @@ impl FreeSegmentsTable {
     }
 
     /// Computes the maximum number of segments that can be stored in a single page.
-    fn max_segments(mm: &MemoryManager<impl MemoryProvider>) -> usize {
+    fn max_segments(mm: &impl MemoryAccess) -> usize {
         let page_size = mm.page_size();
         let record_size = FreeSegment::SIZE.get_fixed_size().expect("Should be fixed") as u64;
         page_size.div_ceil(record_size).saturating_sub(1) as usize // for header
@@ -231,7 +231,7 @@ impl Encode for FreeSegmentsList {
 mod tests {
 
     use super::*;
-    use crate::HeapMemoryProvider;
+    use crate::{HeapMemoryProvider, MemoryManager};
 
     #[test]
     fn test_should_encode_and_decode_free_segments_table() {
