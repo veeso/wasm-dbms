@@ -181,4 +181,54 @@ mod tests {
         );
         assert!(refs.is_empty());
     }
+
+    #[test]
+    fn test_commit_rolls_back_all_operations_on_failure() {
+        let ctx = setup();
+        let owner = vec![1, 2, 3];
+
+        // Begin a transaction and queue two inserts.
+        let tx_id = ctx.begin_transaction(owner);
+        let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+        let first = ItemInsertRequest::from_values(&[
+            (Item::columns()[0], Value::Uint32(Uint32(1))),
+            (Item::columns()[1], Value::Text(Text("first".to_string()))),
+        ])
+        .unwrap();
+        db.insert::<Item>(first).unwrap();
+
+        let second = ItemInsertRequest::from_values(&[
+            (Item::columns()[0], Value::Uint32(Uint32(2))),
+            (Item::columns()[1], Value::Text(Text("second".to_string()))),
+        ])
+        .unwrap();
+        db.insert::<Item>(second).unwrap();
+
+        // Before committing, insert PK=2 outside the transaction so the
+        // second operation will conflict at commit time.
+        let oneshot = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        let conflicting = ItemInsertRequest::from_values(&[
+            (Item::columns()[0], Value::Uint32(Uint32(2))),
+            (
+                Item::columns()[1],
+                Value::Text(Text("conflict".to_string())),
+            ),
+        ])
+        .unwrap();
+        oneshot.insert::<Item>(conflicting).unwrap();
+
+        // Commit should fail: the first insert (PK=1) succeeds, but the
+        // second (PK=2) hits a primary key conflict.
+        let result = db.commit();
+        assert!(result.is_err());
+
+        // Verify that the first insert was also rolled back: only the
+        // conflicting row should remain.
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        let rows = db.select::<Item>(Query::builder().build()).unwrap();
+        assert_eq!(rows.len(), 1, "expected only the conflicting row");
+        assert_eq!(rows[0].id, Some(Uint32(2)));
+        assert_eq!(rows[0].name, Some(Text("conflict".to_string())));
+    }
 }
