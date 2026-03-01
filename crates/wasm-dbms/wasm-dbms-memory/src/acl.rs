@@ -162,12 +162,11 @@ impl AccessControl for AccessControlList {
             .iter()
             .position(|p| p.as_slice() == identity.as_slice())
         {
+            if self.allowed.len() == 1 {
+                panic!("ACL cannot be empty");
+            }
             self.allowed.swap_remove(pos);
             self.save(mm)?;
-        }
-        // trap if empty ACL
-        if self.allowed.is_empty() {
-            panic!("ACL cannot be empty");
         }
 
         Ok(())

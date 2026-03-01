@@ -23,7 +23,7 @@ This guide walks you through setting up a database using wasm-dbms. By the end, 
 
 Before starting, ensure you have:
 
-- Rust 1.85.1 or later
+- Rust 1.91.1 or later
 - `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
 
 ---

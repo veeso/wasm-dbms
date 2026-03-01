@@ -46,7 +46,7 @@ pub fn collect_schema_metadata(attrs: &[syn::Attribute]) -> syn::Result<SchemaMe
         }
     }
 
-    for (ident, _name) in names {
+    for (ident, _) in names {
         tables.push(collect_table_entry(ident)?);
     }
 

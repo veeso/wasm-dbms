@@ -53,7 +53,7 @@ Key operations:
 
 ## Prerequisites
 
-- Rust 1.85.1+
+- Rust 1.91.1+
 - `wasm32-wasip2` target: `rustup target add wasm32-wasip2`
 - [just](https://github.com/casey/just) command runner
 

@@ -229,7 +229,7 @@ where
         E: Encode,
     {
         let alignment = E::ALIGNMENT as PageOffset;
-        if !offset.is_multiple_of(alignment) {
+        if alignment != 0 && offset % alignment != 0 {
             return Err(MemoryError::OffsetNotAligned { offset, alignment });
         }
         Ok(())

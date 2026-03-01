@@ -28,7 +28,7 @@ This guide walks you through setting up a complete database canister on the Inte
 
 Before starting, ensure you have:
 
-- Rust 1.85.1 or later
+- Rust 1.91.1 or later
 - `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
 - [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install/) (Internet Computer SDK)
 - `ic-wasm`: `cargo install ic-wasm`

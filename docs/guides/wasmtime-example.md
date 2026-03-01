@@ -97,7 +97,7 @@ The provider is initialized with a file path relative to the WASI preopened dire
 
 ### Prerequisites
 
-- Rust 1.85.1+
+- Rust 1.91.1+
 - `wasm32-wasip2` target:
 
   ```bash

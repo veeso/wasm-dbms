@@ -188,7 +188,7 @@ docs/
 
 ## Build Requirements
 
-- Rust 1.85.1+ (Edition 2024)
+- Rust 1.91.1+ (Edition 2024)
 - `wasm32-unknown-unknown` target
 - Tools: `ic-wasm`, `candid-extractor`, `just`
 - CI uses nightly for formatting

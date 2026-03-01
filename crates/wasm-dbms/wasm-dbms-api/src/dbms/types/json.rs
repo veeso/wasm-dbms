@@ -331,6 +331,7 @@ impl std::fmt::Display for Json {
 impl DataType for Json {}
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use std::cmp::Ordering;
 
