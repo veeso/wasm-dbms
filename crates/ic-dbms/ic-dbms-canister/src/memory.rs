@@ -6,8 +6,6 @@
 
 mod provider;
 
-pub use wasm_dbms_memory::*;
-
 #[cfg(target_family = "wasm")]
 pub type IcMemoryProvider = provider::IcMemoryProvider;
 
