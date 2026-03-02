@@ -44,6 +44,63 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 | `ic-dbms-macros`   | IC-specific macro: `DbmsCanister`                           |
 | `ic-dbms-client`   | Client libraries for canister interaction                   |
 
+## Quick Start (Generic)
+
+Define your database schema using Rust structs with derive macros:
+
+```rust
+use wasm_dbms_api::prelude::*;
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "users"]
+pub struct User {
+    #[primary_key]
+    pub id: Uint32,
+    #[sanitizer(TrimSanitizer)]
+    #[validate(MaxStrlenValidator(100))]
+    pub name: Text,
+    #[validate(EmailValidator)]
+    pub email: Text,
+}
+```
+
+Wire tables together with the `DatabaseSchema` macro and use the `Database` trait:
+
+```rust
+use wasm_dbms::prelude::*;
+use wasm_dbms_api::prelude::*;
+
+#[derive(DatabaseSchema)]
+#[tables(User = "users")]
+pub struct MySchema;
+
+// Create a database context with any MemoryProvider
+let ctx = DbmsContext::new(HeapMemoryProvider::default());
+MySchema::register_tables(&ctx)?;
+
+let database = WasmDbmsDatabase::oneshot(&ctx, MySchema);
+
+// Insert
+database.insert::<User>(UserInsertRequest {
+    id: 1.into(),
+    name: "Alice".into(),
+    email: "alice@example.com".into(),
+})?;
+
+// Query
+let users = database.select::<User>(Query::builder().all().build())?;
+```
+
+The `MemoryProvider` trait abstracts storage — use `HeapMemoryProvider` for testing, `FileMemoryProvider` for
+Wasmtime/WASI, or implement your own for any WASM runtime.
+
+### Component Model (WIT)
+
+wasm-dbms can be exposed as a [WebAssembly Component](https://component-model.bytecodealliance.org/) via a WIT
+interface (`/wit/dbms.wit`), making it accessible from any Component Model host — Go, Python, JavaScript, or any
+language with Component Model tooling. See the [Wasmtime example](https://wasm-dbms.cc/guides/wasmtime-example.html)
+and the reference implementation in `crates/wasm-dbms/example/`.
+
 ## Quick Start (IC Canister)
 
 Define your database schema using Rust structs:
