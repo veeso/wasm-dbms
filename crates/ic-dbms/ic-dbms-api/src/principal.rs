@@ -123,4 +123,72 @@ mod tests {
         let decoded: Principal = candid::decode_one(&buf).expect("Candid decoding failed");
         assert_eq!(src, decoded);
     }
+
+    #[test]
+    fn test_decode_empty_data_returns_too_short() {
+        let result = Principal::decode(std::borrow::Cow::Borrowed(&[]));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MemoryError::DecodeError(DecodeError::TooShort)
+        ));
+    }
+
+    #[test]
+    fn test_decode_truncated_data_returns_too_short() {
+        // Length prefix says 10 bytes, but only 2 bytes follow
+        let data = vec![10, 0x01, 0x02];
+        let result = Principal::decode(std::borrow::Cow::Owned(data));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MemoryError::DecodeError(DecodeError::TooShort)
+        ));
+    }
+
+    #[test]
+    fn test_size_returns_correct_value() {
+        let principal = Principal(
+            candid::Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").expect("invalid principal"),
+        );
+        let size = principal.size();
+        // 1 byte for length prefix + principal bytes length
+        assert_eq!(size, 1 + principal.0.as_slice().len() as MSize);
+    }
+
+    #[test]
+    fn test_size_anonymous_principal() {
+        let principal = Principal(candid::Principal::anonymous());
+        let size = principal.size();
+        assert_eq!(size, 1 + principal.0.as_slice().len() as MSize);
+    }
+
+    #[test]
+    fn test_display() {
+        let inner =
+            candid::Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").expect("invalid principal");
+        let principal = Principal(inner);
+        let display = format!("{principal}");
+        assert_eq!(display, "ryjl3-tyaaa-aaaaa-aaaba-cai");
+    }
+
+    #[test]
+    fn test_default_is_anonymous() {
+        let principal = Principal::default();
+        assert_eq!(principal.0, candid::Principal::anonymous());
+    }
+
+    #[test]
+    fn test_from_principal_to_value() {
+        let principal = Principal(
+            candid::Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").expect("invalid principal"),
+        );
+        let value: Value = principal.into();
+        assert!(matches!(value, Value::Custom(_)));
+    }
+
+    #[test]
+    fn test_custom_data_type_tag() {
+        assert_eq!(Principal::TYPE_TAG, "principal");
+    }
 }

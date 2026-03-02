@@ -282,3 +282,309 @@ where
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use wasm_dbms_api::prelude::{
+        Database as _, Filter, InsertRecord as _, Query, TableSchema as _, Text, Uint32, Value,
+    };
+    use wasm_dbms_macros::{DatabaseSchema, Table};
+    use wasm_dbms_memory::prelude::HeapMemoryProvider;
+
+    use crate::prelude::{DbmsContext, WasmDbmsDatabase};
+
+    // Use tables WITHOUT foreign key constraints so we can test all join
+    // types including unmatched rows without FK validation failures.
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "departments"]
+    pub struct Department {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+    }
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "employees"]
+    pub struct Employee {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+        pub dept_id: Uint32,
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(Department = "departments", Employee = "employees")]
+    pub struct TestSchema;
+
+    fn setup() -> DbmsContext<HeapMemoryProvider> {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        TestSchema::register_tables(&ctx).unwrap();
+        ctx
+    }
+
+    fn insert_dept(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>, id: u32, name: &str) {
+        let insert = DepartmentInsertRequest::from_values(&[
+            (Department::columns()[0], Value::Uint32(Uint32(id))),
+            (
+                Department::columns()[1],
+                Value::Text(Text(name.to_string())),
+            ),
+        ])
+        .unwrap();
+        db.insert::<Department>(insert).unwrap();
+    }
+
+    fn insert_emp(
+        db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+        id: u32,
+        name: &str,
+        dept_id: u32,
+    ) {
+        let insert = EmployeeInsertRequest::from_values(&[
+            (Employee::columns()[0], Value::Uint32(Uint32(id))),
+            (Employee::columns()[1], Value::Text(Text(name.to_string()))),
+            (Employee::columns()[2], Value::Uint32(Uint32(dept_id))),
+        ])
+        .unwrap();
+        db.insert::<Employee>(insert).unwrap();
+    }
+
+    #[test]
+    fn test_inner_join() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "alice", 1);
+        insert_emp(&db, 11, "bob", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        // eng has 2 employees, hr has 0 → 2 rows
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_left_join() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .left_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        // eng has 1 employee, hr has 0 but LEFT keeps unmatched left → 2 rows
+        assert_eq!(results.len(), 2);
+
+        // Find hr's row: employee columns should be Null
+        let hr_row = results
+            .iter()
+            .find(|row| {
+                row.iter().any(|(col, val)| {
+                    col.name == "name"
+                        && col.table.as_deref() == Some("departments")
+                        && *val == Value::Text(Text("hr".to_string()))
+                })
+            })
+            .expect("hr should be in results");
+
+        // hr's employee name should be Null
+        let emp_name = hr_row
+            .iter()
+            .find(|(col, _)| col.name == "name" && col.table.as_deref() == Some("employees"))
+            .expect("employee name column should exist for hr");
+        assert_eq!(emp_name.1, Value::Null);
+    }
+
+    #[test]
+    fn test_right_join() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+        // charlie references dept 999 which doesn't exist (no FK constraint)
+        insert_emp(&db, 11, "charlie", 999);
+
+        let query = Query::builder()
+            .all()
+            .right_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        // alice matches eng, charlie (dept_id=999) is unmatched right → 2 rows
+        assert_eq!(results.len(), 2);
+
+        // charlie should have null department columns
+        let charlie_row = results
+            .iter()
+            .find(|row| {
+                row.iter().any(|(col, val)| {
+                    col.name == "name"
+                        && col.table.as_deref() == Some("employees")
+                        && *val == Value::Text(Text("charlie".to_string()))
+                })
+            })
+            .expect("charlie should be in results");
+
+        let dept_name = charlie_row
+            .iter()
+            .find(|(col, _)| col.name == "name" && col.table.as_deref() == Some("departments"))
+            .expect("department name column should exist for charlie");
+        assert_eq!(dept_name.1, Value::Null);
+    }
+
+    #[test]
+    fn test_full_join() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "alice", 1);
+        // charlie references dept 999 which doesn't exist
+        insert_emp(&db, 11, "charlie", 999);
+
+        let query = Query::builder()
+            .all()
+            .full_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        // eng-alice matched (1), hr unmatched left (1), charlie unmatched right (1) = 3
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_join_with_filter() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "alice", 1);
+        insert_emp(&db, 11, "bob", 2);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .and_where(Filter::eq(
+                "departments.name",
+                Value::Text(Text("eng".to_string())),
+            ))
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_join_with_order_by() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "zzz", 1);
+        insert_emp(&db, 11, "aaa", 2);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .order_by_asc("employees.name")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert_eq!(results.len(), 2);
+        let first_name = results[0]
+            .iter()
+            .find(|(col, _)| col.name == "name" && col.table.as_deref() == Some("employees"))
+            .unwrap();
+        assert_eq!(first_name.1, Value::Text(Text("aaa".to_string())));
+    }
+
+    #[test]
+    fn test_join_with_limit() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "alice", 1);
+        insert_emp(&db, 11, "bob", 2);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .limit(1)
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_join_with_offset() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "alice", 1);
+        insert_emp(&db, 11, "bob", 2);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .offset(1)
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_join_with_column_selection() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .field("departments.name")
+            .field("employees.name")
+            .inner_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].len(), 2);
+    }
+
+    #[test]
+    fn test_inner_join_empty_result() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        // No employees
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_join_offset_exceeding_results_returns_empty() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .offset(100)
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert!(results.is_empty());
+    }
+}

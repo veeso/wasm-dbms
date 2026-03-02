@@ -318,4 +318,70 @@ mod tests {
         assert!(acl.is_allowed(&()));
         assert!(acl.allowed_identities().is_empty());
     }
+
+    #[test]
+    fn test_add_duplicate_identity_is_idempotent() {
+        let mut mm = make_mm();
+        let mut acl = AccessControlList::default();
+        let identity = vec![0x01, 0x02, 0x03];
+        acl.add_identity(identity.clone(), &mut mm).unwrap();
+        acl.add_identity(identity.clone(), &mut mm).unwrap();
+        assert_eq!(acl.allowed_identities().len(), 1);
+        assert!(acl.is_allowed(&identity));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_identity_is_noop() {
+        let mut mm = make_mm();
+        let mut acl = AccessControlList::default();
+        let identity_a = vec![0x01, 0x02];
+        let identity_b = vec![0x03, 0x04];
+        acl.add_identity(identity_a.clone(), &mut mm).unwrap();
+        acl.add_identity(identity_b.clone(), &mut mm).unwrap();
+        // Removing an identity that is not in the list should succeed silently
+        let nonexistent = vec![0xFF, 0xFF];
+        acl.remove_identity(&nonexistent, &mut mm).unwrap();
+        assert_eq!(acl.allowed_identities().len(), 2);
+    }
+
+    #[test]
+    fn test_no_access_control_load() {
+        let mm = make_mm();
+        let acl = NoAccessControl::load(&mm).unwrap();
+        assert!(acl.is_allowed(&()));
+    }
+
+    #[test]
+    fn test_no_access_control_add_and_remove_identity() {
+        let mut mm = make_mm();
+        let mut acl = NoAccessControl;
+        acl.add_identity((), &mut mm).unwrap();
+        acl.remove_identity(&(), &mut mm).unwrap();
+        // Still allows everything
+        assert!(acl.is_allowed(&()));
+    }
+
+    #[test]
+    fn test_empty_acl_encode_decode() {
+        let acl = AccessControlList::default();
+        let encoded = acl.encode();
+        let decoded = AccessControlList::decode(encoded).unwrap();
+        assert_eq!(acl, decoded);
+        assert!(decoded.allowed_identities().is_empty());
+    }
+
+    #[test]
+    fn test_acl_size() {
+        let acl = AccessControlList {
+            allowed: vec![vec![0x01, 0x02], vec![0x03]],
+        };
+        // 4 bytes count + (1 + 2) for first identity + (1 + 1) for second
+        assert_eq!(acl.size(), 4 + 3 + 2);
+    }
+
+    #[test]
+    fn test_empty_acl_size() {
+        let acl = AccessControlList::default();
+        assert_eq!(acl.size(), 4);
+    }
 }

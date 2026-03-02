@@ -115,3 +115,151 @@ pub enum TransactionOp {
         filter: Option<Filter>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+
+    use wasm_dbms_api::prelude::{
+        Database as _, InsertRecord as _, Query, TableSchema as _, Text, Uint32, UpdateRecord as _,
+        Value,
+    };
+    use wasm_dbms_macros::{DatabaseSchema, Table};
+    use wasm_dbms_memory::prelude::HeapMemoryProvider;
+
+    use super::*;
+    use crate::prelude::{DbmsContext, WasmDbmsDatabase};
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "items"]
+    pub struct Item {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(Item = "items")]
+    pub struct TestSchema;
+
+    fn setup() -> DbmsContext<HeapMemoryProvider> {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        TestSchema::register_tables(&ctx).unwrap();
+        ctx
+    }
+
+    #[test]
+    fn test_transaction_insert_records_operation() {
+        let mut tx = Transaction::default();
+        let values = vec![
+            (Item::columns()[0], Value::Uint32(Uint32(1))),
+            (Item::columns()[1], Value::Text(Text("foo".to_string()))),
+        ];
+        tx.insert::<Item>(values).unwrap();
+        assert_eq!(tx.operations.len(), 1);
+        assert!(matches!(
+            &tx.operations[0],
+            TransactionOp::Insert { table: "items", .. }
+        ));
+    }
+
+    #[test]
+    fn test_transaction_update_records_operation() {
+        let mut tx = Transaction::default();
+        let patch = ItemUpdateRequest::from_values(
+            &[(Item::columns()[1], Value::Text(Text("bar".to_string())))],
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        );
+        tx.update::<Item>(
+            patch,
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+            vec![Value::Uint32(Uint32(1))],
+        )
+        .unwrap();
+        assert_eq!(tx.operations.len(), 1);
+        assert!(matches!(
+            &tx.operations[0],
+            TransactionOp::Update { table: "items", .. }
+        ));
+    }
+
+    #[test]
+    fn test_transaction_delete_records_operation() {
+        let mut tx = Transaction::default();
+        tx.delete::<Item>(
+            DeleteBehavior::Restrict,
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+            vec![Value::Uint32(Uint32(1))],
+        )
+        .unwrap();
+        assert_eq!(tx.operations.len(), 1);
+        assert!(matches!(
+            &tx.operations[0],
+            TransactionOp::Delete {
+                table: "items",
+                behaviour: DeleteBehavior::Restrict,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_transaction_overlay_accessors() {
+        let mut tx = Transaction::default();
+        // Overlay should start empty
+        let overlay = tx.overlay();
+        let overlay_str = format!("{overlay:?}");
+        assert!(overlay_str.contains("DatabaseOverlay"));
+
+        let _overlay_mut = tx.overlay_mut();
+    }
+
+    #[test]
+    fn test_transaction_multiple_operations() {
+        let mut tx = Transaction::default();
+        let insert_values = vec![
+            (Item::columns()[0], Value::Uint32(Uint32(1))),
+            (Item::columns()[1], Value::Text(Text("a".to_string()))),
+        ];
+        tx.insert::<Item>(insert_values).unwrap();
+        tx.delete::<Item>(
+            DeleteBehavior::Cascade,
+            None,
+            vec![Value::Uint32(Uint32(1))],
+        )
+        .unwrap();
+        assert_eq!(tx.operations.len(), 2);
+    }
+
+    #[test]
+    fn test_rollback_discards_transaction() {
+        let ctx = setup();
+        let owner = vec![1, 2, 3];
+        let tx_id = ctx.begin_transaction(owner);
+        let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+        let insert = ItemInsertRequest::from_values(&[
+            (Item::columns()[0], Value::Uint32(Uint32(42))),
+            (
+                Item::columns()[1],
+                Value::Text(Text("rolled_back".to_string())),
+            ),
+        ])
+        .unwrap();
+        db.insert::<Item>(insert).unwrap();
+
+        db.rollback().unwrap();
+
+        // After rollback, the record should not exist
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        let rows = db.select::<Item>(Query::builder().build()).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_rollback_without_transaction_returns_error() {
+        let ctx = setup();
+        let mut db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        let result = db.rollback();
+        assert!(result.is_err());
+    }
+}

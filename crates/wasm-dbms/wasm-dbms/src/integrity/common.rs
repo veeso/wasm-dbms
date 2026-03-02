@@ -68,3 +68,191 @@ pub fn check_non_nullable_fields<T: TableSchema>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+
+    use wasm_dbms_api::prelude::{
+        Database as _, InsertRecord as _, MaxStrlenValidator, TableSchema as _, Text, Uint32, Value,
+    };
+    use wasm_dbms_macros::{DatabaseSchema, Table};
+    use wasm_dbms_memory::prelude::HeapMemoryProvider;
+
+    use super::*;
+    use crate::prelude::{DbmsContext, WasmDbmsDatabase};
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "users"]
+    pub struct User {
+        #[primary_key]
+        pub id: Uint32,
+        #[validate(MaxStrlenValidator(10))]
+        pub name: Text,
+    }
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "posts"]
+    pub struct Post {
+        #[primary_key]
+        pub id: Uint32,
+        pub title: Text,
+        #[foreign_key(entity = "User", table = "users", column = "id")]
+        pub user_id: Uint32,
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(User = "users", Post = "posts")]
+    pub struct TestSchema;
+
+    fn setup() -> DbmsContext<HeapMemoryProvider> {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        TestSchema::register_tables(&ctx).unwrap();
+        ctx
+    }
+
+    #[test]
+    fn test_check_column_validate_with_no_validator() {
+        // Primary key field has no validator
+        let column = User::columns()[0]; // id
+        let value = Value::Uint32(Uint32(1));
+        let result = check_column_validate::<User>(&column, &value);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_column_validate_passes_with_valid_value() {
+        // name field has MaxStrlenValidator(10)
+        let column = User::columns()[1]; // name
+        let value = Value::Text(Text("short".to_string()));
+        let result = check_column_validate::<User>(&column, &value);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_column_validate_fails_with_invalid_value() {
+        let column = User::columns()[1]; // name
+        let value = Value::Text(Text("this string is way too long".to_string()));
+        let result = check_column_validate::<User>(&column, &value);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_non_nullable_fields_all_present() {
+        let values = vec![
+            (User::columns()[0], Value::Uint32(Uint32(1))),
+            (User::columns()[1], Value::Text(Text("foo".to_string()))),
+        ];
+        let result = check_non_nullable_fields::<User>(&values);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_non_nullable_fields_missing_field() {
+        // Only provide id, missing name
+        let values = vec![(User::columns()[0], Value::Uint32(Uint32(1)))];
+        let result = check_non_nullable_fields::<User>(&values);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DbmsError::Query(QueryError::MissingNonNullableField(_))
+        ));
+    }
+
+    #[test]
+    fn test_check_foreign_keys_no_fk_columns() {
+        // User table has no foreign keys
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        let values = vec![
+            (User::columns()[0], Value::Uint32(Uint32(1))),
+            (User::columns()[1], Value::Text(Text("foo".to_string()))),
+        ];
+        let result = check_foreign_keys::<User>(&db, &values);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_foreign_keys_with_existing_reference() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        // Insert a user first
+        let user_insert = UserInsertRequest::from_values(&[
+            (User::columns()[0], Value::Uint32(Uint32(1))),
+            (User::columns()[1], Value::Text(Text("alice".to_string()))),
+        ])
+        .unwrap();
+        db.insert::<User>(user_insert).unwrap();
+
+        // Now check FK for a post referencing user_id=1
+        let post_values = vec![
+            (Post::columns()[0], Value::Uint32(Uint32(10))),
+            (Post::columns()[1], Value::Text(Text("title".to_string()))),
+            (Post::columns()[2], Value::Uint32(Uint32(1))),
+        ];
+        let result = check_foreign_keys::<Post>(&db, &post_values);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_foreign_keys_with_missing_reference() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        // No users inserted; FK reference to user_id=999 should fail.
+        // The generated ForeignFetcher returns BrokenForeignKeyReference
+        // when the referenced record does not exist.
+        let post_values = vec![
+            (Post::columns()[0], Value::Uint32(Uint32(10))),
+            (Post::columns()[1], Value::Text(Text("title".to_string()))),
+            (Post::columns()[2], Value::Uint32(Uint32(999))),
+        ];
+        let result = check_foreign_keys::<Post>(&db, &post_values);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DbmsError::Query(QueryError::BrokenForeignKeyReference { .. })
+        ));
+    }
+
+    #[test]
+    fn test_check_foreign_key_existence_found() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        // Insert a user
+        let user_insert = UserInsertRequest::from_values(&[
+            (User::columns()[0], Value::Uint32(Uint32(1))),
+            (User::columns()[1], Value::Text(Text("bob".to_string()))),
+        ])
+        .unwrap();
+        db.insert::<User>(user_insert).unwrap();
+
+        let fk = ForeignKeyDef {
+            foreign_table: "users",
+            foreign_column: "id",
+            local_column: "user_id",
+        };
+        let result = check_foreign_key_existence::<Post>(&db, &fk, &Value::Uint32(Uint32(1)));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_foreign_key_existence_missing() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let fk = ForeignKeyDef {
+            foreign_table: "users",
+            foreign_column: "id",
+            local_column: "user_id",
+        };
+        let result = check_foreign_key_existence::<Post>(&db, &fk, &Value::Uint32(Uint32(999)));
+        assert!(result.is_err());
+        // The generated ForeignFetcher returns BrokenForeignKeyReference
+        assert!(matches!(
+            result.unwrap_err(),
+            DbmsError::Query(QueryError::BrokenForeignKeyReference { .. })
+        ));
+    }
+}

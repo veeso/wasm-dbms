@@ -33,3 +33,59 @@ pub struct IcDbmsCanisterInitArgs {
 
 #[derive(Debug, CandidType, Serialize, Deserialize)]
 pub struct IcDbmsCanisterUpgradeArgs;
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_unwrap_init_on_init_variant() {
+        let principals = vec![candid::Principal::anonymous()];
+        let args = IcDbmsCanisterArgs::Init(IcDbmsCanisterInitArgs {
+            allowed_principals: principals.clone(),
+        });
+        let init = args.unwrap_init();
+        assert_eq!(init.allowed_principals, principals);
+    }
+
+    #[test]
+    fn test_unwrap_update_on_upgrade_variant() {
+        let args = IcDbmsCanisterArgs::Upgrade(IcDbmsCanisterUpgradeArgs);
+        let _upgrade = args.unwrap_update();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_unwrap_init_on_upgrade_variant_traps() {
+        let args = IcDbmsCanisterArgs::Upgrade(IcDbmsCanisterUpgradeArgs);
+        let _init = args.unwrap_init();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_unwrap_update_on_init_variant_traps() {
+        let args = IcDbmsCanisterArgs::Init(IcDbmsCanisterInitArgs {
+            allowed_principals: vec![],
+        });
+        let _upgrade = args.unwrap_update();
+    }
+
+    #[test]
+    fn test_candid_roundtrip_init_args() {
+        let args = IcDbmsCanisterArgs::Init(IcDbmsCanisterInitArgs {
+            allowed_principals: vec![candid::Principal::anonymous()],
+        });
+        let encoded = candid::encode_one(&args).expect("failed to encode");
+        let decoded: IcDbmsCanisterArgs = candid::decode_one(&encoded).expect("failed to decode");
+        assert!(matches!(decoded, IcDbmsCanisterArgs::Init(_)));
+    }
+
+    #[test]
+    fn test_candid_roundtrip_upgrade_args() {
+        let args = IcDbmsCanisterArgs::Upgrade(IcDbmsCanisterUpgradeArgs);
+        let encoded = candid::encode_one(&args).expect("failed to encode");
+        let decoded: IcDbmsCanisterArgs = candid::decode_one(&encoded).expect("failed to decode");
+        assert!(matches!(decoded, IcDbmsCanisterArgs::Upgrade(_)));
+    }
+}

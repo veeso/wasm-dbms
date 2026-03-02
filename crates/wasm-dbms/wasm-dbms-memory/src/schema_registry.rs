@@ -456,4 +456,57 @@ mod tests {
             None
         }
     }
+
+    #[test]
+    fn test_table_registry_page_returns_none_for_unregistered_table() {
+        let registry = SchemaRegistry::default();
+        assert!(registry.table_registry_page::<User>().is_none());
+    }
+
+    #[test]
+    fn test_empty_registry_encode_decode() {
+        let registry = SchemaRegistry::default();
+        let encoded = registry.encode();
+        let decoded = SchemaRegistry::decode(encoded).expect("failed to decode empty registry");
+        assert_eq!(registry, decoded);
+        assert_eq!(decoded.tables.len(), 0);
+    }
+
+    #[test]
+    fn test_load_fresh_memory_returns_empty_registry() {
+        let mm = make_mm();
+        let registry = SchemaRegistry::load(&mm).expect("failed to load from fresh memory");
+        assert_eq!(registry.tables.len(), 0);
+    }
+
+    #[test]
+    fn test_save_and_reload() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        registry
+            .register_table::<User>(&mut mm)
+            .expect("failed to register");
+        // Modify in-memory, then explicitly save
+        registry
+            .register_table::<AnotherTable>(&mut mm)
+            .expect("failed to register another");
+        registry.save(&mut mm).expect("failed to save");
+
+        let reloaded = SchemaRegistry::load(&mm).expect("failed to reload");
+        assert_eq!(reloaded.tables.len(), 2);
+        assert_eq!(registry, reloaded);
+    }
+
+    #[test]
+    fn test_schema_registry_size() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        // Empty size: 8 bytes for length
+        assert_eq!(registry.size(), 8);
+        registry
+            .register_table::<User>(&mut mm)
+            .expect("failed to register");
+        // One entry: 8 + (8 + 4 + 4) = 24
+        assert_eq!(registry.size(), 24);
+    }
 }
