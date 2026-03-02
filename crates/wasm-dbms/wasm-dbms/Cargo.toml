@@ -6,7 +6,7 @@ authors = { workspace = true }
 description = "Runtime-agnostic DBMS engine for WASM environments"
 license = { workspace = true }
 repository = { workspace = true }
-readme = "../../../README.md"
+readme = "README.md"
 rust-version = { workspace = true }
 documentation = "https://docs.rs/wasm-dbms"
 categories = ["database", "wasm"]
