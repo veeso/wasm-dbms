@@ -1,7 +1,6 @@
 # Changelog
 
 - [Changelog](#changelog)
-  - [Unreleased](#unreleased)
   - [0.6.0](#060)
   - [0.5.0](#050)
   - [0.4.0](#040)
@@ -10,85 +9,193 @@
   - [0.2.0](#020)
   - [0.1.0](#010)
 
-## Unreleased
-
-### Changed
-
-- **BREAKING**: `atomic()` now uses a write-ahead journal instead of panic-based rollback (#48)
-  > The `MemoryManager` now supports `begin_journal()`, `commit_journal()`, and `rollback_journal()`
-  > methods. All writes via `write_at` and `zero` are recorded in the journal when active, allowing
-  > byte-level rollback on error. This makes atomicity runtime-agnostic — it no longer depends on
-  > IC's trap-reverts-stable-memory semantics. Transaction `commit()` now uses a single journal
-  > spanning all operations, ensuring all-or-nothing semantics even when multiple operations are
-  > involved.
-
 ## 0.6.0
 
-Released on 2026-02-27
+Released on 2026-03-02
+
+### ⚠ Breaking Changes
+
+- migrate Principal from built-in to CustomDataType
+  > Value::Principal and DataTypeKind::Principal removed.
+  Principal fields in tables must now use #[custom_type] annotation.
+  Existing stable memory schemas are incompatible (fingerprint change).
+- restructure workspace into wasm-dbms and ic-dbms layers
+  > restructure workspace into wasm-dbms and ic-dbms layers
 
 ### Added
 
-- `AccessControl` trait with associated `type Id` for runtime-agnostic ACL (#48)
-  > Introduced the `AccessControl` trait in `wasm-dbms-memory` to abstract access control behind
-  > a generic interface. Different runtimes can now use different identity types: `Vec<u8>` for
-  > the default `AccessControlList`, `Principal` for IC (`IcAccessControlList`), or `()` for
-  > `NoAccessControl` (runtimes that don't need ACL). The `A: AccessControl` generic parameter
-  > is propagated through `DbmsContext<M, A>`, `WasmDbmsDatabase<'ctx, M, A>`,
-  > `DatabaseSchema<M, A>`, and all integrity validators and join engine types. Default type
-  > parameters preserve backward compatibility.
-- `#[derive(DatabaseSchema)]` macro for automatic `DatabaseSchema<M>` trait generation (#48)
-  > A new derive macro that auto-generates the `DatabaseSchema<M>` trait implementation
-  > from a `#[tables(...)]` attribute, eliminating ~130+ lines of boilerplate per schema.
-  > Two variants exist: a generic one in `wasm-dbms-macros` (for any WASM runtime) and
-  > an IC-specific one in `ic-dbms-macros` (uses IC crate paths so IC users don't need
-  > `wasm-dbms` as a direct dependency). The macro also generates a `register_tables`
-  > associated method for convenient table registration.
-- Custom data types: define arbitrary column types with `#[derive(CustomDataType)]` and `#[type_tag = "..."]` (#35)
-  > Developers can now define their own column types by implementing the `CustomDataType` trait
-  > (via the derive macro) and annotating fields with `#[custom_type]`. Custom types are stored
-  > as opaque byte blobs in stable memory and reconstructed on read via their type tag.
-- `Value::Custom(CustomValue)` variant for type-erased custom values
-  > A new Value variant that wraps custom data types as `(type_tag, encoded_bytes)` pairs,
-  > enabling storage and retrieval without compile-time type knowledge.
-- `#[custom_type]` field annotation for Table derive macro
-  > Fields annotated with `#[custom_type]` are recognized as custom data types during schema
-  > generation, insert request building, and record construction.
-- `CandidDataTypeKind` for serializable type metadata at API boundaries
-  > A Candid-compatible enum mirroring `DataTypeKind` that implements `Serialize`, `Deserialize`,
-  > and `CandidType`, with bidirectional conversion to/from `DataTypeKind`.
-- `Value::as_custom()` and `Value::as_custom_type::<T>()` accessors
-  > Convenience methods to extract custom values: `as_custom()` returns the raw `CustomValue`,
-  > while `as_custom_type::<T>()` decodes it into a concrete `CustomDataType` implementor.
-- `CustomDataType` trait extending `DataType` with `TYPE_TAG` constant
-  > The trait bridges custom types into the DBMS type system, providing encode/decode,
-  > type tag identification, and `DataTypeKind::Custom` integration.
+- **ic-dbms-api:** add CustomValue struct with comparison and hashing
+- **ic-dbms-api:** add CustomDataType trait
+- **ic-dbms-api:** add Value::Custom variant and accessors
+- **ic-dbms-api:** add DataTypeKind::Custom variant and CandidDataTypeKind
+  > Add Custom(&'static str) variant to DataTypeKind for user-defined types.
+  > Remove CandidType/Serialize/Deserialize derives from DataTypeKind since
+  > it no longer needs to cross API boundaries directly. Introduce
+  > CandidDataTypeKind as the Candid-serializable mirror with Custom(String)
+  > for the canister API layer. Update CandidColumnDef to use the new type.
+- **ic-dbms-macros:** add #[derive(CustomDataType)] macro
+  > Add a proc-macro derive that generates `impl CustomDataType` (with
+  > TYPE_TAG constant) and `impl From<T> for Value` for user-defined types.
+  > The attribute `#[type_tag = "..."]` is required and uses the same
+  > NameValue parsing pattern as the existing `#[table = "..."]` attribute.
+- **ic-dbms-macros:** add #[custom_type] support to Table derive macro
+  > When a field is annotated with #[custom_type], the generated code uses
+  > Value::Custom(CustomValue { ... }) instead of Value::FieldType(field)
+  > for to_values/from_values in TableSchema, Record, InsertRequest, and
+  > UpdateRequest. This allows user-defined types implementing CustomDataType
+  > to be used as table columns.
+- 💥 migrate Principal from built-in to CustomDataType
+- add WIT interface definition for wasm-dbms Component Model API
+- add WIT guest crate with FileMemoryProvider and example schemas
+  > Create the wasm-dbms-example-guest crate scaffolding with:
+  > - FileMemoryProvider: file-backed MemoryProvider implementation with
+      >   persistence across process restarts and full test coverage
+  > - Example table schemas (User, Post) with ExampleDatabaseSchema
+      >   implementing the generic DatabaseSchema<M> trait
+  > - register_tables helper for DBMS context initialization
+  >
+  > Fix wasm-dbms-macros to use DbmsError/DbmsResult instead of
+  > IcDbmsError/IcDbmsResult and remove IC-specific candid/serde derives
+  > from generated insert, update, and record structs, making the
+  > generic macro layer truly runtime-agnostic.
+- implement WIT guest bridge layer for Component Model exports
+- add Wasmtime host binary for WIT Component Model example
+  > Create the host-side binary that loads the guest WASM component via
+  > Wasmtime, provides WASI filesystem access, and exercises every exported
+  > database operation: insert, select, transactional commit, and rollback.
+- add wasm-dbms dependency to ic-dbms-canister
+- add #[derive(DatabaseSchema)] macro for automatic schema dispatch
+  > Add a DatabaseSchema derive macro that auto-generates the
+  > DatabaseSchema<M> trait implementation from a #[tables(...)] attribute,
+  > eliminating ~130+ lines of boilerplate per schema. Two variants exist:
+  > a generic one in wasm-dbms-macros and an IC-specific one in
+  > ic-dbms-macros with IC crate paths. Update examples, tests, and docs.
+- add AccessControl trait with associated Id type for runtime-agnostic ACL
+  > Introduce the AccessControl trait in wasm-dbms-memory to abstract access
+  > control behind a generic interface. Different runtimes can use different
+  > identity types: Vec<u8> (AccessControlList), Principal (IcAccessControlList),
+  > or () (NoAccessControl). The A: AccessControl generic parameter is propagated
+  > through DbmsContext, WasmDbmsDatabase, DatabaseSchema, integrity validators,
+  > join engine, and both derive macros. Default type parameters preserve backward
+  > compatibility.
+- add journaling-based atomicity to MemoryManager
+  > Replace panic-based rollback in atomic() with a write-ahead journal in
+  > MemoryManager. All writes via write_at and zero are recorded when a
+  > journal is active, enabling byte-level rollback on error. This makes
+  > atomicity runtime-agnostic, removing the dependency on IC's
+  > trap-reverts-stable-memory semantics.
+  >
+  > Key changes:
+  > - Add JournalEntry, begin/commit/rollback_journal to MemoryManager
+  > - Refactor atomic() to use journal with nested-call awareness
+  > - Refactor commit() to use a single journal spanning all operations
+  > - Fix self vs db inconsistency in delete closure
+  > - Fix pre-existing clippy is_multiple_of lint
+  > - Add 14 journal unit tests and 1 commit-rollback integration test
+  > - Add docs/technical/atomicity.md
 
 ### Changed
 
-- Removed duplicated database engine from `ic-dbms-canister`
-  > The IC layer now uses the generic `wasm-dbms` engine directly via `DbmsContext<IcMemoryProvider>`.
-  > The `IcDbmsDatabase` struct, IC-specific `DatabaseSchema` trait, and duplicated join engine,
-  > integrity validators, and transaction system have been removed. The `DbmsCanister` macro now
-  > generates `DatabaseSchema<M>` implementations on the annotated struct instead of a separate
-  > `CanisterDatabaseSchema` type.
+- 💥 restructure workspace into wasm-dbms and ic-dbms layers
+  > Split the monolithic ic-dbms crates into a two-layer architecture:
+  > - wasm-dbms (generic layer): runtime-agnostic DBMS engine (wasm-dbms-api,
+      >   wasm-dbms-memory, wasm-dbms, wasm-dbms-macros)
+  > - ic-dbms (IC layer): thin adapter for Internet Computer canister
+      >   integration (ic-dbms-api, ic-dbms-canister, ic-dbms-macros,
+      >   ic-dbms-client, example, integration-tests)
+  >
+  > Also fixes integration test wasm paths to account for the new directory
+  > depth and updates CI, docs, and build scripts accordingly.
+- consolidate IC thread-locals into DbmsContext
+- remove duplicated IC database engine module
+- update ic-dbms-canister prelude to re-export from wasm-dbms
+- update IC API layer to use wasm-dbms database engine
+- slim down DbmsCanister macro to IC API only
+- update IC canister tests to use wasm-dbms engine
+- update CHANGELOG, docs, and API for custom data types and AccessControl trait
+  > Update CHANGELOG with custom data types, AccessControl, and DatabaseSchema entries.
+  > Remove CallerContext in favor of AccessControl trait. Update IC macros to use
+  > generic-layer AccessControl. Update example guest, Cargo.toml dependencies, and
+  > documentation across wasm-dbms and ic-dbms crates.
+- remove IC-specific documentation from wasm-dbms crates
+  > The generic wasm-dbms layer should not reference IC-specific concepts.
+  > Remove all doc comments mentioning IC, canister, Principal, Candid,
+  > IcDbmsError, and IcDbmsResult from the wasm-dbms crates.
+- make error types runtime-agnostic and replace ACL panic with error
+  > Rename IC-specific error variants to runtime-agnostic names
+  > (StableMemoryError → ProviderError, PrincipalError → IdentityDecodeError),
+  > add ConstraintViolation variant, replace panic in ACL last-identity removal
+  > with a proper error, simplify get_referenced_tables by removing thread-local
+  > cache, and add DbmsContext threading documentation.
+- move journal from MemoryManager to transaction module
+  > Extract the write-ahead journal from the memory layer into the DBMS
+  > layer where it belongs as a transaction concern. Introduce MemoryAccess
+  > trait so memory-crate functions are generic over the writer, allowing
+  > JournaledWriter to intercept writes for rollback support.
 
-### Breaking Changes
+### Documentation
 
-- `AccessControlList` methods renamed: `add_principal` → `add_identity`, `remove_principal` → `remove_identity`, `allowed_principals` → `allowed_identities`
-  > These methods are now part of the `AccessControl` trait and use generic identity types
-  > instead of being hardcoded to `Principal`. Direct callers of `AccessControlList` must update
-  > method names. IC users interacting through the canister API are unaffected.
-- `DbmsContext`, `WasmDbmsDatabase`, `DatabaseSchema`, integrity validators, and join engine gain a second generic parameter `A: AccessControl`
-  > All types now carry `A: AccessControl` (defaulting to `AccessControlList`), which may require
-  > updating type annotations that previously only specified `M: MemoryProvider`.
-- Removed `Value::Principal` and `DataTypeKind::Principal` built-in variants
-  > Principal is no longer a first-class data type. Use the `#[custom_type]` field annotation
-  > on Principal fields instead, which treats Principal as a custom data type.
-- `DataTypeKind` no longer implements `Serialize`, `Deserialize`, `CandidType`
-  > Use `CandidDataTypeKind` at API boundaries for serializable type metadata.
-- Existing stable memory schemas are incompatible due to fingerprint changes
-  > The removal of the Principal variant and addition of Custom variant in `DataTypeKind`
-  > changes type fingerprints, making previously stored schemas incompatible.
+- add custom data types design document
+  > Design for issue #35: type-erased CustomValue approach with
+  > CustomDataType trait, no generic propagation through core API.
+  > Principal becomes a CustomDataType impl in 0.6, prerequisite
+  > for wasm-dbms extraction (#48) in 0.7.
+- update CHANGELOG for 0.6.0 custom data types
+- add custom data types guide and update references
+- New website for wasm-dbms
+- add Wasmtime WIT Component Model example documentation
+- update architecture docs after IC deduplication
+
+### Fixed
+
+- move design doc to .claude/plans, add convention to CLAUDE.md
+  > Design docs and plans belong in .claude/plans/ (gitignored),
+  > not in docs/plans/. Added this convention to CLAUDE.md.
+- **ic-dbms-macros:** fix nullable custom type codegen using inner type
+  > When a custom type field is declared as Nullable<T>, the macro now
+  > correctly uses the inner type T (not Nullable<T>) for trait lookups
+  > like CustomDataType::TYPE_TAG and Encode::decode in all codegen paths.
+- address code review findings
+  > - Replace String::leak() with OnceLock-based static cache in
+      >   Value::type_name() for Custom variants to prevent unbounded leaks
+  > - Add compile-time error when #[custom_type] and #[foreign_key] are
+      >   combined on the same field
+- harden custom data types and add CustomValue constructor
+  > - Add cache size guard (max 64 entries) to Value::type_name() to
+      >   prevent unbounded memory leaks on IC
+  > - Replace panicking .expect() with non-panicking if-let-Ok decode
+      >   in macro codegen for custom types (record, insert, update)
+  > - Add CustomValue::new<T>() constructor enforcing consistency between
+      >   type_tag, encoded bytes, and display string
+  > - Add Project table with #[custom_type] owner field to example canister
+  > - Add PocketIC integration tests for custom type CRUD and filtering
+- exclude guest crate from native tests and fix clippy warning
+  > The guest crate targets wasm32-wasip2 and cannot link on native targets.
+  > Exclude it from `just test` using --workspace --exclude. Also fix a
+  > redundant_closure clippy warning in the host binary.
+- update MSRV to 1.91.1, fix ACL persist-before-panic, fix clippy warnings
+  > - Set rust-version to 1.91.1 (actual MSRV per cargo msrv) across
+      >   workspace Cargo.toml, CLAUDE.md, and all docs
+  > - Replace is_multiple_of (Rust 1.87+) with modulo check for MSRV compat
+  > - Fix ACL remove_identity to check emptiness before persisting, preventing
+      >   corrupted state on non-IC runtimes
+  > - Add #[allow(clippy::approx_constant)] to JSON test module
+  > - Remove unused _name binding in DatabaseSchema metadata parsing
+- remove redundant drop and unnecessary pub visibility in journal refactor
+  > Remove the explicit `drop(self)` in `Journal::commit` since the method
+  > already takes ownership, and revert test-only struct fields in
+  > `memory_manager` back to private visibility since they are unused
+  > outside their module.
+- add wasm32-wasip2 target to CI and rust-toolchain
+
+### Miscellaneous
+
+- funding
+- add justfile recipes for WIT example build and test
+  > Adds build_wasm_dbms_example (guest + host) and test_wasm_dbms_example
+  > recipes, integrated into build_all and test_all for CI coverage.
+- update benchmarks and remove unused dependencies after IC deduplication
+- sort deps
 
 ## 0.5.0
 

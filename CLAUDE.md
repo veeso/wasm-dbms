@@ -51,6 +51,9 @@ just clippy                  # Run clippy
 
 # Clean build artifacts
 just clean
+
+# Check all after implementing a feature
+just build_all && just test_all && just check_code
 ```
 
 ## Architecture
