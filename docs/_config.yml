@@ -2,6 +2,7 @@ title: wasm-dbms
 description: A framework to implement relational databases on any WASM runtime.
 url: https://wasm-dbms.cc
 theme: minima
+header_pages: []
 image: /og_preview.jpeg
 github_url: https://github.com/veeso/wasm-dbms
 codeberg_url: https://codeberg.org/veeso/wasm-dbms
