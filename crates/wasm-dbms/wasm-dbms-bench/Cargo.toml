@@ -1,0 +1,23 @@
+[package]
+name = "wasm-dbms-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+criterion = { workspace = true }
+duckdb = { version = "1", features = ["bundled"] }
+rand = "0.9"
+rusqlite = { version = "0.35", features = ["bundled"] }
+wasm-dbms = { path = "../wasm-dbms" }
+wasm-dbms-api = { path = "../wasm-dbms-api" }
+wasm-dbms-macros = { path = "../wasm-dbms-macros" }
+wasm-dbms-memory = { path = "../wasm-dbms-memory" }
+
+[[bench]]
+name = "compare"
+harness = false

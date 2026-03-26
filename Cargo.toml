@@ -9,6 +9,7 @@ members = [
   "crates/wasm-dbms/wasm-dbms-memory",
   "crates/wasm-dbms/wasm-dbms",
   "crates/wasm-dbms/wasm-dbms-macros",
+  "crates/wasm-dbms/wasm-dbms-bench",
   "crates/wasm-dbms/example/guest",
   "crates/wasm-dbms/example/host",
   "crates/ic-dbms/integration-tests/dbms-canister-client-integration",
