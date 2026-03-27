@@ -1,15 +1,17 @@
 name: build_and_test
 
 env:
-  RUST_VERSION: 1.93.0
+  RUST_VERSION: 1.94.1
 
 on:
   push:
     branches:
       - main
+      - "[0-9]+.[0-9]+.[0-9]+"
   pull_request:
     branches:
       - main
+      - "[0-9]+.[0-9]+.[0-9]+"
 
 jobs:
   build:
@@ -30,7 +32,7 @@ jobs:
 
       - name: install ic-wasm
         run: |
-          wget https://github.com/dfinity/ic-wasm/releases/download/0.9.9/ic-wasm-linux64 -O /usr/local/bin/ic-wasm
+          wget https://github.com/dfinity/ic-wasm/releases/download/0.9.11/ic-wasm-linux64 -O /usr/local/bin/ic-wasm
           chmod +x /usr/local/bin/ic-wasm
 
       - name: install candid-extractor
