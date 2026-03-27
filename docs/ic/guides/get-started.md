@@ -1,6 +1,8 @@
 # Get Started with IC-DBMS (IC)
 
-> **Note:** This is the IC-specific getting started guide for deploying wasm-dbms as an Internet Computer canister. For the generic wasm-dbms getting started guide (schema definition, core concepts), see the [generic get-started guide](../../guides/get-started.md).
+> **Note:** This is the IC-specific getting started guide for deploying wasm-dbms as an Internet Computer canister. For
+> the generic wasm-dbms getting started guide (schema definition, core concepts), see
+> the [generic get-started guide](../../guides/get-started.md).
 
 - [Prerequisites](#prerequisites)
 - [Project Setup](#project-setup)
@@ -20,7 +22,11 @@
 - [Integration Testing](#integration-testing)
 - [Next Steps](#next-steps)
 
-This guide walks you through setting up a complete database canister on the Internet Computer using ic-dbms. The ic-dbms framework is built on top of the [wasm-dbms](https://github.com/veeso/wasm-dbms) core engine, adding IC-specific functionality such as Candid serialization, canister lifecycle management, ACL-based access control, and inter-canister communication. By the end of this guide, you will have a working canister with CRUD operations, transactions, and access control.
+This guide walks you through setting up a complete database canister on the Internet Computer using ic-dbms. The ic-dbms
+framework is built on top of the [wasm-dbms](https://github.com/veeso/wasm-dbms) core engine, adding IC-specific
+functionality such as Candid serialization, canister lifecycle management, ACL-based access control, and inter-canister
+communication. By the end of this guide, you will have a working canister with CRUD operations, transactions, and access
+control.
 
 ---
 
@@ -94,7 +100,8 @@ ic-dbms-api = "0.6"
 serde = "1"
 ```
 
-> **Note:** `ic-dbms-api` re-exports types from `wasm-dbms-api`, so `use ic_dbms_api::prelude::*` gives you access to the full set of wasm-dbms data types, validators, and sanitizers.
+> **Note:** `ic-dbms-api` re-exports types from `wasm-dbms-api`, so `use ic_dbms_api::prelude::*` gives you access to
+> the full set of wasm-dbms data types, validators, and sanitizers.
 
 ### Define Tables
 
@@ -135,11 +142,11 @@ pub struct Post {
 
 The `Table` macro generates additional types for each table:
 
-| Generated Type | Purpose |
-|----------------|---------|
-| `UserRecord` | Full record returned from queries |
-| `UserInsertRequest` | Request type for inserting records |
-| `UserUpdateRequest` | Request type for updating records |
+| Generated Type       | Purpose                                |
+|----------------------|----------------------------------------|
+| `UserRecord`         | Full record returned from queries      |
+| `UserInsertRequest`  | Request type for inserting records     |
+| `UserUpdateRequest`  | Request type for updating records      |
 | `UserForeignFetcher` | Internal type for relationship loading |
 
 ---
@@ -183,7 +190,8 @@ pub struct MyDbmsCanister;
 ic_cdk::export_candid!();
 ```
 
-The `DatabaseSchema` derive generates the `DatabaseSchema<M>` trait implementation that provides schema dispatch (routing operations to the correct table by name). The `DbmsCanister` derive generates the complete canister API:
+The `DatabaseSchema` derive generates the `DatabaseSchema<M>` trait implementation that provides schema dispatch (
+routing operations to the correct table by name). The `DbmsCanister` derive generates the complete canister API:
 
 ```candid
 service : (IcDbmsCanisterArgs) -> {
@@ -249,7 +257,8 @@ type IcDbmsCanisterInitArgs = record {
 };
 ```
 
-> **Warning:** Only principals in `allowed_principals` can perform database operations. Make sure to include all necessary principals (your frontend canister, admin principal, etc.).
+> **Warning:** Only principals in `allowed_principals` can perform database operations. Make sure to include all
+> necessary principals (your frontend canister, admin principal, etc.).
 
 ### Deploy with dfx
 
@@ -333,7 +342,7 @@ For integration tests using PocketIC, add `ic-dbms-client` with the `pocket-ic` 
 
 ```toml
 [dev-dependencies]
-ic-dbms-client = { version = "0.6", features = ["pocket-ic"] }
+ic-dbms-client = { version = "0.7", features = ["pocket-ic"] }
 pocket-ic = "9"
 ```
 
@@ -389,4 +398,5 @@ Now that you have a working canister, explore these topics:
 - [Data Types (IC)](../reference/data-types.md) - IC-specific data types (Principal, Candid mappings)
 - [Errors (IC)](../reference/errors.md) - IC-specific error handling (double-Result pattern)
 
-For core wasm-dbms concepts (querying, transactions, relationships, validators, sanitizers), see the [generic guides](../../guides/).
+For core wasm-dbms concepts (querying, transactions, relationships, validators, sanitizers), see
+the [generic guides](../../guides/).

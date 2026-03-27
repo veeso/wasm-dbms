@@ -5,6 +5,9 @@ members = [
   "crates/ic-dbms/ic-dbms-canister",
   "crates/ic-dbms/ic-dbms-client",
   "crates/ic-dbms/ic-dbms-macros",
+  "crates/ic-dbms/integration-tests/dbms-canister-client-integration",
+  "crates/ic-dbms/integration-tests/pocket-ic-tests",
+  "crates/ic-dbms/integration-tests/pocket-ic-tests-macro",
   "crates/wasm-dbms/wasm-dbms-api",
   "crates/wasm-dbms/wasm-dbms-memory",
   "crates/wasm-dbms/wasm-dbms",
@@ -12,14 +15,11 @@ members = [
   "crates/wasm-dbms/wasm-dbms-bench",
   "crates/wasm-dbms/example/guest",
   "crates/wasm-dbms/example/host",
-  "crates/ic-dbms/integration-tests/dbms-canister-client-integration",
-  "crates/ic-dbms/integration-tests/pocket-ic-tests",
-  "crates/ic-dbms/integration-tests/pocket-ic-tests-macro",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.91.1"
 authors = ["Christian Visintin <christian.visintin@veeso.dev>"]
@@ -32,12 +32,12 @@ categories = ["database", "network-programming", "wasm"]
 candid = { version = "0.10", features = ["value"] }
 criterion = "0.8"
 getrandom = { version = "0.4", default-features = false }
-ic-agent = "0.45"
-ic-cdk = "0.19"
-ic-cdk-macros = "0.19"
+ic-agent = "0.47"
+ic-cdk = "0.20"
+ic-cdk-macros = "0.20"
 lazy-regex = "3"
 percent-encoding = "2"
-pocket-ic = "12"
+pocket-ic = "13"
 proc-macro2 = "1"
 quote = "1"
 rust_decimal = "1"

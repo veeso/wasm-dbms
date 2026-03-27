@@ -1,6 +1,7 @@
 # Client API (IC)
 
-> **Note:** This is the IC-specific client API guide. For general wasm-dbms documentation, see the [generic docs](../../guides/).
+> **Note:** This is the IC-specific client API guide. For general wasm-dbms documentation, see
+> the [generic docs](../../guides/).
 
 - [Overview](#overview)
 - [Client Types](#client-types)
@@ -26,9 +27,11 @@
 
 ## Overview
 
-The `ic-dbms-client` crate provides type-safe Rust clients for interacting with ic-dbms canisters. Instead of manually constructing Candid calls, you use a high-level API that handles serialization and error handling.
+The `ic-dbms-client` crate provides type-safe Rust clients for interacting with ic-dbms canisters. Instead of manually
+constructing Candid calls, you use a high-level API that handles serialization and error handling.
 
 **Benefits:**
+
 - Type-safe operations with compile-time checking
 - Automatic Candid encoding/decoding
 - Consistent API across different environments
@@ -40,11 +43,11 @@ The `ic-dbms-client` crate provides type-safe Rust clients for interacting with 
 
 ic-dbms provides three client implementations for different use cases:
 
-| Client | Use Case | Feature Flag |
-|--------|----------|--------------|
-| `IcDbmsCanisterClient` | Inter-canister calls (inside IC canisters) | Default |
-| `IcDbmsAgentClient` | External applications (frontend, backend, CLI) | `ic-agent` |
-| `IcDbmsPocketIcClient` | Integration tests with PocketIC | `pocket-ic` |
+| Client                 | Use Case                                       | Feature Flag |
+|------------------------|------------------------------------------------|--------------|
+| `IcDbmsCanisterClient` | Inter-canister calls (inside IC canisters)     | Default      |
+| `IcDbmsAgentClient`    | External applications (frontend, backend, CLI) | `ic-agent`   |
+| `IcDbmsPocketIcClient` | Integration tests with PocketIC                | `pocket-ic`  |
 
 ### IcDbmsCanisterClient
 
@@ -125,14 +128,14 @@ ic-dbms-client = "0.6"
 
 ```toml
 [dependencies]
-ic-dbms-client = { version = "0.6", features = ["ic-agent"] }
+ic-dbms-client = { version = "0.7", features = ["ic-agent"] }
 ```
 
 **For integration tests:**
 
 ```toml
 [dev-dependencies]
-ic-dbms-client = { version = "0.6", features = ["pocket-ic"] }
+ic-dbms-client = { version = "0.7", features = ["pocket-ic"] }
 ```
 
 ---
@@ -162,6 +165,7 @@ pub trait Client {
 ```
 
 **Note the double Result:**
+
 - Outer `Result`: Network/communication errors
 - Inner `Result`: Business logic errors (IcDbmsError)
 

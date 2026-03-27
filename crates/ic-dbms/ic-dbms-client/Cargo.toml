@@ -23,7 +23,7 @@ readme = "README.md"
 candid = { workspace = true }
 ic-agent = { workspace = true, optional = true }
 ic-cdk = { workspace = true }
-ic-dbms-api = { version = "0.6", path = "../ic-dbms-api" }
+ic-dbms-api = { version = "0.7", path = "../ic-dbms-api" }
 pocket-ic = { workspace = true, optional = true }
 thiserror = { workspace = true }
 

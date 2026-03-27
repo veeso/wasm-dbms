@@ -93,7 +93,7 @@ you need to enable the `ic-agent` feature and use the `IcDbmsAgentClient` implem
 
 ```toml
 [dependencies]
-ic-dbms-client = { version = "0.6", features = ["ic-agent"] }
+ic-dbms-client = { version = "0.7", features = ["ic-agent"] }
 ic-agent = "0.45"
 ```
 
