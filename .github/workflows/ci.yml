@@ -41,18 +41,22 @@ jobs:
           tar -xvf /tmp/candid-extractor-x86_64-unknown-linux-gnu.tar.gz -C /usr/local/bin
           chmod +x /usr/local/bin/candid-extractor
 
+      - name: Install Rust (nightly)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly
+          components: rustfmt
+
+      - name: check rust code format
+        run: |
+          just fmt_nightly "--check"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: $RUST_VERSION
           components: rustfmt, clippy
           target: wasm32-unknown-unknown
-
-      - name: Install Rust (nightly)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly
-          components: rustfmt
 
       - name: Install Rust (wasm32-unknown-unknown target)
         uses: dtolnay/rust-toolchain@stable
