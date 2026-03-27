@@ -14,6 +14,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
-ic-dbms-api = { version = "0.6", path = "../../ic-dbms-api" }
-ic-dbms-client = { version = "0.6", path = "../../ic-dbms-client" }
+ic-dbms-api = { version = "0.7", path = "../../ic-dbms-api" }
+ic-dbms-client = { version = "0.7", path = "../../ic-dbms-client" }
 serde = { workspace = true }

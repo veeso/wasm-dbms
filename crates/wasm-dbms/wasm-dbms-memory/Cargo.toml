@@ -19,7 +19,7 @@ include = [
 ]
 
 [dependencies]
-wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.6" }
+wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.7" }
 
 [dev-dependencies]
 candid = { workspace = true }
