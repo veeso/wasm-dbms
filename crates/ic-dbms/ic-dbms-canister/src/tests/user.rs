@@ -1,9 +1,10 @@
 use candid::CandidType;
 use ic_dbms_api::prelude::{Encode, TableSchema, Text, Uint32};
-use ic_dbms_macros::Table;
+use wasm_dbms_macros::Table;
 
 /// A simple user struct for testing purposes.
 #[derive(Debug, Table, CandidType, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]

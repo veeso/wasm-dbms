@@ -242,6 +242,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
     Table,
     attributes(
         alignment,
+        candid,
         table,
         primary_key,
         foreign_key,

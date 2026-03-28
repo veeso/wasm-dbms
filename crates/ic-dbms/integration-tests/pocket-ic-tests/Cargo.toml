@@ -20,6 +20,7 @@ reqwest = { version = "0.13" }
 serde = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 url = { workspace = true }
+wasm-dbms-api = { path = "../../../wasm-dbms/wasm-dbms-api" }
 
 [dev-dependencies]
 pocket-ic-tests-macro = { path = "../pocket-ic-tests-macro" }

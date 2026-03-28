@@ -105,6 +105,9 @@ pub struct TableMetadata {
     pub fields: Vec<Field>,
     /// Memory alignment if provided
     pub alignment: Option<u16>,
+    /// Whether to add `candid::CandidType` and `serde::{Serialize, Deserialize}` derives
+    /// to generated Record, Insert, and Update types
+    pub candid: bool,
 }
 
 impl TableMetadata {
@@ -146,6 +149,7 @@ pub fn collect_table_metadata(
         None
     };
     let fields = get_fields(data, &primary_key, &foreign_keys, &sanitizes, &validates)?;
+    let candid = attrs.iter().any(|a| a.path().is_ident("candid"));
 
     Ok(TableMetadata {
         name: table_name,
@@ -157,6 +161,7 @@ pub fn collect_table_metadata(
         foreign_fetcher: foreign_fetcher_ident,
         fields,
         alignment,
+        candid,
     })
 }
 

@@ -46,8 +46,18 @@ fn generate_update_request_struct(metadata: &TableMetadata) -> TokenStream2 {
 
     let update_request_ident = &metadata.update;
 
+    let derives = if metadata.candid {
+        quote::quote! {
+            #[derive(Clone, candid::CandidType, serde::Serialize, serde::Deserialize)]
+        }
+    } else {
+        quote::quote! {
+            #[derive(Clone)]
+        }
+    };
+
     quote::quote! {
-        #[derive(Clone)]
+        #derives
         pub struct #update_request_ident {
             #(#fields)*
             pub where_clause: Option<::wasm_dbms_api::prelude::Filter>,

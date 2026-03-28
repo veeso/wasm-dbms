@@ -56,8 +56,18 @@ fn struct_def(metadata: &TableMetadata) -> TokenStream2 {
 
     let record_ident = &metadata.record;
 
+    let derives = if metadata.candid {
+        quote::quote! {
+            #[derive(Debug, Clone, Eq, PartialEq, candid::CandidType, serde::Serialize, serde::Deserialize)]
+        }
+    } else {
+        quote::quote! {
+            #[derive(Debug, Clone, Eq, PartialEq)]
+        }
+    };
+
     quote::quote! {
-        #[derive(Debug, Clone, Eq, PartialEq)]
+        #derives
         pub struct #record_ident {
             #(#fields)*
         }

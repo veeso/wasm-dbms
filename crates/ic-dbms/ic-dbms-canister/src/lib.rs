@@ -34,6 +34,7 @@
 //! // define a simple `User` table
 //!
 //! #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+//! #[candid]
 //! #[table = "users"]
 //! pub struct User {
 //!     #[primary_key]
@@ -46,6 +47,7 @@
 //! // define a table referencing `User`
 //!
 //! #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+//! #[candid]
 //! #[table = "posts"]
 //! pub struct Post {
 //!     #[primary_key]

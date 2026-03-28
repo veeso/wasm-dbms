@@ -2,7 +2,7 @@
 
 use candid::CandidType;
 use ic_dbms_api::prelude::{Text, Uint32};
-use ic_dbms_macros::Table;
+use wasm_dbms_macros::Table;
 
 use crate::tests::{User, UserRecord};
 
@@ -10,6 +10,7 @@ use crate::tests::{User, UserRecord};
 ///
 /// One [`super::User`] has many [`Post`]s.
 #[derive(Debug, Table, CandidType, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "posts"]
 #[alignment = 64]
 pub struct Post {

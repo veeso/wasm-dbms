@@ -3,6 +3,7 @@ use ic_dbms_api::prelude::{Principal, Table, Text, Uint32};
 use serde::Deserialize;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -13,6 +14,7 @@ pub struct User {
 }
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "posts"]
 pub struct Post {
     #[primary_key]
@@ -24,6 +26,7 @@ pub struct Post {
 }
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "projects"]
 pub struct Project {
     #[primary_key]

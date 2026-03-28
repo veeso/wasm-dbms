@@ -74,7 +74,7 @@ crates/
 └── ic-dbms/                    # IC-specific crates
     ├── ic-dbms-api/            # IC types (re-exports wasm-dbms-api)
     ├── ic-dbms-canister/       # IC canister DBMS implementation
-    ├── ic-dbms-macros/         # IC-specific macros: DatabaseSchema, DbmsCanister
+    ├── ic-dbms-macros/         # IC-specific macros: DbmsCanister
     ├── ic-dbms-client/         # Client libraries for canister interaction
     ├── example/                # Reference implementation
     └── integration-tests/      # PocketIC integration tests
@@ -95,9 +95,8 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 1. **`#[derive(Encode)]`** (wasm-dbms-macros): Binary serialization for memory storage
 2. **`#[derive(Table)]`** (wasm-dbms-macros): Generates `TableSchema`, `*Record`, `*InsertRequest`, `*UpdateRequest`,
    `*ForeignFetcher`
-3. **`#[derive(DatabaseSchema)]`** (wasm-dbms-macros / ic-dbms-macros): Generates `DatabaseSchema<M, A>` trait
-   implementation for schema dispatch. Two variants exist: the generic one in wasm-dbms-macros (uses `::wasm_dbms::`
-   paths) and the IC-specific one in ic-dbms-macros (uses `::ic_dbms_canister::prelude::` paths).
+3. **`#[derive(DatabaseSchema)]`** (wasm-dbms-macros): Generates `DatabaseSchema<M, A>` trait
+   implementation for schema dispatch. Re-exported through `ic-dbms-canister::prelude`.
 4. **`#[derive(DbmsCanister)]`** (ic-dbms-macros): Generates complete IC canister API with all CRUD operations
 
 ### Memory Model
@@ -143,6 +142,7 @@ use candid::{CandidType, Deserialize};
 use ic_dbms_api::prelude::*;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -151,7 +151,7 @@ pub struct User {
 }
 ```
 
-Required derives: `Table`, `CandidType`, `Deserialize`, `Clone`
+Required derives: `Table`, `CandidType`, `Deserialize`, `Clone`. The `#[candid]` attribute adds Candid/Serde derives to generated types.
 
 ### Creating an IC Canister
 

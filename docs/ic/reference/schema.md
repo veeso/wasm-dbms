@@ -16,19 +16,20 @@
 
 ## Overview
 
-When deploying wasm-dbms on the Internet Computer, your schema definitions need additional IC-specific derives and a canister generation macro. The core `Table` macro, column attributes (`#[primary_key]`, `#[foreign_key(...)]`, `#[sanitizer(...)]`, `#[validate(...)]`, `#[custom_type]`, `#[alignment]`), and generated types (`Record`, `InsertRequest`, `UpdateRequest`, `ForeignFetcher`) work exactly as described in the [generic schema reference](../../reference/schema.md). This document covers only the IC-specific additions.
+When deploying wasm-dbms on the Internet Computer, your schema definitions need additional IC-specific derives, the `#[candid]` attribute, and a canister generation macro. The core `Table` macro, column attributes (`#[primary_key]`, `#[foreign_key(...)]`, `#[sanitizer(...)]`, `#[validate(...)]`, `#[custom_type]`, `#[alignment]`), and generated types (`Record`, `InsertRequest`, `UpdateRequest`, `ForeignFetcher`) work exactly as described in the [generic schema reference](../../reference/schema.md). This document covers only the IC-specific additions.
 
 ---
 
 ## IC-Specific Required Derives
 
-Every table struct for IC deployment must include `CandidType` and `Deserialize` in addition to the standard `Table` and `Clone` derives:
+Every table struct for IC deployment must include `CandidType` and `Deserialize` in addition to the standard `Table` and `Clone` derives. You must also add the `#[candid]` attribute so that generated types (`Record`, `InsertRequest`, `UpdateRequest`) derive `CandidType`, `Serialize`, and `Deserialize` as well:
 
 ```rust
 use candid::{CandidType, Deserialize};
 use ic_dbms_api::prelude::*;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -37,16 +38,17 @@ pub struct User {
 }
 ```
 
-| Derive | Required for IC | Purpose |
-|--------|-----------------|---------|
+| Derive / Attribute | Required for IC | Purpose |
+|--------------------|-----------------|---------|
 | `Table` | Yes | Generates table schema and related types |
-| `CandidType` | Yes (IC-specific) | Enables Candid serialization for canister API |
+| `CandidType` | Yes (IC-specific) | Enables Candid serialization for the table struct |
 | `Deserialize` | Yes (IC-specific) | Enables deserialization from Candid wire format |
+| `#[candid]` | Yes (IC-specific) | Adds Candid/Serde derives to generated `Record`, `InsertRequest`, `UpdateRequest` types |
 | `Clone` | Yes | Required by the macro system |
 | `Debug` | Recommended | Useful for debugging |
 | `PartialEq`, `Eq` | Recommended | Useful for comparisons in tests |
 
-Without `CandidType` and `Deserialize`, the generated canister API will not compile because Candid is the serialization format used for all IC inter-canister calls.
+Without `CandidType`, `Deserialize`, and `#[candid]`, the generated canister API will not compile because Candid is the serialization format used for all IC inter-canister calls.
 
 ---
 
@@ -54,7 +56,7 @@ Without `CandidType` and `Deserialize`, the generated canister API will not comp
 
 The `DatabaseSchema` derive macro generates a `DatabaseSchema<M, A>` trait implementation that provides schema dispatch -- routing database operations to the correct table by name at runtime. This is required by the `DbmsCanister` macro.
 
-The IC variant of `DatabaseSchema` (provided by `ic-dbms-macros`) uses IC-specific crate paths (`::ic_dbms_canister::prelude::`) so that IC users do not need `wasm-dbms` as a direct dependency. A generic variant also exists in `wasm-dbms-macros` for non-IC runtimes.
+The `DatabaseSchema` macro is provided by `wasm-dbms-macros` and re-exported through the `ic-dbms-canister` prelude.
 
 ```rust
 use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
@@ -162,6 +164,7 @@ use ic_dbms_api::prelude::*;
 
 // All field types (Uint32, Text, DateTime, etc.) already implement CandidType
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "events"]
 pub struct Event {
     #[primary_key]
@@ -204,6 +207,7 @@ use candid::{CandidType, Deserialize};
 use ic_dbms_api::prelude::*;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -223,6 +227,7 @@ pub struct User {
 }
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "posts"]
 pub struct Post {
     #[primary_key]

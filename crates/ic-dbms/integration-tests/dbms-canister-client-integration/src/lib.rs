@@ -12,6 +12,7 @@ use ic_dbms_api::prelude::{
 use ic_dbms_client::prelude::{Client as _, IcDbmsCanisterClient};
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]

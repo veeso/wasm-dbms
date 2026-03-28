@@ -11,6 +11,7 @@ use ic_dbms_canister::prelude::{
 use serde::Deserialize;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -20,6 +21,7 @@ pub struct User {
 }
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "posts"]
 #[alignment = 64]
 pub struct Post {

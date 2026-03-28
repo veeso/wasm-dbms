@@ -1,11 +1,12 @@
 use candid::CandidType;
 use ic_dbms_api::prelude::{DateTime, Nullable, Text, Uint32};
-use ic_dbms_macros::Table;
+use wasm_dbms_macros::Table;
 
 use crate::tests::{User, UserRecord};
 
 /// A simple message struct for testing purposes.
 #[derive(Debug, Table, CandidType, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "messages"]
 pub struct Message {
     #[primary_key]
