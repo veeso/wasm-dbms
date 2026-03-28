@@ -4,6 +4,7 @@ use ic_dbms_client::prelude::{Client as _, IcDbmsCanisterClient};
 use serde::Deserialize;
 
 #[derive(Table, CandidType, Clone, Deserialize)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]

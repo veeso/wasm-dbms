@@ -11,6 +11,7 @@
     - [Custom Type](#custom-type)
     - [Sanitizer](#sanitizer)
     - [Validate](#validate)
+    - [Candid](#candid)
     - [Alignment](#alignment)
   - [Generated Types](#generated-types)
     - [Record Type](#record-type)
@@ -59,7 +60,7 @@ pub struct User {
 | `Debug` | Recommended | Useful for debugging |
 | `PartialEq`, `Eq` | Recommended | Useful for comparisons in tests |
 
-> **Note:** For IC canister usage, also add `CandidType` and `Deserialize` derives. See the [IC Schema Reference](../ic/reference/schema.md).
+> **Note:** For IC canister usage, also add `CandidType` and `Deserialize` derives plus the `#[candid]` attribute. See the [IC Schema Reference](../ic/reference/schema.md).
 
 ### Table Attribute
 
@@ -261,6 +262,32 @@ pub name: Text,
 ```
 
 See [Validation Reference](./validation.md) for all available validators.
+
+### Candid
+
+Enable `CandidType` and `Deserialize` derives on generated types:
+
+```rust
+#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
+#[table = "users"]
+pub struct User {
+    #[primary_key]
+    pub id: Uint32,
+    pub name: Text,
+}
+```
+
+When the `#[candid]` attribute is present, the `Table` macro adds `candid::CandidType`, `serde::Serialize`, and `serde::Deserialize` derives to the generated `Record`, `InsertRequest`, and `UpdateRequest` types.
+
+**When to use:**
+
+- Required for IC canister deployment where types must cross canister boundaries via Candid
+- Any context where generated types need Candid serialization
+
+> **Note:** The `#[candid]` attribute only affects the types *generated* by the `Table` macro. You still need to derive `CandidType` and `Deserialize` on the table struct itself.
+
+See the [IC Schema Reference](../ic/reference/schema.md) for full IC integration details.
 
 ### Alignment
 

@@ -25,14 +25,6 @@ This repository contains two crate families:
 
 ### Crate Architecture
 
-```txt
-wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms
-                                                                 ^
-ic-dbms-macros <── ic-dbms-canister ─────────────────────────────┘
-                        ^
-                   ic-dbms-client
-```
-
 | Crate              | Description                                                 |
 |--------------------|-------------------------------------------------------------|
 | `wasm-dbms-api`    | Shared types, traits, validators, sanitizers                |

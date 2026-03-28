@@ -112,6 +112,7 @@ use candid::{CandidType, Deserialize};
 use ic_dbms_api::prelude::*;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -125,6 +126,7 @@ pub struct User {
 }
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "posts"]
 pub struct Post {
     #[primary_key]
@@ -138,7 +140,7 @@ pub struct Post {
 }
 ```
 
-**Required derives:** `Table`, `CandidType`, `Deserialize`, `Clone`
+**Required derives:** `Table`, `CandidType`, `Deserialize`, `Clone`. The `#[candid]` attribute ensures generated types (`Record`, `InsertRequest`, `UpdateRequest`) also derive Candid/Serde traits.
 
 The `Table` macro generates additional types for each table:
 

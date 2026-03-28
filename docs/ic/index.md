@@ -87,6 +87,7 @@ use candid::{CandidType, Deserialize};
 use ic_dbms_api::prelude::*;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]

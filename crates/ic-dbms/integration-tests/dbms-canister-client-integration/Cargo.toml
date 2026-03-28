@@ -17,3 +17,4 @@ ic-cdk = { workspace = true }
 ic-dbms-api = { version = "0.7", path = "../../ic-dbms-api" }
 ic-dbms-client = { version = "0.7", path = "../../ic-dbms-client" }
 serde = { workspace = true }
+wasm-dbms-api = { version = "0.7", path = "../../../wasm-dbms/wasm-dbms-api" }

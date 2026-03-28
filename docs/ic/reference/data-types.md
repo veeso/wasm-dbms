@@ -27,6 +27,7 @@ All wasm-dbms data types are available in ic-dbms through `ic_dbms_api::prelude:
 use ic_dbms_api::prelude::*;
 
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "users"]
 pub struct User {
     #[primary_key]
@@ -71,6 +72,7 @@ client.insert::<User>(User::table_name(), user, None).await??;
 
 ```rust
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "documents"]
 pub struct Document {
     #[primary_key]
@@ -96,6 +98,7 @@ let my_docs = client.select::<Document>(Document::table_name(), query, None).awa
 
 ```rust
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "tasks"]
 pub struct Task {
     #[primary_key]

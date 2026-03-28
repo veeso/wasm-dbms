@@ -92,6 +92,7 @@ For fields wrapped in `Nullable<T>`, you can insert either a value or null:
 
 ```rust
 #[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[candid]
 #[table = "profiles"]
 pub struct Profile {
     #[primary_key]

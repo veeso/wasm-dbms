@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 serde = { workspace = true }
 tokio = { version = "1.0", features = ["full"] }
+wasm-dbms-api = { version = "0.7", path = "../../wasm-dbms/wasm-dbms-api" }
 
 [features]
 default = []
