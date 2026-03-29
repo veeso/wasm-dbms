@@ -213,7 +213,7 @@ fn bench_single_delete(c: &mut Criterion) {
 // ── Bulk insert ──
 
 fn bench_bulk_insert(c: &mut Criterion) {
-    for count in [100u32, 1_000, 10_000] {
+    for count in [1_000u32] {
         let mut group = c.benchmark_group(format!("bulk_insert/{count}"));
 
         group.bench_function("wasm_dbms", |b| {
@@ -303,53 +303,6 @@ fn bench_query_filtered(c: &mut Criterion) {
                 .expect("prepare failed");
             let _rows: Vec<(i32, String, String, i32)> = stmt
                 .query_map(duckdb::params![50], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-                })
-                .expect("query failed")
-                .collect::<Result<Vec<_>, _>>()
-                .expect("collect failed");
-        });
-    });
-
-    group.finish();
-}
-
-fn bench_query_ordered(c: &mut Criterion) {
-    let mut group = c.benchmark_group("query/ordered");
-
-    group.bench_function("wasm_dbms", |b| {
-        let ctx = setup::setup_wasm_dbms_with_users(10_000);
-        b.iter(|| {
-            let db = WasmDbmsDatabase::oneshot(&ctx, BenchDatabaseSchema);
-            let query = Query::builder().all().order_by_asc("name").build();
-            db.select::<User>(query).expect("select failed");
-        });
-    });
-
-    group.bench_function("rusqlite", |b| {
-        let conn = setup::setup_rusqlite_with_users(10_000);
-        b.iter(|| {
-            let mut stmt = conn
-                .prepare_cached("SELECT id, name, email, age FROM users ORDER BY name ASC")
-                .expect("prepare failed");
-            let _rows: Vec<(i32, String, String, i32)> = stmt
-                .query_map([], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-                })
-                .expect("query failed")
-                .collect::<Result<Vec<_>, _>>()
-                .expect("collect failed");
-        });
-    });
-
-    group.bench_function("duckdb", |b| {
-        let conn = setup::setup_duckdb_with_users(10_000);
-        b.iter(|| {
-            let mut stmt = conn
-                .prepare_cached("SELECT id, name, email, age FROM users ORDER BY name ASC")
-                .expect("prepare failed");
-            let _rows: Vec<(i32, String, String, i32)> = stmt
-                .query_map([], |row| {
                     Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                 })
                 .expect("query failed")
@@ -514,83 +467,6 @@ fn bench_transaction_commit(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_transaction_rollback(c: &mut Criterion) {
-    let mut group = c.benchmark_group("transaction/rollback");
-
-    group.bench_function("wasm_dbms", |b| {
-        b.iter_batched(
-            setup::setup_wasm_dbms,
-            |ctx| {
-                let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
-                let mut db = WasmDbmsDatabase::from_transaction(&ctx, BenchDatabaseSchema, tx_id);
-                for id in 1..=100u32 {
-                    let req = UserInsertRequest {
-                        id: Uint32(id),
-                        name: Text(format!("user_{id}")),
-                        email: Text(format!("user_{id}@example.com")),
-                        age: Uint32(25),
-                    };
-                    db.insert::<User>(req).expect("insert failed");
-                }
-                db.rollback().expect("rollback failed");
-            },
-            criterion::BatchSize::SmallInput,
-        );
-    });
-
-    group.bench_function("rusqlite", |b| {
-        b.iter_batched(
-            setup::setup_rusqlite,
-            |conn| {
-                let tx = conn.unchecked_transaction().expect("begin failed");
-                {
-                    let mut stmt = tx
-                        .prepare("INSERT INTO users (id, name, email, age) VALUES (?1, ?2, ?3, ?4)")
-                        .expect("prepare failed");
-                    for id in 1..=100u32 {
-                        stmt.execute(rusqlite::params![
-                            id,
-                            format!("user_{id}"),
-                            format!("user_{id}@example.com"),
-                            25
-                        ])
-                        .expect("insert failed");
-                    }
-                }
-                tx.rollback().expect("rollback failed");
-            },
-            criterion::BatchSize::SmallInput,
-        );
-    });
-
-    group.bench_function("duckdb", |b| {
-        b.iter_batched(
-            setup::setup_duckdb,
-            |conn| {
-                let tx = conn.unchecked_transaction().expect("begin failed");
-                {
-                    let mut stmt = tx
-                        .prepare("INSERT INTO users (id, name, email, age) VALUES (?, ?, ?, ?)")
-                        .expect("prepare failed");
-                    for id in 1..=100u32 {
-                        stmt.execute(duckdb::params![
-                            id,
-                            format!("user_{id}"),
-                            format!("user_{id}@example.com"),
-                            25
-                        ])
-                        .expect("insert failed");
-                    }
-                }
-                tx.rollback().expect("rollback failed");
-            },
-            criterion::BatchSize::SmallInput,
-        );
-    });
-
-    group.finish();
-}
-
 fn configure_criterion() -> Criterion {
     Criterion::default()
         .measurement_time(Duration::from_secs(10))
@@ -620,7 +496,6 @@ criterion_group!(
     config = configure_criterion();
     targets =
         bench_query_filtered,
-        bench_query_ordered,
         bench_query_join
 );
 
@@ -628,8 +503,7 @@ criterion_group!(
     name = transactions;
     config = configure_criterion();
     targets =
-        bench_transaction_commit,
-        bench_transaction_rollback
+        bench_transaction_commit
 );
 
 criterion_main!(single_crud, bulk, queries, transactions);
