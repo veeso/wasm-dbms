@@ -32,7 +32,7 @@ jobs:
         uses: extractions/setup-just@v3
 
       - name: Run comparison benchmarks
-        run: just bench_comparison
+        run: just bench_compare
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4

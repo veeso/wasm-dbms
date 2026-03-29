@@ -21,6 +21,15 @@ pub enum MemoryError {
     /// Error when failing to allocate a new page.
     #[error("Failed to allocate a new page")]
     FailedToAllocatePage,
+    /// Error when no index exists for the requested columns.
+    #[error("Index not found for columns: {0:?}")]
+    IndexNotFound(Vec<String>),
+    /// Error when an index entry cannot be located.
+    #[error("Entry not found in index")]
+    EntryNotFound,
+    /// Error when a single key cannot fit into a node page.
+    #[error("Key too large: {size} bytes exceeds maximum {max} bytes")]
+    KeyTooLarge { size: u64, max: u64 },
     #[error("Offset {offset} is not aligned to {alignment} bytes")]
     OffsetNotAligned { offset: PageOffset, alignment: u16 },
     /// Error when attempting to access stable memory out of bounds.
@@ -81,6 +90,9 @@ pub enum DecodeError {
     /// Error when the data is too short to decode.
     #[error("Data too short to decode")]
     TooShort,
+    /// Error when an invalid discriminant byte is encountered.
+    #[error("Invalid discriminant: {0}")]
+    InvalidDiscriminant(u8),
     /// UUID error
     #[error("UUID error: {0}")]
     UuidError(String),

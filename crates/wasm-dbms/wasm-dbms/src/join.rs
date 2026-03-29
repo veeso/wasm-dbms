@@ -3,6 +3,8 @@
 
 //! Join execution engine for cross-table queries.
 
+use std::collections::HashSet;
+
 use wasm_dbms_api::prelude::{
     CandidColumnDef, ColumnDef, DbmsResult, JoinType, OrderDirection, Query, Value,
 };
@@ -62,10 +64,6 @@ where
             .collect();
 
         for join in &query.joins {
-            let right_rows =
-                self.schema
-                    .select(dbms, &join.table, Query::builder().all().build())?;
-
             let (left_table, left_col) = self.resolve_column_ref(&join.left_column, from_table);
             let (_right_table_ref, right_col) =
                 self.resolve_column_ref(&join.right_column, &join.table);
@@ -76,6 +74,16 @@ where
                 JoinType::Right => (false, true),
                 JoinType::Full => (true, true),
             };
+
+            let right_rows = self.load_join_right_rows(
+                dbms,
+                &joined_rows,
+                &join.table,
+                &left_table,
+                left_col,
+                right_col,
+                keep_unmatched_right,
+            )?;
 
             joined_rows = self.nested_loop_join(
                 joined_rows,
@@ -122,6 +130,48 @@ where
             .collect::<DbmsResult<Vec<_>>>()?;
 
         Ok(results)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arguments are necessary for loading right table rows based on join conditions"
+    )]
+    fn load_join_right_rows(
+        &self,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
+        left_rows: &[JoinedRow],
+        right_table: &str,
+        left_table: &str,
+        left_col: &str,
+        right_col: &str,
+        keep_unmatched_right: bool,
+    ) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
+        let unique_join_values: Vec<Value> = {
+            let mut seen = HashSet::new();
+            left_rows
+                .iter()
+                .filter_map(|row| self.get_column_value(row, left_table, left_col).cloned())
+                .filter(|value| seen.insert(value.clone()))
+                .collect()
+        };
+
+        if unique_join_values.is_empty() || keep_unmatched_right {
+            return self
+                .schema
+                .select(dbms, right_table, Query::builder().all().build());
+        }
+
+        self.schema.select(
+            dbms,
+            right_table,
+            Query::builder()
+                .all()
+                .filter(Some(wasm_dbms_api::prelude::Filter::in_list(
+                    right_col,
+                    unique_join_values,
+                )))
+                .build(),
+        )
     }
 
     /// Unified nested-loop join.
@@ -318,9 +368,40 @@ mod tests {
     #[tables(Department = "departments", Employee = "employees")]
     pub struct TestSchema;
 
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "indexed_departments"]
+    pub struct IndexedDepartment {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+    }
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "indexed_employees"]
+    pub struct IndexedEmployee {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+        #[index]
+        pub dept_id: Uint32,
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(
+        IndexedDepartment = "indexed_departments",
+        IndexedEmployee = "indexed_employees"
+    )]
+    pub struct IndexedJoinSchema;
+
     fn setup() -> DbmsContext<HeapMemoryProvider> {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
         TestSchema::register_tables(&ctx).unwrap();
+        ctx
+    }
+
+    fn setup_indexed() -> DbmsContext<HeapMemoryProvider> {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        IndexedJoinSchema::register_tables(&ctx).unwrap();
         ctx
     }
 
@@ -349,6 +430,39 @@ mod tests {
         ])
         .unwrap();
         db.insert::<Employee>(insert).unwrap();
+    }
+
+    fn insert_indexed_dept(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>, id: u32, name: &str) {
+        let insert = IndexedDepartmentInsertRequest::from_values(&[
+            (IndexedDepartment::columns()[0], Value::Uint32(Uint32(id))),
+            (
+                IndexedDepartment::columns()[1],
+                Value::Text(Text(name.to_string())),
+            ),
+        ])
+        .unwrap();
+        db.insert::<IndexedDepartment>(insert).unwrap();
+    }
+
+    fn insert_indexed_emp(
+        db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+        id: u32,
+        name: &str,
+        dept_id: u32,
+    ) {
+        let insert = IndexedEmployeeInsertRequest::from_values(&[
+            (IndexedEmployee::columns()[0], Value::Uint32(Uint32(id))),
+            (
+                IndexedEmployee::columns()[1],
+                Value::Text(Text(name.to_string())),
+            ),
+            (
+                IndexedEmployee::columns()[2],
+                Value::Uint32(Uint32(dept_id)),
+            ),
+        ])
+        .unwrap();
+        db.insert::<IndexedEmployee>(insert).unwrap();
     }
 
     #[test]
@@ -586,5 +700,34 @@ mod tests {
             .build();
         let results = db.select_join("departments", query).unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_join_on_indexed_column() {
+        let ctx = setup_indexed();
+        let db = WasmDbmsDatabase::oneshot(&ctx, IndexedJoinSchema);
+        insert_indexed_dept(&db, 1, "eng");
+        insert_indexed_dept(&db, 2, "hr");
+        insert_indexed_emp(&db, 10, "alice", 1);
+        insert_indexed_emp(&db, 11, "bob", 2);
+
+        let query = Query::builder()
+            .all()
+            .inner_join(
+                "indexed_employees",
+                "indexed_departments.id",
+                "indexed_employees.dept_id",
+            )
+            .build();
+        let results = db.select_join("indexed_departments", query).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|row| {
+            row.iter().any(|(column, value)| {
+                column.name == "name"
+                    && column.table.as_deref() == Some("indexed_employees")
+                    && *value == Value::Text(Text("alice".to_string()))
+            })
+        }));
     }
 }

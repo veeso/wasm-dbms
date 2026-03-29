@@ -28,6 +28,19 @@ pub struct ForeignKeyDef {
     pub foreign_column: &'static str,
 }
 
+/// Defines an index on one or more columns of a table.
+///
+/// Contains a static slice of column names that make up the index, in the order they are defined.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IndexDef(pub &'static [&'static str]);
+
+impl IndexDef {
+    /// Returns the column names that make up this index.
+    pub fn columns(&self) -> &'static [&'static str] {
+        self.0
+    }
+}
+
 /// Serializable data type kind for API boundaries.
 ///
 /// Mirrors [`DataTypeKind`] but uses owned `String` for the `Custom` variant,

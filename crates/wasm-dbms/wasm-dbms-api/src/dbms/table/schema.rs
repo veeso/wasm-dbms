@@ -1,7 +1,7 @@
 use std::hash::{Hash as _, Hasher as _};
 
 use crate::dbms::foreign_fetcher::ForeignFetcher;
-use crate::dbms::table::column_def::ColumnDef;
+use crate::dbms::table::column_def::{ColumnDef, IndexDef};
 use crate::dbms::table::{InsertRecord, TableRecord, UpdateRecord};
 use crate::memory::Encode;
 use crate::prelude::{Sanitize, Validate};
@@ -34,6 +34,12 @@ where
 
     /// Returns the name of the primary key column.
     fn primary_key() -> &'static str;
+
+    /// Returns the list of indexes defined on the table, where each index
+    /// is represented by the list of column names it includes.
+    fn indexes() -> &'static [IndexDef] {
+        &[]
+    }
 
     /// Converts itself into a vector of column-value pairs.
     fn to_values(self) -> Vec<(ColumnDef, crate::dbms::value::Value)>;

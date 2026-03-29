@@ -32,6 +32,10 @@ pub trait MemoryAccess {
     where
         E: Encode;
 
+    /// Writes raw bytes at the specified page and offset, bypassing
+    /// alignment and encoding checks.
+    fn write_at_raw(&mut self, page: Page, offset: PageOffset, buf: &[u8]) -> MemoryResult<()>;
+
     /// Zeros out the region occupied by `data` at the specified page
     /// and offset.
     fn zero<E>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>
