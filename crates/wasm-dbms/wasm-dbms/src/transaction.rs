@@ -10,7 +10,7 @@ use wasm_dbms_api::prelude::{
     ColumnDef, DbmsResult, DeleteBehavior, Filter, TableSchema, UpdateRecord as _, Value,
 };
 
-pub use self::overlay::DatabaseOverlay;
+pub use self::overlay::{DatabaseOverlay, IndexOverlay};
 
 /// A transaction represents a sequence of operations performed as a single
 /// logical unit of work.
@@ -37,11 +37,14 @@ impl Transaction {
     }
 
     /// Inserts a new update operation into the transaction.
+    ///
+    /// `rows` is a list of `(primary_key, current_row)` pairs for each affected record.
+    /// The current row is needed to track old indexed values in the overlay.
     pub fn update<T>(
         &mut self,
         patch: T::Update,
         filter: Option<Filter>,
-        primary_keys: Vec<Value>,
+        rows: Vec<(Value, Vec<(ColumnDef, Value)>)>,
     ) -> DbmsResult<()>
     where
         T: TableSchema,
@@ -52,8 +55,9 @@ impl Transaction {
             .map(|(col, val)| (col.name, val.clone()))
             .collect();
 
-        for pk in primary_keys {
-            self.overlay.update::<T>(pk, overlay_patch.clone());
+        for (pk, current_row) in rows {
+            self.overlay
+                .update::<T>(pk, overlay_patch.clone(), &current_row);
         }
 
         self.operations.push(TransactionOp::Update {
@@ -65,17 +69,20 @@ impl Transaction {
     }
 
     /// Inserts a new delete operation into the transaction.
+    ///
+    /// `rows` is a list of `(primary_key, current_row)` pairs for each affected record.
+    /// The current row is needed to track removed indexed values in the overlay.
     pub fn delete<T>(
         &mut self,
         behaviour: DeleteBehavior,
         filter: Option<Filter>,
-        primary_keys: Vec<Value>,
+        rows: Vec<(Value, Vec<(ColumnDef, Value)>)>,
     ) -> DbmsResult<()>
     where
         T: TableSchema,
     {
-        for pk in primary_keys {
-            self.overlay.delete::<T>(pk);
+        for (pk, current_row) in rows {
+            self.overlay.delete::<T>(pk, &current_row);
         }
 
         self.operations.push(TransactionOp::Delete {
@@ -169,10 +176,14 @@ mod tests {
             &[(Item::columns()[1], Value::Text(Text("bar".to_string())))],
             Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
         );
+        let current_row = vec![
+            (Item::columns()[0], Value::Uint32(Uint32(1))),
+            (Item::columns()[1], Value::Text(Text("foo".to_string()))),
+        ];
         tx.update::<Item>(
             patch,
             Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-            vec![Value::Uint32(Uint32(1))],
+            vec![(Value::Uint32(Uint32(1)), current_row)],
         )
         .unwrap();
         assert_eq!(tx.operations.len(), 1);
@@ -185,10 +196,14 @@ mod tests {
     #[test]
     fn test_transaction_delete_records_operation() {
         let mut tx = Transaction::default();
+        let current_row = vec![
+            (Item::columns()[0], Value::Uint32(Uint32(1))),
+            (Item::columns()[1], Value::Text(Text("foo".to_string()))),
+        ];
         tx.delete::<Item>(
             DeleteBehavior::Restrict,
             Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-            vec![Value::Uint32(Uint32(1))],
+            vec![(Value::Uint32(Uint32(1)), current_row)],
         )
         .unwrap();
         assert_eq!(tx.operations.len(), 1);
@@ -220,11 +235,11 @@ mod tests {
             (Item::columns()[0], Value::Uint32(Uint32(1))),
             (Item::columns()[1], Value::Text(Text("a".to_string()))),
         ];
-        tx.insert::<Item>(insert_values).unwrap();
+        tx.insert::<Item>(insert_values.clone()).unwrap();
         tx.delete::<Item>(
             DeleteBehavior::Cascade,
             None,
-            vec![Value::Uint32(Uint32(1))],
+            vec![(Value::Uint32(Uint32(1)), insert_values)],
         )
         .unwrap();
         assert_eq!(tx.operations.len(), 2);

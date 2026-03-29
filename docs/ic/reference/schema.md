@@ -2,21 +2,23 @@
 
 > **Note:** This is the IC-specific schema reference. For complete Table macro details, column attributes, generated types, and best practices, see the [generic schema reference](../../reference/schema.md).
 
-- [Overview](#overview)
-- [IC-Specific Required Derives](#ic-specific-required-derives)
-- [DbmsCanister Macro](#dbmscanister-macro)
-  - [Basic Usage](#basic-usage)
-  - [Generated Candid API](#generated-candid-api)
-- [Candid Integration](#candid-integration)
-  - [CandidType and Deserialize](#candidtype-and-deserialize)
-  - [Candid Export](#candid-export)
-- [Complete IC Example](#complete-ic-example)
+- [Schema Reference (IC)](#schema-reference-ic)
+  - [Overview](#overview)
+  - [IC-Specific Required Derives](#ic-specific-required-derives)
+  - [DatabaseSchema Macro](#databaseschema-macro)
+  - [DbmsCanister Macro](#dbmscanister-macro)
+    - [Basic Usage](#basic-usage)
+    - [Generated Candid API](#generated-candid-api)
+  - [Candid Integration](#candid-integration)
+    - [CandidType and Deserialize](#candidtype-and-deserialize)
+    - [Candid Export](#candid-export)
+  - [Complete IC Example](#complete-ic-example)
 
 ---
 
 ## Overview
 
-When deploying wasm-dbms on the Internet Computer, your schema definitions need additional IC-specific derives, the `#[candid]` attribute, and a canister generation macro. The core `Table` macro, column attributes (`#[primary_key]`, `#[foreign_key(...)]`, `#[sanitizer(...)]`, `#[validate(...)]`, `#[custom_type]`, `#[alignment]`), and generated types (`Record`, `InsertRequest`, `UpdateRequest`, `ForeignFetcher`) work exactly as described in the [generic schema reference](../../reference/schema.md). This document covers only the IC-specific additions.
+When deploying wasm-dbms on the Internet Computer, your schema definitions need additional IC-specific derives, the `#[candid]` attribute, and a canister generation macro. The core `Table` macro, column attributes (`#[primary_key]`, `#[index]`, `#[foreign_key(...)]`, `#[sanitizer(...)]`, `#[validate(...)]`, `#[custom_type]`, `#[alignment]`), and generated types (`Record`, `InsertRequest`, `UpdateRequest`, `ForeignFetcher`) work exactly as described in the [generic schema reference](../../reference/schema.md). This document covers only the IC-specific additions.
 
 ---
 
@@ -217,6 +219,7 @@ pub struct User {
     #[validate(MaxStrlenValidator(100))]
     pub name: Text,
 
+    #[index]
     #[sanitizer(TrimSanitizer)]
     #[sanitizer(LowerCaseSanitizer)]
     #[validate(EmailValidator)]
@@ -239,10 +242,13 @@ pub struct Post {
     pub content: Text,
     pub published: Boolean,
 
+    #[index(group = "author_date")]
     #[foreign_key(entity = "User", table = "users", column = "id")]
     pub author_id: Uint32,
 
     pub metadata: Nullable<Json>,
+
+    #[index(group = "author_date")]
     pub created_at: DateTime,
 }
 ```

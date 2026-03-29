@@ -30,6 +30,11 @@
     - [Chaining Multiple Joins](#chaining-multiple-joins)
     - [Qualified Column Names](#qualified-column-names)
     - [Joins vs Eager Loading](#joins-vs-eager-loading)
+- [Index-Accelerated Queries](#index-accelerated-queries)
+  - [How Indexes Improve Queries](#how-indexes-improve-queries)
+  - [Which Filters Use Indexes](#which-filters-use-indexes)
+  - [Residual Filters](#residual-filters)
+  - [Transaction-Aware Lookups](#transaction-aware-lookups)
 
 ---
 
@@ -517,3 +522,78 @@ Unqualified names default to the FROM table (the table passed to `select_raw`).
 | **Use case** | Load parent with children | Correlate columns across tables |
 
 Use **eager loading** when you want typed results with related records attached. Use **joins** when you need a flat, cross-table result set -- for example, for reporting, search, or when you need columns from multiple tables in a single row.
+
+---
+
+## Index-Accelerated Queries
+
+When a table has indexes defined (via `#[index]` or the automatic primary key index), the query
+engine can use them to avoid full table scans. This happens transparently — you write the same
+filters as before, and the engine picks the best available index.
+
+### How Indexes Improve Queries
+
+Without indexes, every SELECT, UPDATE, and DELETE scans all records in the table. With an index
+on the filtered column, the engine navigates the B-tree to locate matching records directly,
+then loads only those records from memory.
+
+```rust
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "users"]
+pub struct User {
+    #[primary_key]
+    pub id: Uint32,
+    #[index]
+    pub email: Text,
+    pub name: Text,
+}
+
+// This uses the index on `email` — no full table scan
+let query = Query::builder()
+    .filter(Filter::eq("email", Value::Text("alice@example.com".into())))
+    .build();
+
+let users = database.select::<User>(query)?;
+```
+
+### Which Filters Use Indexes
+
+The filter analyzer extracts an index plan from the leftmost AND-chain of conditions on
+indexed columns:
+
+| Filter | Index plan | Notes |
+|--------|-----------|-------|
+| `Filter::eq("col", val)` | Exact match | Best case — direct B-tree lookup |
+| `Filter::ge("col", val)` | Range scan (start bound) | Uses linked-leaf traversal |
+| `Filter::le("col", val)` | Range scan (end bound) | Uses linked-leaf traversal |
+| `Filter::gt("col", val)` | Range scan + residual | Range is inclusive, so GT is rechecked |
+| `Filter::lt("col", val)` | Range scan + residual | Range is inclusive, so LT is rechecked |
+| `Filter::in_list("col", vals)` | Multi-lookup | One exact match per value |
+| AND of range filters on same column | Merged range | e.g., `age >= 18 AND age <= 65` |
+
+**Filters that fall back to full scan:**
+
+- OR at the top level
+- NOT wrapping an indexable condition
+- Filters on non-indexed columns
+- Complex nested expressions
+
+### Residual Filters
+
+When the index narrows down the candidate set but doesn't fully satisfy the filter, the
+remaining conditions are applied as a residual check on each loaded record:
+
+```rust
+// Index on `email` handles the equality check.
+// `name LIKE 'A%'` is applied as a residual filter on the results.
+let filter = Filter::eq("email", Value::Text("alice@example.com".into()))
+    .and(Filter::like("name", "A%"));
+```
+
+### Transaction-Aware Lookups
+
+Inside a transaction, index lookups are merged with the transaction overlay. Records
+added in the current transaction appear in index results, and deleted records are
+excluded — even though the on-disk B-tree has not been modified yet. On commit, overlay
+changes are flushed to the persistent B-tree. On rollback, the overlay is discarded and
+the B-tree remains unchanged.

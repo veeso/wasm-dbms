@@ -106,6 +106,19 @@ mod tests {
         pub name: Text,
     }
 
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "products"]
+    pub struct Product {
+        #[primary_key]
+        pub id: Uint32,
+        #[index]
+        pub sku: Text,
+        #[index(group = "category_brand")]
+        pub category: Text,
+        #[index(group = "category_brand")]
+        pub brand: Text,
+    }
+
     #[derive(DatabaseSchema)]
     #[tables(Item = "items")]
     pub struct TestSchema;
@@ -230,5 +243,22 @@ mod tests {
         assert_eq!(rows.len(), 1, "expected only the conflicting row");
         assert_eq!(rows[0].id, Some(Uint32(2)));
         assert_eq!(rows[0].name, Some(Text("conflict".to_string())));
+    }
+
+    #[test]
+    fn test_indexes_contains_pk_by_default() {
+        let indexes = Item::indexes();
+        assert_eq!(indexes.len(), 1);
+        assert_eq!(indexes[0].columns(), &["id"]);
+    }
+
+    #[test]
+    fn test_indexes_single_and_composite() {
+        let indexes = Product::indexes();
+        // [pk("id"), standalone("sku"), composite("category", "brand")]
+        assert_eq!(indexes.len(), 3);
+        assert_eq!(indexes[0].columns(), &["id"]);
+        assert_eq!(indexes[1].columns(), &["sku"]);
+        assert_eq!(indexes[2].columns(), &["category", "brand"]);
     }
 }

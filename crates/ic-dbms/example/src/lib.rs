@@ -39,6 +39,7 @@ pub struct Project {
     #[primary_key]
     pub id: Uint32,
     pub name: Text,
+    #[index]
     #[custom_type]
     pub owner: Principal,
 }

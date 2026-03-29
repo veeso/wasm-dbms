@@ -132,6 +132,11 @@ where
         self.mm.write_at(page, offset, data)
     }
 
+    fn write_at_raw(&mut self, page: Page, offset: PageOffset, buf: &[u8]) -> MemoryResult<()> {
+        self.journal.record(self.mm, page, offset, buf.len())?;
+        self.mm.write_at_raw(page, offset, buf)
+    }
+
     fn zero<E>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>
     where
         E: Encode,

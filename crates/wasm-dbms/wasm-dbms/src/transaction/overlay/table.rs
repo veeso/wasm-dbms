@@ -1,12 +1,20 @@
 // Rust guideline compliant 2026-02-28
 
-use wasm_dbms_api::prelude::{ColumnDef, Value};
+mod index;
+
+use wasm_dbms_api::prelude::{ColumnDef, IndexDef, Value};
+
+pub use self::index::IndexOverlay;
 
 /// The table overlay tracks uncommitted changes for a specific table.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct TableOverlay {
     /// The stack of operations applied to the table.
     pub(super) operations: Vec<Operation>,
+    /// The index overlay for tracking uncommitted changes to indexes.
+    pub(super) index_overlay: IndexOverlay,
+    /// Table index definitions, used for knowing when to update indexes on insert/update/delete operations.
+    indexes: &'static [IndexDef],
 }
 
 /// An operation within a [`TableOverlay`].
@@ -31,19 +39,104 @@ impl Operation {
 }
 
 impl TableOverlay {
+    /// Creates a new [`TableOverlay`] with the given index definitions.
+    pub fn new(indexes: &'static [IndexDef]) -> Self {
+        Self {
+            operations: Vec::default(),
+            index_overlay: IndexOverlay::default(),
+            indexes,
+        }
+    }
+
     /// Inserts a new record into the overlay.
+    ///
+    /// Indexed column values are extracted from `record` and added to the index overlay.
     pub fn insert(&mut self, pk: Value, record: Vec<(ColumnDef, Value)>) {
+        for index_def in self.indexes {
+            let indexed_values = Self::extract_indexed_values(index_def.columns(), &record);
+            self.index_overlay
+                .insert(index_def.columns(), indexed_values, pk.clone());
+        }
         self.operations.push(Operation::Insert(pk, record));
     }
 
     /// Updates a record in the overlay.
-    pub fn update(&mut self, pk: Value, updates: Vec<(&'static str, Value)>) {
+    ///
+    /// `current_row` is the full row before the update, used to compute old indexed values
+    /// for any indexes whose columns are affected by the update.
+    pub fn update(
+        &mut self,
+        pk: Value,
+        updates: Vec<(&'static str, Value)>,
+        current_row: &[(ColumnDef, Value)],
+    ) {
+        for index_def in self.indexes {
+            let columns = index_def.columns();
+            let affects_index = columns
+                .iter()
+                .any(|col| updates.iter().any(|(name, _)| name == col));
+            if affects_index {
+                let old_values = Self::extract_indexed_values(columns, current_row);
+                let new_values =
+                    Self::compute_updated_indexed_values(columns, current_row, &updates);
+                self.index_overlay
+                    .update(columns, old_values, new_values, pk.clone());
+            }
+        }
         self.operations.push(Operation::Update(pk, updates));
     }
 
     /// Marks a record as deleted in the overlay.
-    pub fn delete(&mut self, pk: Value) {
+    ///
+    /// `current_row` is the full row being deleted, used to remove its indexed values
+    /// from the index overlay.
+    pub fn delete(&mut self, pk: Value, current_row: &[(ColumnDef, Value)]) {
+        for index_def in self.indexes {
+            let indexed_values = Self::extract_indexed_values(index_def.columns(), current_row);
+            self.index_overlay
+                .delete(index_def.columns(), indexed_values, pk.clone());
+        }
         self.operations.push(Operation::Delete(pk));
+    }
+
+    /// Extracts the values for the given indexed columns from a row.
+    fn extract_indexed_values(columns: &[&'static str], row: &[(ColumnDef, Value)]) -> Vec<Value> {
+        columns
+            .iter()
+            .map(|col_name| {
+                row.iter()
+                    .find(|(col_def, _)| col_def.name == *col_name)
+                    .map(|(_, value)| value.clone())
+                    .unwrap_or(Value::Null)
+            })
+            .collect()
+    }
+
+    /// Computes the new indexed values after applying updates to a row.
+    ///
+    /// For each indexed column, uses the updated value if present in `updates`,
+    /// otherwise falls back to the current row value.
+    fn compute_updated_indexed_values(
+        columns: &[&'static str],
+        current_row: &[(ColumnDef, Value)],
+        updates: &[(&'static str, Value)],
+    ) -> Vec<Value> {
+        columns
+            .iter()
+            .map(|col_name| {
+                updates
+                    .iter()
+                    .find(|(name, _)| name == col_name)
+                    .map(|(_, value)| value.clone())
+                    .or_else(|| {
+                        current_row
+                            .iter()
+                            .find(|(col_def, _)| col_def.name == *col_name)
+                            .map(|(_, value)| value.clone())
+                    })
+                    .unwrap_or(Value::Null)
+            })
+            .collect()
     }
 
     /// Returns an iterator over the inserted records which are still valid after the operation stack.
@@ -111,6 +204,49 @@ mod tests {
 
     use super::*;
 
+    fn index_defs() -> &'static [IndexDef] {
+        &[IndexDef(&["id"])]
+    }
+
+    fn name_index_defs() -> &'static [IndexDef] {
+        &[IndexDef(&["name"])]
+    }
+
+    fn multi_index_defs() -> &'static [IndexDef] {
+        &[IndexDef(&["id"]), IndexDef(&["name"])]
+    }
+
+    fn composite_index_defs() -> &'static [IndexDef] {
+        &[IndexDef(&["name", "age"])]
+    }
+
+    fn col_def(name: &'static str, data_type: DataTypeKind, primary_key: bool) -> ColumnDef {
+        ColumnDef {
+            name,
+            data_type,
+            nullable: false,
+            primary_key,
+            foreign_key: None,
+        }
+    }
+
+    fn make_row(id: u32, name: &str, age: u32) -> Vec<(ColumnDef, Value)> {
+        vec![
+            (
+                col_def("id", DataTypeKind::Uint32, true),
+                Value::Uint32(id.into()),
+            ),
+            (
+                col_def("name", DataTypeKind::Text, false),
+                Value::Text(name.to_string().into()),
+            ),
+            (
+                col_def("age", DataTypeKind::Uint32, false),
+                Value::Uint32(age.into()),
+            ),
+        ]
+    }
+
     #[test]
     fn test_should_get_op_pk() {
         let op = Operation::Insert(Value::Int32(1.into()), vec![]);
@@ -127,7 +263,7 @@ mod tests {
     #[test]
     fn test_should_patch_row() {
         // let's make some ops
-        let mut overlay = TableOverlay::default();
+        let mut overlay = TableOverlay::new(index_defs());
         let pk = Value::Uint32(1.into());
         let row = vec![
             (
@@ -165,9 +301,19 @@ mod tests {
         overlay.update(
             pk.clone(),
             vec![("name", Value::Text("Bob".to_string().into()))],
+            &row,
         );
         // update age
-        overlay.update(pk.clone(), vec![("age", Value::Uint32(30.into()))]);
+        let row_after_name_update = vec![
+            row[0].clone(),
+            (row[1].0, Value::Text("Bob".to_string().into())),
+            row[2].clone(),
+        ];
+        overlay.update(
+            pk.clone(),
+            vec![("age", Value::Uint32(30.into()))],
+            &row_after_name_update,
+        );
 
         // get patched row
         let row = overlay.patch_row(row).expect("should be Some");
@@ -210,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_should_iter_inserted_row_with_patch() {
-        let mut overlay = TableOverlay::default();
+        let mut overlay = TableOverlay::new(index_defs());
         let first_pk = Value::Uint32(1.into());
         overlay.insert(
             first_pk.clone(),
@@ -285,7 +431,43 @@ mod tests {
         );
 
         // update second row
-        overlay.update(second_pk.clone(), vec![("age", Value::Uint32(33.into()))]);
+        let second_row = vec![
+            (
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Uint32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                second_pk.clone(),
+            ),
+            (
+                ColumnDef {
+                    name: "name",
+                    data_type: DataTypeKind::Text,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Text("Bob".to_string().into()),
+            ),
+            (
+                ColumnDef {
+                    name: "age",
+                    data_type: DataTypeKind::Uint32,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Uint32(32.into()),
+            ),
+        ];
+        overlay.update(
+            second_pk.clone(),
+            vec![("age", Value::Uint32(33.into()))],
+            &second_row,
+        );
 
         // insert a third
         let third_pk = Value::Uint32(3.into());
@@ -326,12 +508,50 @@ mod tests {
         );
 
         // delete third
-        overlay.delete(third_pk.clone());
+        let third_row = vec![
+            (
+                ColumnDef {
+                    name: "id",
+                    data_type: DataTypeKind::Uint32,
+                    nullable: false,
+                    primary_key: true,
+                    foreign_key: None,
+                },
+                third_pk.clone(),
+            ),
+            (
+                ColumnDef {
+                    name: "name",
+                    data_type: DataTypeKind::Text,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Text("Charlie".to_string().into()),
+            ),
+            (
+                ColumnDef {
+                    name: "age",
+                    data_type: DataTypeKind::Uint32,
+                    nullable: false,
+                    primary_key: false,
+                    foreign_key: None,
+                },
+                Value::Uint32(28.into()),
+            ),
+        ];
+        overlay.delete(third_pk.clone(), &third_row);
 
-        // update second row (again)
+        // update second row (again) — age was updated to 33 above
+        let second_row_after_age_update = vec![
+            second_row[0].clone(),
+            second_row[1].clone(),
+            (second_row[2].0, Value::Uint32(33.into())),
+        ];
         overlay.update(
             second_pk.clone(),
             vec![("name", Value::Text("Robert".to_string().into()))],
+            &second_row_after_age_update,
         );
 
         let inserted_rows: Vec<_> = overlay.iter_inserted().collect();
@@ -406,5 +626,247 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    // -- extract_indexed_values tests --
+
+    #[test]
+    fn test_extract_indexed_values_single_column() {
+        let row = make_row(1, "Alice", 24);
+        let values = TableOverlay::extract_indexed_values(&["name"], &row);
+        assert_eq!(values, vec![Value::Text("Alice".to_string().into())]);
+    }
+
+    #[test]
+    fn test_extract_indexed_values_composite() {
+        let row = make_row(1, "Alice", 24);
+        let values = TableOverlay::extract_indexed_values(&["name", "age"], &row);
+        assert_eq!(
+            values,
+            vec![
+                Value::Text("Alice".to_string().into()),
+                Value::Uint32(24.into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_extract_indexed_values_missing_column_returns_null() {
+        let row = make_row(1, "Alice", 24);
+        let values = TableOverlay::extract_indexed_values(&["nonexistent"], &row);
+        assert_eq!(values, vec![Value::Null]);
+    }
+
+    // -- compute_updated_indexed_values tests --
+
+    #[test]
+    fn test_compute_updated_indexed_values_with_update() {
+        let row = make_row(1, "Alice", 24);
+        let updates = vec![("name", Value::Text("Bob".to_string().into()))];
+        let values = TableOverlay::compute_updated_indexed_values(&["name"], &row, &updates);
+        assert_eq!(values, vec![Value::Text("Bob".to_string().into())]);
+    }
+
+    #[test]
+    fn test_compute_updated_indexed_values_falls_back_to_current_row() {
+        let row = make_row(1, "Alice", 24);
+        let updates = vec![("age", Value::Uint32(30.into()))];
+        // "name" not in updates, should fall back to row value
+        let values = TableOverlay::compute_updated_indexed_values(&["name"], &row, &updates);
+        assert_eq!(values, vec![Value::Text("Alice".to_string().into())]);
+    }
+
+    #[test]
+    fn test_compute_updated_indexed_values_composite_partial_update() {
+        let row = make_row(1, "Alice", 24);
+        let updates = vec![("age", Value::Uint32(30.into()))];
+        let values = TableOverlay::compute_updated_indexed_values(&["name", "age"], &row, &updates);
+        assert_eq!(
+            values,
+            vec![
+                Value::Text("Alice".to_string().into()), // unchanged
+                Value::Uint32(30.into()),                // updated
+            ]
+        );
+    }
+
+    // -- insert index overlay integration tests --
+
+    #[test]
+    fn test_insert_populates_index_overlay() {
+        let mut overlay = TableOverlay::new(name_index_defs());
+        let row = make_row(1, "Alice", 24);
+        overlay.insert(Value::Uint32(1.into()), row);
+
+        let added = overlay
+            .index_overlay
+            .added_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(added.contains(&Value::Uint32(1.into())));
+    }
+
+    #[test]
+    fn test_insert_populates_multiple_indexes() {
+        let mut overlay = TableOverlay::new(multi_index_defs());
+        let row = make_row(1, "Alice", 24);
+        overlay.insert(Value::Uint32(1.into()), row);
+
+        let id_added = overlay
+            .index_overlay
+            .added_pks(&["id"], &[Value::Uint32(1.into())]);
+        assert!(id_added.contains(&Value::Uint32(1.into())));
+
+        let name_added = overlay
+            .index_overlay
+            .added_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(name_added.contains(&Value::Uint32(1.into())));
+    }
+
+    #[test]
+    fn test_insert_populates_composite_index() {
+        let mut overlay = TableOverlay::new(composite_index_defs());
+        let row = make_row(1, "Alice", 24);
+        overlay.insert(Value::Uint32(1.into()), row);
+
+        let added = overlay.index_overlay.added_pks(
+            &["name", "age"],
+            &[
+                Value::Text("Alice".to_string().into()),
+                Value::Uint32(24.into()),
+            ],
+        );
+        assert!(added.contains(&Value::Uint32(1.into())));
+    }
+
+    // -- delete index overlay integration tests --
+
+    #[test]
+    fn test_delete_populates_index_overlay_removed() {
+        let mut overlay = TableOverlay::new(name_index_defs());
+        let row = make_row(1, "Alice", 24);
+        overlay.delete(Value::Uint32(1.into()), &row);
+
+        let removed = overlay
+            .index_overlay
+            .removed_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(removed.contains(&Value::Uint32(1.into())));
+    }
+
+    #[test]
+    fn test_delete_populates_multiple_indexes_removed() {
+        let mut overlay = TableOverlay::new(multi_index_defs());
+        let row = make_row(1, "Alice", 24);
+        overlay.delete(Value::Uint32(1.into()), &row);
+
+        let id_removed = overlay
+            .index_overlay
+            .removed_pks(&["id"], &[Value::Uint32(1.into())]);
+        assert!(id_removed.contains(&Value::Uint32(1.into())));
+
+        let name_removed = overlay
+            .index_overlay
+            .removed_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(name_removed.contains(&Value::Uint32(1.into())));
+    }
+
+    // -- update index overlay integration tests --
+
+    #[test]
+    fn test_update_indexed_column_updates_overlay() {
+        let mut overlay = TableOverlay::new(name_index_defs());
+        let row = make_row(1, "Alice", 24);
+        overlay.update(
+            Value::Uint32(1.into()),
+            vec![("name", Value::Text("Bob".to_string().into()))],
+            &row,
+        );
+
+        // old value should be in removed
+        let removed = overlay
+            .index_overlay
+            .removed_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(removed.contains(&Value::Uint32(1.into())));
+
+        // new value should be in added
+        let added = overlay
+            .index_overlay
+            .added_pks(&["name"], &[Value::Text("Bob".to_string().into())]);
+        assert!(added.contains(&Value::Uint32(1.into())));
+    }
+
+    #[test]
+    fn test_update_non_indexed_column_does_not_affect_index_overlay() {
+        let mut overlay = TableOverlay::new(name_index_defs());
+        let row = make_row(1, "Alice", 24);
+        // update "age" which is not in the name index
+        overlay.update(
+            Value::Uint32(1.into()),
+            vec![("age", Value::Uint32(30.into()))],
+            &row,
+        );
+
+        // index overlay should be empty — "age" is not indexed
+        let added = overlay
+            .index_overlay
+            .added_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(added.is_empty());
+
+        let removed = overlay
+            .index_overlay
+            .removed_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn test_update_composite_index_partial_column_change() {
+        let mut overlay = TableOverlay::new(composite_index_defs());
+        let row = make_row(1, "Alice", 24);
+        // update only "age" — composite index ["name", "age"] is affected
+        overlay.update(
+            Value::Uint32(1.into()),
+            vec![("age", Value::Uint32(30.into()))],
+            &row,
+        );
+
+        // old composite key removed
+        let removed = overlay.index_overlay.removed_pks(
+            &["name", "age"],
+            &[
+                Value::Text("Alice".to_string().into()),
+                Value::Uint32(24.into()),
+            ],
+        );
+        assert!(removed.contains(&Value::Uint32(1.into())));
+
+        // new composite key added (name unchanged, age updated)
+        let added = overlay.index_overlay.added_pks(
+            &["name", "age"],
+            &[
+                Value::Text("Alice".to_string().into()),
+                Value::Uint32(30.into()),
+            ],
+        );
+        assert!(added.contains(&Value::Uint32(1.into())));
+    }
+
+    // -- insert then delete consistency --
+
+    #[test]
+    fn test_insert_then_delete_leaves_clean_index_overlay() {
+        let mut overlay = TableOverlay::new(name_index_defs());
+        let row = make_row(1, "Alice", 24);
+        overlay.insert(Value::Uint32(1.into()), row.clone());
+        overlay.delete(Value::Uint32(1.into()), &row);
+
+        // Insert added the pk, delete should remove from added.
+        // Since the entry was overlay-only (never in base index), it should NOT be in removed.
+        let added = overlay
+            .index_overlay
+            .added_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(!added.contains(&Value::Uint32(1.into())));
+
+        let removed = overlay
+            .index_overlay
+            .removed_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
+        assert!(!removed.contains(&Value::Uint32(1.into())));
     }
 }

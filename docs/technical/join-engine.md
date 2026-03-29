@@ -177,7 +177,6 @@ Both paths return `Vec<Vec<(CandidColumnDef, Value)>>`, but for non-join queries
 ## Limitations
 
 - **O(n*m) nested-loop join**: Each join performs a full nested-loop comparison. For two tables of size *n* and *m*, this is O(n*m) per join clause.
-- **Full table scans**: Both the FROM table and each joined table are read in full (no filter pushdown to individual tables).
-- **No index usage**: The join engine does not use any indexing; all comparisons are linear scans.
+- **Full table scans for join matching**: The join ON condition itself does not use indexes — both sides are compared via linear scan. However, if the query has a filter, the individual table reads that feed the join may use indexes (via the standard select path).
 - **All rows loaded into memory**: Every table involved in the join is fully materialized in memory before processing. This can be a concern for very large tables on the IC.
 - **Equality joins only**: The ON condition only supports column equality (`left_col = right_col`). Range conditions, expressions, and multi-column ON clauses are not supported.
