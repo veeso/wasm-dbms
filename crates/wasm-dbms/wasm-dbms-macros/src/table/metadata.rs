@@ -8,6 +8,7 @@ const MIN_ALIGNMENT: u16 = 8;
 
 const ATTRIBUTE_ALIGNMENT: &str = "alignment";
 const ATTRIBUTE_TABLE: &str = "table";
+const ATTRIBUTE_INDEX: &str = "index";
 const ATTRIBUTE_PRIMARY_KEY: &str = "primary_key";
 const ATTRIBUTE_FOREIGN_KEY: &str = "foreign_key";
 const ATTRIBUTE_FOREIGN_KEY_ENTITY: &str = "entity";
@@ -85,6 +86,24 @@ pub enum Sanitizer {
 /// Map of field identifiers to their sanitizers
 type Sanitizers = HashMap<Ident, Sanitizer>;
 
+/// Represents a resolved index definition, built from `#[index]` field attributes.
+///
+/// - A bare `#[index]` creates a single-column index.
+/// - `#[index(group = "name")]` groups fields sharing the same group into a composite index.
+/// - The primary key always produces an implicit index.
+pub struct Index {
+    /// Column names that make up this index, in field declaration order.
+    pub columns: Vec<Ident>,
+}
+
+/// Raw per-field index annotation: either standalone or grouped.
+enum FieldIndex {
+    /// Bare `#[index]` -- standalone single-column index.
+    Standalone,
+    /// `#[index(group = "name")]` -- part of a composite index.
+    Grouped(String),
+}
+
 /// Metadata about the table extracted from the struct and its attributes
 pub struct TableMetadata {
     /// Name of the table
@@ -93,6 +112,8 @@ pub struct TableMetadata {
     pub primary_key: Ident,
     /// List of foreign keys
     pub foreign_keys: Vec<ForeignKey>,
+    /// List of indexes
+    pub indexes: Vec<Index>,
     /// Name of the record type
     pub record: Ident,
     /// Name of the insert type
@@ -134,6 +155,7 @@ pub fn collect_table_metadata(
     let alignment = get_alignment(attrs)?;
     let table_name = get_table_name(attrs)?;
     let primary_key = get_primary_key_field(data)?;
+    let indexes = collect_indexes(data, &primary_key)?;
     let foreign_keys = collect_foreign_keys(data)?;
     let validates = collect_validates(data)?;
     let sanitizes = collect_sanitizes(data)?;
@@ -155,6 +177,7 @@ pub fn collect_table_metadata(
         name: table_name,
         primary_key,
         foreign_keys,
+        indexes,
         record: record_ident,
         insert: insert_ident,
         update: update_ident,
@@ -229,6 +252,85 @@ fn get_table_name(attrs: &[syn::Attribute]) -> syn::Result<Ident> {
         proc_macro2::Span::call_site(),
         "missing `table` attribute",
     ))
+}
+
+/// Collect indexes from field-level `#[index]` / `#[index(group = "...")]` attributes.
+///
+/// The primary key always produces an implicit single-column index (listed first).
+/// Bare `#[index]` fields each produce a single-column index.
+/// Fields sharing the same `group` name are merged into one composite index,
+/// with columns ordered by field declaration order.
+fn collect_indexes(data: &DataStruct, primary_key: &Ident) -> syn::Result<Vec<Index>> {
+    // PK is always an index.
+    let mut indexes = vec![Index {
+        columns: vec![primary_key.clone()],
+    }];
+
+    // Collect per-field annotations: (field_name, FieldIndex).
+    let mut grouped: HashMap<String, Vec<Ident>> = HashMap::new();
+
+    for field in &data.fields {
+        for attr in &field.attrs {
+            if attr.path().is_ident(ATTRIBUTE_INDEX) {
+                let field_name = field.ident.clone().ok_or_else(|| {
+                    syn::Error::new_spanned(field, "`#[index]` can only be used on named fields")
+                })?;
+
+                let field_index = parse_index_attr(attr)?;
+
+                match field_index {
+                    FieldIndex::Standalone => {
+                        indexes.push(Index {
+                            columns: vec![field_name],
+                        });
+                    }
+                    FieldIndex::Grouped(group) => {
+                        grouped.entry(group).or_default().push(field_name);
+                    }
+                }
+            }
+        }
+    }
+
+    // Append grouped composite indexes (sorted by group name for determinism).
+    let mut group_names: Vec<_> = grouped.keys().cloned().collect();
+    group_names.sort();
+    for name in group_names {
+        let columns = grouped.remove(&name).expect("key must exist");
+        indexes.push(Index { columns });
+    }
+
+    Ok(indexes)
+}
+
+/// Parse a single `#[index]` or `#[index(group = "...")]` attribute.
+fn parse_index_attr(attr: &syn::Attribute) -> syn::Result<FieldIndex> {
+    // Bare `#[index]` -- no parentheses at all.
+    if matches!(&attr.meta, syn::Meta::Path(_)) {
+        return Ok(FieldIndex::Standalone);
+    }
+
+    let mut group: Option<String> = None;
+
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("group") {
+            let lit: syn::LitStr = meta.value()?.parse()?;
+            group = Some(lit.value());
+            return Ok(());
+        }
+        Err(syn::Error::new_spanned(
+            &meta.path,
+            "unknown index attribute; expected `group`",
+        ))
+    })?;
+
+    match group {
+        Some(g) => Ok(FieldIndex::Grouped(g)),
+        None => Err(syn::Error::new_spanned(
+            attr,
+            "`#[index(...)]` requires `group = \"name\"`",
+        )),
+    }
 }
 
 /// Find the primary key field in the struct

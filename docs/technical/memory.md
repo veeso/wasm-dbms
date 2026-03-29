@@ -5,7 +5,7 @@
   - [How Internet Computer Memory Works](#how-internet-computer-memory-works)
   - [Memory Model](#memory-model)
   - [Memory Provider](#memory-provider)
-  - [Memory Manager](#memory-manager)
+  - [Memory Manager and MemoryAccess](#memory-manager-and-memoryaccess)
   - [Encode Trait](#encode-trait)
   - [Schema Registry](#schema-registry)
   - [ACL Storage](#acl-storage)
@@ -17,6 +17,12 @@
     - [Record Alignment](#record-alignment)
     - [Table Reader](#table-reader)
   - [Index Registry](#index-registry)
+    - [Index Ledger](#index-ledger)
+    - [B-Tree Structure](#b-tree-structure)
+    - [Internal Node Layout](#internal-node-layout)
+    - [Leaf Node Layout](#leaf-node-layout)
+    - [Index Maintenance](#index-maintenance)
+    - [Index Tree Walker](#index-tree-walker)
 
 ---
 
@@ -58,15 +64,23 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 ├─────────────────────────────────────────────┤
 │ Page 3: Table "users" Free Segments Ledger  │
 ├─────────────────────────────────────────────┤
-│ Page 4: Table "posts" Page Ledger           │
+│ Page 4: Table "users" Index Ledger          │
 ├─────────────────────────────────────────────┤
-│ Page 5: Table "posts" Free Segments Ledger  │
+│ Page 5: Table "posts" Page Ledger           │
 ├─────────────────────────────────────────────┤
-│ Page 6: Table "users" Records - Page 1      │
+│ Page 6: Table "posts" Free Segments Ledger  │
 ├─────────────────────────────────────────────┤
-│ Page 7: Table "users" Records - Page 2      │
+│ Page 7: Table "posts" Index Ledger          │
 ├─────────────────────────────────────────────┤
-│ Page 8: Table "posts" Records - Page 1      │
+│ Page 8: Table "users" Records - Page 1      │
+├─────────────────────────────────────────────┤
+│ Page 9: Table "users" Records - Page 2      │
+├─────────────────────────────────────────────┤
+│ Page 10: B-Tree Node (index on users.id)    │
+├─────────────────────────────────────────────┤
+│ Page 11: B-Tree Node (index on users.email) │
+├─────────────────────────────────────────────┤
+│ Page 12: Table "posts" Records - Page 1     │
 ├─────────────────────────────────────────────┤
 │ ...                                         │
 └─────────────────────────────────────────────┘
@@ -75,8 +89,8 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 **Layout characteristics:**
 
 - Reserved pages (0-1) are allocated at initialization
-- Each table gets its own Page Ledger and Free Segments Ledger
-- Record pages are allocated on demand
+- Each table gets a Page Ledger, Free Segments Ledger, and Index Ledger
+- Record pages and B-tree node pages are allocated on demand
 - Pages can be interleaved between tables
 
 ---
@@ -256,8 +270,9 @@ The Schema Registry maps tables to their storage pages:
 ```rust
 /// Information about a table's storage pages
 pub struct TableRegistryPage {
-    pub pages_list_page: Page,      // Page Ledger location
-    pub free_segments_page: Page,   // Free Segments Ledger location
+    pub pages_list_page: Page,        // Page Ledger location
+    pub free_segments_page: Page,     // Free Segments Ledger location
+    pub index_registry_page: Page,    // Index Ledger location
 }
 
 /// Maps table fingerprints to storage locations
@@ -267,6 +282,7 @@ pub struct SchemaRegistry {
 ```
 
 **Table Fingerprint:**
+
 - Unique identifier derived from table schema
 - Used to detect schema changes on upgrade
 - Enables multiple tables in one canister
@@ -311,10 +327,10 @@ which wraps `AccessControlList` and uses `Principal` as its identity type.
 Each table has a `TableRegistry` managing its records:
 
 ```rust
-pub struct TableRegistry<E: Encode> {
-    _marker: PhantomData<E>,
+pub struct TableRegistry {
     free_segments_ledger: FreeSegmentsLedger,
     page_ledger: PageLedger,
+    index_ledger: IndexLedger,
 }
 ```
 
@@ -396,7 +412,7 @@ impl FreeSegmentsLedger {
 
 Records are wrapped in `RawRecord` with a length header:
 
-```
+```txt
 ┌─────────────────────────────────────────┐
 │  2 bytes: Data length (little-endian)   │
 ├─────────────────────────────────────────┤
@@ -504,10 +520,148 @@ impl<E: Encode> TableRegistry<E> {
 
 ## Index Registry
 
-> **Note:** Index Registry is reserved for future use (RFU).
+Each table has an `IndexLedger` that maps index definitions (column sets) to B-tree root pages.
+Indexes are always B+ trees where each node occupies exactly one memory page (64 KiB).
 
-Planned features:
+Every table automatically gets an index on its primary key. Additional indexes can be declared
+with the `#[index]` attribute (see [Schema Reference](../reference/schema.md)).
 
-- Secondary indexes for faster queries
-- B-tree or hash-based indexes
-- Automatic index updates on insert/update/delete
+### Index Ledger
+
+The `IndexLedger` is stored in a single page per table and maps column sets to B-tree root pages:
+
+```rust
+pub struct IndexLedger {
+    ledger_page: Page,
+    tables: HashMap<Vec<String>, Page>,  // column names → root page
+}
+```
+
+**Serialization format:**
+
+```txt
+Offset   Size    Field
+0-7      8       Number of indexes (u64)
+8+       var     For each index:
+                 - 8 bytes: column count (u64)
+                 - For each column name:
+                   - 1 byte: name length (u8)
+                   - N bytes: UTF-8 column name
+                 - 4 bytes: root page (u32)
+```
+
+When a table is registered via `SchemaRegistry::register_table()`, the index ledger is
+initialized by allocating one root page per index definition. The ledger supports
+insert, delete, update, exact-match search, and range scan operations — all delegated
+to the underlying B-tree for the appropriate column set.
+
+### B-Tree Structure
+
+Indexes use a B+ tree where values (record pointers) are stored only in leaf nodes.
+Internal nodes contain separator keys that guide traversal. Each node is a single page.
+
+```rust
+struct RecordAddress {
+    page: Page,         // 4 bytes, u32
+    offset: PageOffset, // 2 bytes, u16
+}
+```
+
+`RecordAddress` is the pointer stored in leaf entries, pointing to the exact location
+of the record in the table's data pages. It is 6 bytes when serialized.
+
+Key characteristics:
+
+- **Variable-size keys**: Entries are packed as many as fit in a 64 KiB page
+- **Non-unique**: The same key can map to multiple `RecordAddress` values
+- **Linked leaves**: Leaf nodes form a doubly-linked list for range scans
+- **Node type tag**: Byte 0 distinguishes internal (0x00) from leaf (0x01) nodes
+
+### Internal Node Layout
+
+```txt
+┌──────────────────────────────────────────────────────┐
+│ Byte 0:     Node type (0x00 = INTERNAL)              │
+│ Bytes 1-4:  Parent page (u32, u32::MAX if root)      │
+│ Bytes 5-6:  Entry count (u16)                        │
+│ Bytes 7-10: Rightmost child page (u32)               │
+├──────────────────────────────────────────────────────┤
+│ Entry 0:                                             │
+│   Bytes 0-1: Key size (u16)                          │
+│   Bytes 2+:  Key data (variable)                     │
+│   Next 4:    Child page (u32)                        │
+├──────────────────────────────────────────────────────┤
+│ Entry 1: ...                                         │
+├──────────────────────────────────────────────────────┤
+│ ...                                                  │
+└──────────────────────────────────────────────────────┘
+```
+
+Header size: 11 bytes. Entries are sorted by key. A search for key `K` routes to the
+child page of the first entry whose key is `>= K`, or to `rightmost_child` if `K`
+is greater than all entries.
+
+### Leaf Node Layout
+
+```txt
+┌──────────────────────────────────────────────────────┐
+│ Byte 0:      Node type (0x01 = LEAF)                 │
+│ Bytes 1-4:   Parent page (u32, u32::MAX if root)     │
+│ Bytes 5-6:   Entry count (u16)                       │
+│ Bytes 7-10:  Previous leaf page (u32, u32::MAX=none) │
+│ Bytes 11-14: Next leaf page (u32, u32::MAX=none)     │
+├──────────────────────────────────────────────────────┤
+│ Entry 0:                                             │
+│   Bytes 0-1: Key size (u16)                          │
+│   Bytes 2+:  Key data (variable)                     │
+│   Next 6:    RecordAddress (4-byte page + 2-byte     │
+│              offset)                                 │
+├──────────────────────────────────────────────────────┤
+│ Entry 1: ...                                         │
+├──────────────────────────────────────────────────────┤
+│ ...                                                  │
+└──────────────────────────────────────────────────────┘
+```
+
+Header size: 15 bytes. Entries are sorted by (key, record address). The
+`prev_leaf` / `next_leaf` pointers form a doubly-linked list across all leaves,
+enabling efficient forward and backward range scans.
+
+### Index Maintenance
+
+Indexes are updated eagerly on every write operation:
+
+- **INSERT**: After writing the record and obtaining its `RecordAddress`, the key
+  is inserted into every index defined on the table.
+- **DELETE**: After removing the record, the key-pointer pair is removed from every
+  index.
+- **UPDATE**: If indexed columns changed, those indexes are updated (delete old
+  key + insert new key). If the record moved (size change), all indexes are updated
+  with the new `RecordAddress`.
+
+When a leaf node overflows during insertion, it splits at its midpoint. The first
+key of the new right sibling is promoted to the parent internal node. If the parent
+also overflows, the split propagates upward. When the root splits, a new root is
+created and the tree height increases by one.
+
+When a leaf becomes empty after deletion (and is not the root), it is unlinked from
+the leaf chain and its parent is updated.
+
+### Index Tree Walker
+
+Range scans use an `IndexTreeWalker` that iterates through leaf entries across
+linked leaf pages:
+
+```rust
+pub struct IndexTreeWalker<K: Encode + Ord> {
+    entries: Vec<LeafEntry<K>>,   // Current leaf's entries
+    cursor: usize,                // Position within current leaf
+    next_leaf: Option<Page>,      // Next leaf page for continuation
+    end_key: Option<K>,           // Optional upper bound (inclusive)
+}
+```
+
+The walker starts at the first leaf entry `>= start_key` and advances through the
+linked-leaf chain until it reaches an entry `> end_key` (or exhausts all leaves).
+This provides efficient iteration for range queries without revisiting internal
+nodes.

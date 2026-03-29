@@ -1,9 +1,15 @@
+mod discriminant;
+
+use std::borrow::Cow;
 use std::str::FromStr;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
 use super::types;
+use crate::memory::{
+    DEFAULT_ALIGNMENT, DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult, PageOffset,
+};
 
 /// A generic wrapper enum to hold any DBMS value.
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
@@ -204,6 +210,198 @@ impl Value {
     }
 }
 
+/// Encodes a [`Value`] as `[discriminant: u8] + [inner_type.encode()]`.
+///
+/// For `Null`, only the discriminant byte is written.
+/// For `Custom`, the encoding is `[discriminant] + [tag_len: u16 LE] + [tag_bytes] + [data_len: u16 LE] + [encoded_bytes]`.
+impl Encode for Value {
+    const SIZE: DataSize = DataSize::Dynamic;
+    const ALIGNMENT: PageOffset = DEFAULT_ALIGNMENT;
+
+    fn encode(&'_ self) -> Cow<'_, [u8]> {
+        match self {
+            Value::Blob(v) => encode_with_discriminant(discriminant::BLOB, v.encode()),
+            Value::Boolean(v) => encode_with_discriminant(discriminant::BOOLEAN, v.encode()),
+            Value::Date(v) => encode_with_discriminant(discriminant::DATE, v.encode()),
+            Value::DateTime(v) => encode_with_discriminant(discriminant::DATE_TIME, v.encode()),
+            Value::Decimal(v) => encode_with_discriminant(discriminant::DECIMAL, v.encode()),
+            Value::Int8(v) => encode_with_discriminant(discriminant::INT8, v.encode()),
+            Value::Int16(v) => encode_with_discriminant(discriminant::INT16, v.encode()),
+            Value::Int32(v) => encode_with_discriminant(discriminant::INT32, v.encode()),
+            Value::Int64(v) => encode_with_discriminant(discriminant::INT64, v.encode()),
+            Value::Json(v) => encode_with_discriminant(discriminant::JSON, v.encode()),
+            Value::Null => Cow::Owned(vec![discriminant::NULL]),
+            Value::Text(v) => encode_with_discriminant(discriminant::TEXT, v.encode()),
+            Value::Uint8(v) => encode_with_discriminant(discriminant::UINT8, v.encode()),
+            Value::Uint16(v) => encode_with_discriminant(discriminant::UINT16, v.encode()),
+            Value::Uint32(v) => encode_with_discriminant(discriminant::UINT32, v.encode()),
+            Value::Uint64(v) => encode_with_discriminant(discriminant::UINT64, v.encode()),
+            Value::Uuid(v) => encode_with_discriminant(discriminant::UUID, v.encode()),
+            Value::Custom(cv) => {
+                let tag_bytes = cv.type_tag.as_bytes();
+                let tag_len = tag_bytes.len() as u16;
+                let data_len = cv.encoded.len() as u16;
+                let total = 1 + 2 + tag_bytes.len() + 2 + cv.encoded.len();
+                let mut buf = Vec::with_capacity(total);
+                buf.push(discriminant::CUSTOM);
+                buf.extend_from_slice(&tag_len.to_le_bytes());
+                buf.extend_from_slice(tag_bytes);
+                buf.extend_from_slice(&data_len.to_le_bytes());
+                buf.extend_from_slice(&cv.encoded);
+                Cow::Owned(buf)
+            }
+        }
+    }
+
+    fn decode(data: Cow<[u8]>) -> MemoryResult<Self> {
+        if data.is_empty() {
+            return Err(MemoryError::DecodeError(DecodeError::TooShort));
+        }
+
+        let disc = data[0];
+        let rest = Cow::Owned(data[1..].to_vec());
+
+        match disc {
+            discriminant::BLOB => types::Blob::decode(rest).map(Value::Blob),
+            discriminant::BOOLEAN => types::Boolean::decode(rest).map(Value::Boolean),
+            discriminant::DATE => types::Date::decode(rest).map(Value::Date),
+            discriminant::DATE_TIME => types::DateTime::decode(rest).map(Value::DateTime),
+            discriminant::DECIMAL => types::Decimal::decode(rest).map(Value::Decimal),
+            discriminant::INT8 => types::Int8::decode(rest).map(Value::Int8),
+            discriminant::INT16 => types::Int16::decode(rest).map(Value::Int16),
+            discriminant::INT32 => types::Int32::decode(rest).map(Value::Int32),
+            discriminant::INT64 => types::Int64::decode(rest).map(Value::Int64),
+            discriminant::JSON => types::Json::decode(rest).map(Value::Json),
+            discriminant::NULL => Ok(Value::Null),
+            discriminant::TEXT => types::Text::decode(rest).map(Value::Text),
+            discriminant::UINT8 => types::Uint8::decode(rest).map(Value::Uint8),
+            discriminant::UINT16 => types::Uint16::decode(rest).map(Value::Uint16),
+            discriminant::UINT32 => types::Uint32::decode(rest).map(Value::Uint32),
+            discriminant::UINT64 => types::Uint64::decode(rest).map(Value::Uint64),
+            discriminant::UUID => types::Uuid::decode(rest).map(Value::Uuid),
+            discriminant::CUSTOM => decode_custom_value(&data[1..]),
+            other => Err(MemoryError::DecodeError(DecodeError::InvalidDiscriminant(
+                other,
+            ))),
+        }
+    }
+
+    fn size(&self) -> MSize {
+        1 + match self {
+            Value::Blob(v) => Encode::size(v),
+            Value::Boolean(v) => Encode::size(v),
+            Value::Date(v) => Encode::size(v),
+            Value::DateTime(v) => Encode::size(v),
+            Value::Decimal(v) => Encode::size(v),
+            Value::Int8(v) => Encode::size(v),
+            Value::Int16(v) => Encode::size(v),
+            Value::Int32(v) => Encode::size(v),
+            Value::Int64(v) => Encode::size(v),
+            Value::Json(v) => Encode::size(v),
+            Value::Null => 0,
+            Value::Text(v) => Encode::size(v),
+            Value::Uint8(v) => Encode::size(v),
+            Value::Uint16(v) => Encode::size(v),
+            Value::Uint32(v) => Encode::size(v),
+            Value::Uint64(v) => Encode::size(v),
+            Value::Uuid(v) => Encode::size(v),
+            Value::Custom(cv) => {
+                // tag_len(2) + tag_bytes + data_len(2) + encoded_bytes
+                (2 + cv.type_tag.len() + 2 + cv.encoded.len()) as MSize
+            }
+        }
+    }
+}
+
+/// Prepends the discriminant byte to an already-encoded inner value.
+fn encode_with_discriminant(disc: u8, inner: Cow<[u8]>) -> Cow<'static, [u8]> {
+    let mut buf = Vec::with_capacity(1 + inner.len());
+    buf.push(disc);
+    buf.extend_from_slice(&inner);
+    Cow::Owned(buf)
+}
+
+/// Decodes a [`CustomValue`](crate::dbms::custom_value::CustomValue) from the bytes after the discriminant.
+fn decode_custom_value(data: &[u8]) -> MemoryResult<Value> {
+    if data.len() < 2 {
+        return Err(MemoryError::DecodeError(DecodeError::TooShort));
+    }
+    let tag_len = u16::from_le_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + tag_len + 2 {
+        return Err(MemoryError::DecodeError(DecodeError::TooShort));
+    }
+    let type_tag = String::from_utf8(data[2..2 + tag_len].to_vec())?;
+    let data_offset = 2 + tag_len;
+    let data_len = u16::from_le_bytes([data[data_offset], data[data_offset + 1]]) as usize;
+    if data.len() < data_offset + 2 + data_len {
+        return Err(MemoryError::DecodeError(DecodeError::TooShort));
+    }
+    let encoded = data[data_offset + 2..data_offset + 2 + data_len].to_vec();
+    Ok(Value::Custom(crate::dbms::custom_value::CustomValue {
+        type_tag,
+        encoded,
+        display: String::new(),
+    }))
+}
+
+/// Encodes a `Vec<Value>` as `[count: u32 LE] + [for each value: [size: u32 LE] + value.encode()]`.
+///
+/// This is used as the key type for B-tree indexes, supporting both single-column
+/// and composite indexes uniformly.
+impl Encode for Vec<Value> {
+    const SIZE: DataSize = DataSize::Dynamic;
+    const ALIGNMENT: PageOffset = DEFAULT_ALIGNMENT;
+
+    fn encode(&'_ self) -> Cow<'_, [u8]> {
+        let count = self.len() as u32;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&count.to_le_bytes());
+        for value in self {
+            let encoded = Encode::encode(value);
+            let size = encoded.len() as u32;
+            buf.extend_from_slice(&size.to_le_bytes());
+            buf.extend_from_slice(&encoded);
+        }
+        Cow::Owned(buf)
+    }
+
+    fn decode(data: Cow<[u8]>) -> MemoryResult<Self> {
+        if data.len() < 4 {
+            return Err(MemoryError::DecodeError(DecodeError::TooShort));
+        }
+        let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        let mut offset = 4;
+        let mut values = Vec::with_capacity(count);
+        for _ in 0..count {
+            if offset + 4 > data.len() {
+                return Err(MemoryError::DecodeError(DecodeError::TooShort));
+            }
+            let size = u32::from_le_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]) as usize;
+            offset += 4;
+            if offset + size > data.len() {
+                return Err(MemoryError::DecodeError(DecodeError::TooShort));
+            }
+            let value = Value::decode(Cow::Owned(data[offset..offset + size].to_vec()))?;
+            values.push(value);
+            offset += size;
+        }
+        Ok(values)
+    }
+
+    fn size(&self) -> MSize {
+        let mut total: MSize = 4; // count
+        for value in self {
+            total += 4 + Encode::size(value); // size prefix + encoded value
+        }
+        total
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -383,5 +581,237 @@ mod tests {
             display: "Admin".to_string(),
         });
         assert_eq!(cv.type_name(), "Custom(role)");
+    }
+
+    // -- Encode round-trip tests for Value --
+
+    #[test]
+    fn test_encode_decode_null() {
+        let original = Value::Null;
+        let encoded = Encode::encode(&original);
+        assert_eq!(encoded.len(), 1);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_uint32() {
+        let original = Value::Uint32(types::Uint32(42));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_text() {
+        let original = Value::Text(types::Text("hello index".to_string()));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_blob() {
+        let original = Value::Blob(types::Blob(vec![0xDE, 0xAD, 0xBE, 0xEF]));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_boolean() {
+        let original = Value::Boolean(types::Boolean(true));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_date() {
+        let original = Value::Date(types::Date {
+            year: 2026,
+            month: 3,
+            day: 29,
+        });
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_datetime() {
+        let original = Value::DateTime(types::DateTime {
+            year: 2026,
+            month: 3,
+            day: 29,
+            hour: 14,
+            minute: 30,
+            second: 0,
+            microsecond: 0,
+            timezone_offset_minutes: 60,
+        });
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_decimal() {
+        let original = Value::Decimal(types::Decimal(rust_decimal::Decimal::new(12345, 2)));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_int8() {
+        let original = Value::Int8(types::Int8(-42));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_int16() {
+        let original = Value::Int16(types::Int16(-1000));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_int32() {
+        let original = Value::Int32(types::Int32(-100_000));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_int64() {
+        let original = Value::Int64(types::Int64(-9_000_000_000));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_uint8() {
+        let original = Value::Uint8(types::Uint8(255));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_uint16() {
+        let original = Value::Uint16(types::Uint16(60_000));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_uint64() {
+        let original = Value::Uint64(types::Uint64(18_446_744_073_709_551_615));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_uuid() {
+        let original = Value::Uuid(types::Uuid(
+            Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+        ));
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_custom() {
+        let original = Value::Custom(crate::dbms::custom_value::CustomValue {
+            type_tag: "role".to_string(),
+            encoded: vec![0x01, 0x02],
+            display: "Admin".to_string(),
+        });
+        let encoded = Encode::encode(&original);
+        let decoded = Value::decode(encoded).unwrap();
+        // Display is not preserved through encoding
+        assert_eq!(decoded.as_custom().unwrap().type_tag, "role");
+        assert_eq!(decoded.as_custom().unwrap().encoded, vec![0x01, 0x02]);
+    }
+
+    #[test]
+    fn test_encode_decode_invalid_discriminant() {
+        let data = Cow::Owned(vec![0xFF]);
+        let result = Value::decode(data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encode_decode_empty_data() {
+        let data: Cow<[u8]> = Cow::Owned(vec![]);
+        let result = Value::decode(data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_value_size_matches_encoded_length() {
+        let values = vec![
+            Value::Null,
+            Value::Uint32(types::Uint32(42)),
+            Value::Text(types::Text("test".to_string())),
+            Value::Boolean(types::Boolean(false)),
+        ];
+        for value in &values {
+            let encoded = Encode::encode(value);
+            assert_eq!(
+                Encode::size(value) as usize,
+                encoded.len(),
+                "size mismatch for {value:?}"
+            );
+        }
+    }
+
+    // -- Encode round-trip tests for Vec<Value> --
+
+    #[test]
+    fn test_encode_decode_vec_single_value() {
+        let original = vec![Value::Uint32(types::Uint32(99))];
+        let encoded = Encode::encode(&original);
+        let decoded = Vec::<Value>::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_vec_composite() {
+        let original = vec![
+            Value::Text(types::Text("alice".to_string())),
+            Value::Uint32(types::Uint32(30)),
+        ];
+        let encoded = Encode::encode(&original);
+        let decoded = Vec::<Value>::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_decode_vec_empty() {
+        let original: Vec<Value> = vec![];
+        let encoded = Encode::encode(&original);
+        let decoded = Vec::<Value>::decode(encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_vec_value_size_matches_encoded_length() {
+        let original = vec![
+            Value::Text(types::Text("hello".to_string())),
+            Value::Null,
+            Value::Int64(types::Int64(-1)),
+        ];
+        let encoded = Encode::encode(&original);
+        assert_eq!(Encode::size(&original) as usize, encoded.len());
     }
 }

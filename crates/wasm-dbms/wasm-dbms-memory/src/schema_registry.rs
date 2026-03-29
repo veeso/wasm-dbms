@@ -7,6 +7,7 @@ use wasm_dbms_api::prelude::{
     TableSchema,
 };
 
+use crate::table_registry::IndexLedger;
 use crate::{MemoryAccess, MemoryManager, MemoryProvider};
 
 /// Data regarding the table registry page.
@@ -14,6 +15,7 @@ use crate::{MemoryAccess, MemoryManager, MemoryProvider};
 pub struct TableRegistryPage {
     pub pages_list_page: Page,
     pub free_segments_page: Page,
+    pub index_registry_page: Page,
 }
 
 /// The schema registry takes care of storing and retrieving table schemas from memory.
@@ -49,11 +51,13 @@ impl SchemaRegistry {
         // allocate table registry page
         let pages_list_page = mm.allocate_page()?;
         let free_segments_page = mm.allocate_page()?;
+        let index_registry_page = mm.allocate_page()?;
 
         // insert into tables map
         let pages = TableRegistryPage {
             pages_list_page,
             free_segments_page,
+            index_registry_page,
         };
         self.tables.insert(fingerprint, pages);
 
@@ -61,6 +65,9 @@ impl SchemaRegistry {
         let page = mm.schema_page();
         // write self to schema page
         mm.write_at(page, 0, self)?;
+
+        // init index ledger for this table
+        IndexLedger::init(pages.index_registry_page, TS::indexes(), mm)?;
 
         Ok(pages)
     }
@@ -95,6 +102,7 @@ impl Encode for SchemaRegistry {
             buffer.extend_from_slice(&fingerprint.to_le_bytes());
             buffer.extend_from_slice(&page.pages_list_page.to_le_bytes());
             buffer.extend_from_slice(&page.free_segments_page.to_le_bytes());
+            buffer.extend_from_slice(&page.index_registry_page.to_le_bytes());
         }
         std::borrow::Cow::Owned(buffer)
     }
@@ -120,11 +128,14 @@ impl Encode for SchemaRegistry {
             offset += 4;
             let deleted_records_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
             offset += 4;
+            let index_registry_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
+            offset += 4;
             tables.insert(
                 fingerprint,
                 TableRegistryPage {
                     pages_list_page,
                     free_segments_page: deleted_records_page,
+                    index_registry_page,
                 },
             );
         }
@@ -132,8 +143,13 @@ impl Encode for SchemaRegistry {
     }
 
     fn size(&self) -> MSize {
-        // 8 bytes for len + (8 + (4 * 2)) bytes for each entry
-        8 + (self.tables.len() as MSize * (4 * 2 + 8))
+        // - 8 bytes for `self.tables.len()`
+        // - for each entry:
+        //  - 8 bytes for the fingerprint
+        //  - 4 bytes for the pages_list_page
+        //  - 4 bytes for the free_segments_page
+        //  - 4 bytes for the index_registry_page
+        8 + (self.tables.len() as MSize * (4 * 3 + 8))
     }
 }
 
@@ -143,12 +159,12 @@ mod tests {
     use candid::CandidType;
     use serde::{Deserialize, Serialize};
     use wasm_dbms_api::prelude::{
-        ColumnDef, DbmsResult, InsertRecord, NoForeignFetcher, TableColumns, TableRecord,
-        UpdateRecord,
+        ColumnDef, DbmsResult, IndexDef, InsertRecord, Int32, NoForeignFetcher, TableColumns,
+        TableRecord, UpdateRecord,
     };
 
     use super::*;
-    use crate::HeapMemoryProvider;
+    use crate::{HeapMemoryProvider, RecordAddress};
 
     fn make_mm() -> MemoryManager<HeapMemoryProvider> {
         MemoryManager::init(HeapMemoryProvider::default())
@@ -220,6 +236,38 @@ mod tests {
 
         assert_eq!(first_page, second_page);
         assert_eq!(registry.tables.len(), 1);
+    }
+
+    #[test]
+    fn test_should_init_index_ledger() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+
+        let pages = registry
+            .register_table::<User>(&mut mm)
+            .expect("failed to register table");
+
+        // check that index ledger is initialized with the correct indexes
+        let mut index_ledger =
+            IndexLedger::load(pages.index_registry_page, &mm).expect("failed to load index ledger");
+
+        // insert an index for id
+        index_ledger
+            .insert(
+                &["id"],
+                Int32::from(1i32),
+                RecordAddress { page: 1, offset: 0 },
+                &mut mm,
+            )
+            .expect("failed to insert index");
+        // search the index
+        let result = index_ledger
+            .search(&["id"], &Int32::from(1i32), &mm)
+            .expect("failed to search index")
+            .get(0)
+            .copied()
+            .expect("no index at 0");
+        assert_eq!(result, RecordAddress { page: 1, offset: 0 });
     }
 
     #[derive(Clone, CandidType)]
@@ -320,6 +368,10 @@ mod tests {
 
         fn primary_key() -> &'static str {
             ""
+        }
+
+        fn indexes() -> &'static [wasm_dbms_api::prelude::IndexDef] {
+            &[]
         }
 
         fn to_values(self) -> Vec<(ColumnDef, wasm_dbms_api::prelude::Value)> {
@@ -440,6 +492,10 @@ mod tests {
             "id"
         }
 
+        fn indexes() -> &'static [wasm_dbms_api::prelude::IndexDef] {
+            &[IndexDef(&["id"])]
+        }
+
         fn to_values(self) -> Vec<(ColumnDef, wasm_dbms_api::prelude::Value)> {
             vec![]
         }
@@ -506,7 +562,7 @@ mod tests {
         registry
             .register_table::<User>(&mut mm)
             .expect("failed to register");
-        // One entry: 8 + (8 + 4 + 4) = 24
-        assert_eq!(registry.size(), 24);
+        // One entry: 8 + (8 + 4 + 4 + 4) = 28
+        assert_eq!(registry.size(), 28);
     }
 }

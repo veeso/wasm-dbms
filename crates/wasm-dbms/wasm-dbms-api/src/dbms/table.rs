@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use self::column_def::{
-    CandidColumnDef, CandidDataTypeKind, CandidForeignKeyDef, ColumnDef, ForeignKeyDef,
+    CandidColumnDef, CandidDataTypeKind, CandidForeignKeyDef, ColumnDef, ForeignKeyDef, IndexDef,
 };
 pub use self::record::{
     InsertRecord, TableColumns, TableRecord, UpdateRecord, ValuesSource, flatten_table_columns,

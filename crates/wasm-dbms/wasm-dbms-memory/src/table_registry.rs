@@ -1,16 +1,20 @@
 // Rust guideline compliant 2026-02-28
 
 mod free_segments_ledger;
+mod index_ledger;
 mod page_ledger;
 mod raw_record;
+mod record_address;
 mod table_reader;
 mod write_at;
 
-use wasm_dbms_api::prelude::{Encode, MemoryResult, Page, PageOffset};
+use wasm_dbms_api::prelude::{Encode, MemoryResult, PageOffset};
 
 use self::free_segments_ledger::FreeSegmentsLedger;
+pub use self::index_ledger::{IndexLedger, IndexTreeWalker};
 use self::page_ledger::PageLedger;
 use self::raw_record::RawRecord;
+pub use self::record_address::RecordAddress;
 pub use self::table_reader::{NextRecord, TableReader};
 use self::write_at::WriteAt;
 use crate::{MemoryAccess, TableRegistryPage, align_up};
@@ -26,6 +30,7 @@ use crate::{MemoryAccess, TableRegistryPage, align_up};
 pub struct TableRegistry {
     free_segments_ledger: FreeSegmentsLedger,
     pub(crate) page_ledger: PageLedger,
+    index_ledger: IndexLedger,
 }
 
 impl TableRegistry {
@@ -34,13 +39,20 @@ impl TableRegistry {
         Ok(Self {
             free_segments_ledger: FreeSegmentsLedger::load(table_pages.free_segments_page, mm)?,
             page_ledger: PageLedger::load(table_pages.pages_list_page, mm)?,
+            index_ledger: IndexLedger::load(table_pages.index_registry_page, mm)?,
         })
     }
 
     /// Inserts a new record into the table registry.
     ///
+    /// Returns the address where the record was inserted, which can be used to read it back or to update/delete it.
+    ///
     /// NOTE: this function does NOT make any logical checks on the record being inserted.
-    pub fn insert<E>(&mut self, record: E, mm: &mut impl MemoryAccess) -> MemoryResult<()>
+    pub fn insert<E>(
+        &mut self,
+        record: E,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<RecordAddress>
     where
         E: Encode,
     {
@@ -54,8 +66,15 @@ impl TableRegistry {
         // write record
         mm.write_at(write_at.page(), aligned_offset, &raw_record)?;
 
+        let pointer = RecordAddress {
+            page: write_at.page(),
+            offset: aligned_offset,
+        };
+
         // commit post-write actions
-        self.post_write(write_at, &raw_record, mm)
+        self.post_write(write_at, &raw_record, mm)?;
+
+        Ok(pointer)
     }
 
     /// Creates a [`TableReader`] to read records from the table registry.
@@ -69,27 +88,38 @@ impl TableRegistry {
         TableReader::new(&self.page_ledger, mm)
     }
 
+    /// Reads a single record at the given address.
+    pub fn read_at<E, MA>(&self, address: RecordAddress, mm: &MA) -> MemoryResult<E>
+    where
+        E: Encode,
+        MA: MemoryAccess,
+    {
+        let raw_record: RawRecord<E> = mm.read_at(address.page, address.offset)?;
+        Ok(raw_record.data)
+    }
+
     /// Deletes a record at the given page and offset.
     ///
     /// The space occupied by the record is marked as free and zeroed.
     pub fn delete(
         &mut self,
         record: impl Encode,
-        page: Page,
-        offset: PageOffset,
+        address: RecordAddress,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
         let raw_record = RawRecord::new(record);
 
         // zero the record in memory
-        mm.zero(page, offset, &raw_record)?;
+        mm.zero(address.page, address.offset, &raw_record)?;
 
         // insert a free segment for the deleted record
         self.free_segments_ledger
-            .insert_free_segment(page, offset, &raw_record, mm)
+            .insert_free_segment(address.page, address.offset, &raw_record, mm)
     }
 
     /// Updates a record at the given page and offset.
+    ///
+    /// The [`RecordAddress`] of the new record is returned, which can be different from the old one if the record was reallocated.
     ///
     /// The logic is the following:
     ///
@@ -99,44 +129,57 @@ impl TableRegistry {
         &mut self,
         new_record: impl Encode,
         old_record: impl Encode,
-        old_page: Page,
-        old_offset: PageOffset,
+        old_address: RecordAddress,
         mm: &mut impl MemoryAccess,
-    ) -> MemoryResult<()> {
+    ) -> MemoryResult<RecordAddress> {
         if new_record.size() == old_record.size() {
-            self.update_in_place(new_record, old_page, old_offset, mm)
+            self.update_in_place(new_record, old_address, mm)
         } else {
-            self.update_by_realloc(new_record, old_record, old_page, old_offset, mm)
+            self.update_by_realloc(new_record, old_record, old_address, mm)
         }
     }
 
+    /// Get a reference to the index ledger, allowing to read the indexes.
+    pub fn index_ledger(&self) -> &IndexLedger {
+        &self.index_ledger
+    }
+
+    /// Get a mutable reference to the index ledger, allowing to modify the indexes.
+    pub fn index_ledger_mut(&mut self) -> &mut IndexLedger {
+        &mut self.index_ledger
+    }
+
     /// Update a [`RawRecord`] in place at the given page and offset.
+    ///
+    /// The [`RecordAddress`] of the record is returned, which is the same as the old one.
     ///
     /// This must be used IF AND ONLY if the new record has the SAME size as the old record.
     fn update_in_place(
         &mut self,
         record: impl Encode,
-        page: Page,
-        offset: PageOffset,
+        address: RecordAddress,
         mm: &mut impl MemoryAccess,
-    ) -> MemoryResult<()> {
+    ) -> MemoryResult<RecordAddress> {
         let raw_record = RawRecord::new(record);
-        mm.write_at(page, offset, &raw_record)
+        mm.write_at(address.page, address.offset, &raw_record)?;
+
+        Ok(address)
     }
 
     /// Updates a record by reallocating it.
     ///
     /// The old record is deleted and the new record is inserted.
+    ///
+    /// The [`RecordAddress`] of the new record is returned, which can be different from the old one.
     fn update_by_realloc(
         &mut self,
         new_record: impl Encode,
         old_record: impl Encode,
-        old_page: Page,
-        old_offset: PageOffset,
+        old_address: RecordAddress,
         mm: &mut impl MemoryAccess,
-    ) -> MemoryResult<()> {
+    ) -> MemoryResult<RecordAddress> {
         // delete old record
-        self.delete(old_record, old_page, old_offset, mm)?;
+        self.delete(old_record, old_address, mm)?;
 
         // insert new record
         self.insert(new_record, mm)
@@ -283,9 +326,11 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
+        let index_registry_page = mm.allocate_page().expect("failed to get page");
         let table_pages = TableRegistryPage {
             pages_list_page: page_ledger_page,
             free_segments_page,
+            index_registry_page,
         };
 
         let registry: MemoryResult<TableRegistry> = TableRegistry::load(table_pages, &mm);
@@ -419,7 +464,11 @@ mod tests {
         let raw_user_size = raw_user.size();
 
         // delete record
-        assert!(registry.delete(record, page, offset, &mut mm).is_ok());
+        assert!(
+            registry
+                .delete(record, RecordAddress { page, offset }, &mut mm)
+                .is_ok()
+        );
 
         // should have been deleted
         let mut reader = registry.read::<User, _>(&mm);
@@ -449,6 +498,57 @@ mod tests {
         mm.read_at_raw(page, offset, &mut buffer)
             .expect("failed to read memory");
         assert!(buffer.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_read_at_returns_record_at_address() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+        let record = User {
+            id: 1,
+            name: "Alice".to_string(),
+            email: "alice@example.com".to_string(),
+            age: 30,
+        };
+
+        let address = registry
+            .insert(record.clone(), &mut mm)
+            .expect("failed to insert record");
+
+        let stored: User = registry
+            .read_at(address, &mm)
+            .expect("failed to read record");
+        assert_eq!(stored, record);
+    }
+
+    #[test]
+    fn test_read_at_after_update_returns_updated_record() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+        let old_record = User {
+            id: 1,
+            name: "Alice".to_string(),
+            email: "alice@example.com".to_string(),
+            age: 30,
+        };
+        let new_record = User {
+            id: 1,
+            name: "Alice Updated".to_string(),
+            email: "alice.updated@example.com".to_string(),
+            age: 31,
+        };
+
+        let old_address = registry
+            .insert(old_record.clone(), &mut mm)
+            .expect("failed to insert record");
+        let new_address = registry
+            .update(new_record.clone(), old_record, old_address, &mut mm)
+            .expect("failed to update record");
+
+        let stored: User = registry
+            .read_at(new_address, &mm)
+            .expect("failed to read updated record");
+        assert_eq!(stored, new_record);
     }
 
     #[test]
@@ -484,17 +584,16 @@ mod tests {
         let offset = next_record.offset;
 
         // update in place
-        assert!(
-            registry
-                .update(
-                    new_record.clone(),
-                    next_record.record.clone(),
-                    page,
-                    offset,
-                    &mut mm,
-                )
-                .is_ok()
-        );
+        let old_address = RecordAddress { page, offset };
+        let new_location = registry
+            .update(
+                new_record.clone(),
+                next_record.record.clone(),
+                old_address,
+                &mut mm,
+            )
+            .expect("failed to update record");
+        assert_eq!(new_location, old_address); // should be same address
 
         // read back the record
         let mut reader = registry.read::<User, _>(&mm);
@@ -552,17 +651,16 @@ mod tests {
         let offset = old_record_from_db.offset;
 
         // update by reallocating
-        assert!(
-            registry
-                .update(
-                    new_record.clone(),
-                    old_record_from_db.record.clone(),
-                    page,
-                    offset,
-                    &mut mm,
-                )
-                .is_ok()
-        );
+        let old_address = RecordAddress { page, offset };
+        let new_location = registry
+            .update(
+                new_record.clone(),
+                old_record_from_db.record.clone(),
+                old_address,
+                &mut mm,
+            )
+            .expect("failed to update record");
+        assert_ne!(new_location, old_address); // should be different page
 
         // read back the record
         let mut reader = registry.read::<User, _>(&mm);
@@ -616,8 +714,10 @@ mod tests {
                     registry
                         .delete(
                             record.clone(),
-                            next_record.page,
-                            next_record.offset,
+                            RecordAddress {
+                                page: next_record.page,
+                                offset: next_record.offset,
+                            },
                             &mut mm,
                         )
                         .expect("failed to delete");
@@ -644,8 +744,10 @@ mod tests {
                     registry
                         .delete(
                             record.clone(),
-                            next_record.page,
-                            next_record.offset,
+                            RecordAddress {
+                                page: next_record.page,
+                                offset: next_record.offset,
+                            },
                             &mut mm,
                         )
                         .expect("failed to delete");
@@ -698,8 +800,10 @@ mod tests {
         registry
             .delete(
                 next_record.record,
-                next_record.page,
-                next_record.offset,
+                RecordAddress {
+                    page: next_record.page,
+                    offset: next_record.offset,
+                },
                 &mut mm,
             )
             .expect("failed to delete");
@@ -753,9 +857,11 @@ mod tests {
     fn registry(mm: &mut MemoryManager<HeapMemoryProvider>) -> TableRegistry {
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
+        let index_registry_page = mm.allocate_page().expect("failed to get page");
         let table_pages = TableRegistryPage {
             pages_list_page: page_ledger_page,
             free_segments_page,
+            index_registry_page,
         };
 
         TableRegistry::load(table_pages, mm).expect("failed to load")

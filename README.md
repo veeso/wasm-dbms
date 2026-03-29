@@ -209,7 +209,7 @@ canister.
 - [x] JOIN operations between tables
 - [x] Custom data types
 - [x] Runtime-agnostic core (wasm-dbms) for any WASM runtime
-- [ ] Indexes for faster queries
+- [x] Indexes for faster queries
 - [ ] Migrations to update the database schema on canister upgrades
 - [ ] SQL query support
 

@@ -11,6 +11,7 @@ use wasm_dbms_api::prelude::{ColumnDef, DbmsError, DbmsResult, QueryError, Table
 use wasm_dbms_memory::prelude::{MemoryAccess, TableReader};
 
 pub use self::reader::DatabaseOverlayReader;
+pub use self::table::IndexOverlay;
 pub(crate) use self::table::TableOverlay;
 
 /// Manages uncommitted changes during a transaction.
@@ -33,7 +34,10 @@ impl DatabaseOverlay {
         MA: MemoryAccess,
     {
         let table_name = T::table_name();
-        let table_overlay = self.tables.entry(table_name.to_string()).or_default();
+        let table_overlay = self
+            .tables
+            .entry(table_name.to_string())
+            .or_insert_with(|| TableOverlay::new(T::indexes()));
         DatabaseOverlayReader::new(table_overlay, table_reader)
     }
 
@@ -45,30 +49,57 @@ impl DatabaseOverlay {
         let table_name = T::table_name();
         let pk = T::primary_key();
         let pk = Self::primary_key(pk, &values)?;
-        let overlay = self.tables.entry(table_name.to_string()).or_default();
+        let overlay = self
+            .tables
+            .entry(table_name.to_string())
+            .or_insert_with(|| TableOverlay::new(T::indexes()));
         overlay.insert(pk, values);
 
         Ok(())
     }
 
     /// Updates a record in the overlay for the specified table.
-    pub fn update<T>(&mut self, pk: Value, updates: Vec<(&'static str, Value)>)
-    where
+    ///
+    /// `current_row` is the full row before the update, used to track old indexed values.
+    pub fn update<T>(
+        &mut self,
+        pk: Value,
+        updates: Vec<(&'static str, Value)>,
+        current_row: &[(ColumnDef, Value)],
+    ) where
         T: TableSchema,
     {
         let table_name = T::table_name();
-        let overlay = self.tables.entry(table_name.to_string()).or_default();
-        overlay.update(pk, updates);
+        let overlay = self
+            .tables
+            .entry(table_name.to_string())
+            .or_insert_with(|| TableOverlay::new(T::indexes()));
+        overlay.update(pk, updates, current_row);
     }
 
     /// Deletes a record in the overlay for the specified table.
-    pub fn delete<T>(&mut self, pk: Value)
+    ///
+    /// `current_row` is the full row being deleted, used to track removed indexed values.
+    pub fn delete<T>(&mut self, pk: Value, current_row: &[(ColumnDef, Value)])
     where
         T: TableSchema,
     {
         let table_name = T::table_name();
-        let overlay = self.tables.entry(table_name.to_string()).or_default();
-        overlay.delete(pk);
+        let overlay = self
+            .tables
+            .entry(table_name.to_string())
+            .or_insert_with(|| TableOverlay::new(T::indexes()));
+        overlay.delete(pk, current_row);
+    }
+
+    /// Retrieves the index overlay for a given table, if it exists.
+    pub fn index_overlay(&self, table: &str) -> Option<&IndexOverlay> {
+        self.tables.get(table).map(|t| &t.index_overlay)
+    }
+
+    /// Retrieves the table overlay for a given table, if it exists.
+    pub(crate) fn table_overlay(&self, table: &str) -> Option<&TableOverlay> {
+        self.tables.get(table)
     }
 
     fn primary_key(pk: &'static str, values: &[(ColumnDef, Value)]) -> DbmsResult<Value> {

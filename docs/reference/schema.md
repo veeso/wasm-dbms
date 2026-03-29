@@ -7,6 +7,7 @@
     - [Table Attribute](#table-attribute)
   - [Column Attributes](#column-attributes)
     - [Primary Key](#primary-key)
+    - [Index](#index)
     - [Foreign Key](#foreign-key)
     - [Custom Type](#custom-type)
     - [Sanitizer](#sanitizer)
@@ -115,6 +116,59 @@ pub struct Order {
     pub id: Uuid,  // UUID primary key
     pub total: Decimal,
 }
+```
+
+### Index
+
+Define indexes on columns for faster lookups:
+
+```rust
+#[derive(Table, ...)]
+#[table = "users"]
+pub struct User {
+    #[primary_key]
+    pub id: Uint32,
+
+    #[index]
+    pub email: Text,  // Single-column index
+
+    pub name: Text,
+}
+```
+
+**The primary key is always an implicit index** -- you don't need to add `#[index]` to it.
+
+**Composite indexes:**
+
+Use `group` to group multiple fields into a single composite index:
+
+```rust
+#[derive(Table, ...)]
+#[table = "products"]
+pub struct Product {
+    #[primary_key]
+    pub id: Uint32,
+
+    #[index(group = "category_brand")]
+    pub category: Text,
+
+    #[index(group = "category_brand")]
+    pub brand: Text,
+
+    pub name: Text,
+}
+```
+
+Fields sharing the same `group` name form a composite index, with columns ordered by field declaration order. In the example above, the composite index covers `(category, brand)`.
+
+**Syntax variants:**
+
+```rust
+// Single-column index
+#[index]
+
+// Composite index (group multiple fields by name)
+#[index(group = "group_name")]
 ```
 
 ### Foreign Key
@@ -414,6 +468,7 @@ pub struct User {
     #[validate(MaxStrlenValidator(100))]
     pub name: Text,
 
+    #[index]
     #[sanitizer(TrimSanitizer)]
     #[sanitizer(LowerCaseSanitizer)]
     #[validate(EmailValidator)]
@@ -437,11 +492,13 @@ pub struct Post {
 
     pub published: Boolean,
 
+    #[index(group = "author_date")]
     #[foreign_key(entity = "User", table = "users", column = "id")]
     pub author_id: Uint32,
 
     pub metadata: Nullable<Json>,
 
+    #[index(group = "author_date")]
     pub created_at: DateTime,
 }
 

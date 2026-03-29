@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream as TokenStream2;
 use syn::Ident;
 
-use crate::table::metadata::{Field, Sanitizer, TableMetadata};
+use crate::table::metadata::{Field, Index, Sanitizer, TableMetadata};
 
 /// Generate the table schema implementation for `struct_name` using the provided `data` and `metadata`.
 pub fn generate_table_schema(
@@ -16,6 +16,7 @@ pub fn generate_table_schema(
     let table_name = metadata.name.to_string();
     let primary_key_str = primary_key.to_string();
     let columns_def = column_def(metadata)?;
+    let indexes_def = indexes_def(&metadata.indexes);
     let values = to_values(&metadata.fields);
     let sanitizers = sanitizers(&metadata.fields);
     let validators = validators(&metadata.fields);
@@ -39,6 +40,10 @@ pub fn generate_table_schema(
                 #columns_def
             }
 
+            fn indexes() -> &'static [::wasm_dbms_api::prelude::IndexDef] {
+                #indexes_def
+            }
+
             fn to_values(self) -> Vec<(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)> {
                 #values
             }
@@ -54,6 +59,23 @@ pub fn generate_table_schema(
             }
         }
     })
+}
+
+/// Generate the static `&[IndexDef]` slice for the `indexes()` method.
+fn indexes_def(indexes: &[Index]) -> TokenStream2 {
+    let entries: Vec<_> = indexes
+        .iter()
+        .map(|index| {
+            let col_strs: Vec<_> = index.columns.iter().map(|c| c.to_string()).collect();
+            quote::quote! {
+                ::wasm_dbms_api::prelude::IndexDef(&[#(#col_strs),*])
+            }
+        })
+        .collect();
+
+    quote::quote! {
+        &[#(#entries),*]
+    }
 }
 
 fn column_def(metadata: &TableMetadata) -> syn::Result<TokenStream2> {

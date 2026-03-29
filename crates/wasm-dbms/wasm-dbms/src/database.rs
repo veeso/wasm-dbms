@@ -3,6 +3,9 @@
 
 //! Core DBMS database struct providing CRUD and transaction operations.
 
+mod filter_analyzer;
+mod index_reader;
+
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
@@ -12,10 +15,13 @@ use wasm_dbms_api::prelude::{
     TableColumns, TableError, TableRecord, TableSchema, TransactionError, TransactionId,
     UpdateRecord, Value, ValuesSource,
 };
+use wasm_dbms_memory::RecordAddress;
 use wasm_dbms_memory::prelude::{
-    AccessControl, AccessControlList, MemoryProvider, NextRecord, TableRegistry,
+    AccessControl, AccessControlList, MemoryAccess, MemoryProvider, NextRecord, TableRegistry,
 };
 
+use self::filter_analyzer::{IndexPlan, analyze_filter};
+use self::index_reader::{IndexReader, IndexSearchResult};
 use crate::context::DbmsContext;
 use crate::schema::DatabaseSchema;
 use crate::transaction::journal::{Journal, JournaledWriter};
@@ -366,27 +372,36 @@ where
             .map(|(_, cols)| cols)
     }
 
-    /// Retrieves existing primary keys matching a filter.
-    fn existing_primary_keys_for_filter<T>(&self, filter: Option<Filter>) -> DbmsResult<Vec<Value>>
+    /// Retrieves existing rows matching a filter, returning `(primary_key, full_row)` pairs.
+    #[expect(
+        clippy::type_complexity,
+        reason = "complex return type is necessary for returning both PK and full row data"
+    )]
+    fn existing_rows_for_filter<T>(
+        &self,
+        filter: Option<Filter>,
+    ) -> DbmsResult<Vec<(Value, Vec<(ColumnDef, Value)>)>>
     where
         T: TableSchema,
     {
         let pk = T::primary_key();
-        let query = Query::builder().field(pk).filter(filter).build();
-        let fields = self.select::<T>(query)?;
-        let pks = fields
+        let query = Query::builder().filter(filter).build();
+        let records = self.select::<T>(query)?;
+        let rows = records
             .into_iter()
             .map(|record| {
-                record
-                    .to_values()
-                    .into_iter()
-                    .find(|(col_def, _value)| col_def.name == pk)
+                let values = record.to_values();
+                let pk_value = values
+                    .iter()
+                    .find(|(col_def, _)| col_def.name == pk)
                     .expect("primary key not found")
                     .1
+                    .clone();
+                (pk_value, values)
             })
-            .collect::<Vec<Value>>();
+            .collect();
 
-        Ok(pks)
+        Ok(rows)
     }
 
     /// Loads the table registry for a given table schema.
@@ -432,6 +447,152 @@ where
         });
     }
 
+    fn execute_index_plan<MA>(
+        &self,
+        reader: &IndexReader<'_>,
+        plan: &IndexPlan,
+        mm: &MA,
+    ) -> DbmsResult<IndexSearchResult>
+    where
+        MA: MemoryAccess,
+    {
+        let columns = [plan.column()];
+        match plan {
+            IndexPlan::Eq { value, .. } => {
+                let key = [value.clone()];
+                reader
+                    .search_eq(&columns, &key, mm)
+                    .map_err(DbmsError::from)
+            }
+            IndexPlan::Range { start, end, .. } => {
+                let start_key = start.as_ref().map(|value| vec![value.clone()]);
+                let end_key = end.as_ref().map(|value| vec![value.clone()]);
+                reader
+                    .search_range(&columns, start_key.as_deref(), end_key.as_deref(), mm)
+                    .map_err(DbmsError::from)
+            }
+            IndexPlan::In { values, .. } => {
+                let keys: Vec<Vec<Value>> =
+                    values.iter().cloned().map(|value| vec![value]).collect();
+                reader
+                    .search_in(&columns, &keys, mm)
+                    .map_err(DbmsError::from)
+            }
+        }
+    }
+
+    #[expect(
+        clippy::type_complexity,
+        reason = "complex return type is necessary for returning addresses and overlay PKs"
+    )]
+    fn try_index_select<T>(
+        &self,
+        query: &Query,
+        table_registry: &TableRegistry,
+        table_overlay: &DatabaseOverlay,
+    ) -> DbmsResult<Option<Vec<Vec<(ColumnDef, Value)>>>>
+    where
+        T: TableSchema,
+    {
+        let Some(filter) = &query.filter else {
+            return Ok(None);
+        };
+
+        let Some(analyzed) = analyze_filter(filter, T::indexes()) else {
+            return Ok(None);
+        };
+
+        let mm = self.ctx.mm.borrow();
+        let reader = IndexReader::new(
+            table_registry.index_ledger(),
+            table_overlay.index_overlay(T::table_name()),
+        );
+        let search_result = self.execute_index_plan(&reader, &analyzed.plan, &*mm)?;
+
+        let mut indexed_rows = Vec::new();
+        let pk_name = T::primary_key();
+
+        for address in &search_result.addresses {
+            let record: T = table_registry
+                .read_at(*address, &*mm)
+                .map_err(DbmsError::from)?;
+            let values = record.to_values();
+            let Some(pk) = values
+                .iter()
+                .find(|(column, _)| column.name == pk_name)
+                .map(|(_, value)| value)
+            else {
+                continue;
+            };
+
+            if search_result.removed_pks.contains(pk) || search_result.overlay_pks.contains(pk) {
+                continue;
+            }
+
+            if let Some(remaining_filter) = &analyzed.remaining_filter
+                && !self.record_matches_filter(&values, remaining_filter)?
+            {
+                continue;
+            }
+
+            indexed_rows.push(values);
+        }
+
+        if let Some(overlay) = table_overlay.table_overlay(T::table_name()) {
+            let mut pending_overlay_pks = search_result.overlay_pks.clone();
+
+            for row in overlay.iter_inserted() {
+                let Some(pk) = row
+                    .iter()
+                    .find(|(column, _)| column.name == pk_name)
+                    .map(|(_, value)| value)
+                else {
+                    continue;
+                };
+
+                if !pending_overlay_pks.remove(pk) {
+                    continue;
+                }
+                if let Some(remaining_filter) = &analyzed.remaining_filter
+                    && !self.record_matches_filter(&row, remaining_filter)?
+                {
+                    continue;
+                }
+
+                indexed_rows.push(row);
+            }
+
+            if !pending_overlay_pks.is_empty() {
+                let pk_reader = IndexReader::new(table_registry.index_ledger(), None);
+                let pk_columns = [T::primary_key()];
+
+                for pk in pending_overlay_pks {
+                    let pk_key = [pk];
+                    let pk_lookup = pk_reader.search_eq(&pk_columns, &pk_key, &*mm)?;
+                    for address in pk_lookup.addresses {
+                        let record: T = table_registry
+                            .read_at(address, &*mm)
+                            .map_err(DbmsError::from)?;
+                        let values = record.to_values();
+                        let Some(patched_values) = overlay.patch_row(values) else {
+                            continue;
+                        };
+
+                        if let Some(remaining_filter) = &analyzed.remaining_filter
+                            && !self.record_matches_filter(&patched_values, remaining_filter)?
+                        {
+                            continue;
+                        }
+
+                        indexed_rows.push(patched_values);
+                    }
+                }
+            }
+        }
+
+        Ok(Some(indexed_rows))
+    }
+
     /// Core select logic returning intermediate `TableColumns`.
     #[doc(hidden)]
     pub fn select_columns<T>(&self, query: Query) -> DbmsResult<Vec<TableColumns>>
@@ -448,7 +609,20 @@ where
         let mut results = Vec::with_capacity(query.limit.unwrap_or(DEFAULT_SELECT_CAPACITY));
         let mut count = 0;
 
+        if let Some(indexed_rows) =
+            self.try_index_select::<T>(&query, &table_registry, &table_overlay)?
         {
+            for values in indexed_rows {
+                count += 1;
+                if query.offset.is_some_and(|offset| count <= offset) {
+                    continue;
+                }
+                results.push(vec![(ValuesSource::This, values)]);
+                if query.limit.is_some_and(|limit| results.len() >= limit) {
+                    break;
+                }
+            }
+        } else {
             let mm = self.ctx.mm.borrow();
             let table_reader = table_registry.read::<T, _>(&*mm);
             let mut table_reader = table_overlay.reader(table_reader);
@@ -566,6 +740,41 @@ where
         T: TableSchema,
     {
         let mm = self.ctx.mm.borrow();
+
+        // `collect_matching_records` is only used by the non-transactional update/delete paths.
+        // Transactional mutations first resolve rows via `existing_rows_for_filter`, which reads
+        // through `select()` and therefore includes the overlay. Using `overlay = None` here is
+        // intentional because the atomic write path is operating on committed storage only.
+        if let Some(filter) = filter
+            && let Some(analyzed) = analyze_filter(filter, T::indexes())
+        {
+            let reader = IndexReader::new(table_registry.index_ledger(), None);
+            let search_result = self.execute_index_plan(&reader, &analyzed.plan, &*mm)?;
+
+            let mut records = Vec::new();
+            for address in search_result.addresses {
+                let record: T = table_registry
+                    .read_at(address, &*mm)
+                    .map_err(DbmsError::from)?;
+                let record_values = record.clone().to_values();
+                if let Some(remaining_filter) = &analyzed.remaining_filter
+                    && !self.record_matches_filter(&record_values, remaining_filter)?
+                {
+                    continue;
+                }
+                records.push((
+                    NextRecord {
+                        record,
+                        page: address.page,
+                        offset: address.offset,
+                    },
+                    record_values,
+                ));
+            }
+
+            return Ok(records);
+        }
+
         let mut table_reader = table_registry.read::<T, _>(&*mm);
         let mut records = vec![];
         while let Some(values) = table_reader.try_next()? {
@@ -578,6 +787,81 @@ where
             records.push((values, record_values));
         }
         Ok(records)
+    }
+
+    /// For each indexed column for the table, inserts the index for the given record address.
+    fn insert_index<T>(
+        &self,
+        table_registry: &mut TableRegistry,
+        record_address: RecordAddress,
+        values: &[(ColumnDef, Value)],
+        mm: &mut impl wasm_dbms_memory::MemoryAccess,
+    ) -> DbmsResult<()>
+    where
+        T: TableSchema,
+    {
+        let index_ledger = table_registry.index_ledger_mut();
+        for columns in T::indexes().iter().map(|index| index.columns()) {
+            let key = index_key(columns, values);
+            index_ledger.insert(columns, key, record_address, mm)?;
+        }
+
+        Ok(())
+    }
+
+    /// For each indexed column for the table, deletes the index for the given record address.
+    fn delete_index<T>(
+        &self,
+        table_registry: &mut TableRegistry,
+        record_address: RecordAddress,
+        values: &[(ColumnDef, Value)],
+        mm: &mut impl wasm_dbms_memory::MemoryAccess,
+    ) -> DbmsResult<()>
+    where
+        T: TableSchema,
+    {
+        let index_ledger = table_registry.index_ledger_mut();
+        for columns in T::indexes().iter().map(|index| index.columns()) {
+            let key = index_key(columns, values);
+            index_ledger.delete(columns, &key, record_address, mm)?;
+        }
+        Ok(())
+    }
+
+    /// For each indexed column for the table, updates the index for the given record address.
+    ///
+    /// When an indexed column's value changed, the old key is deleted and the new key is inserted.
+    /// When only the record address moved (same key), the pointer is updated in place.
+    fn update_index<T>(
+        &self,
+        table_registry: &mut TableRegistry,
+        old_record_address: RecordAddress,
+        new_record_address: RecordAddress,
+        old_values: &[(ColumnDef, Value)],
+        new_values: &[(ColumnDef, Value)],
+        mm: &mut impl wasm_dbms_memory::MemoryAccess,
+    ) -> DbmsResult<()>
+    where
+        T: TableSchema,
+    {
+        let index_ledger = table_registry.index_ledger_mut();
+        for columns in T::indexes().iter().map(|index| index.columns()) {
+            let old_key = index_key(columns, old_values);
+            let new_key = index_key(columns, new_values);
+            if old_key == new_key {
+                index_ledger.update(
+                    columns,
+                    &new_key,
+                    old_record_address,
+                    new_record_address,
+                    mm,
+                )?;
+            } else {
+                index_ledger.delete(columns, &old_key, old_record_address, mm)?;
+                index_ledger.insert(columns, new_key, new_record_address, mm)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -605,6 +889,22 @@ where
 {
     let record = T::Insert::from_values(&values)?.into_record();
     Ok(record)
+}
+
+/// Builds the index key for the given columns by extracting values from the record.
+///
+/// Columns not found in `values` default to [`Value::Null`].
+fn index_key(columns: &[&str], values: &[(ColumnDef, Value)]) -> Vec<Value> {
+    columns
+        .iter()
+        .map(|col| {
+            values
+                .iter()
+                .find(|(cd, _)| cd.name == *col)
+                .map(|(_, v)| v.clone())
+                .unwrap_or(Value::Null)
+        })
+        .collect()
 }
 
 impl<M, A> Database for WasmDbmsDatabase<'_, M, A>
@@ -643,14 +943,22 @@ where
                 let mut table_registry = db.load_table_registry::<T>()?;
                 let record = T::Insert::from_values(&sanitized_values)?;
                 let mut mm = db.ctx.mm.borrow_mut();
+                // update journal with the insert operation before mutating memory
                 let mut journal_ref = db.ctx.journal.borrow_mut();
                 let journal = journal_ref
                     .as_mut()
                     .expect("journal must be active inside atomic");
                 let mut writer = JournaledWriter::new(&mut *mm, journal);
-                table_registry
+                // insert the record in the table registry, and eventually update the indexes
+                let record_address = table_registry
                     .insert(record.into_record(), &mut writer)
                     .map_err(DbmsError::from)?;
+                self.insert_index::<T>(
+                    &mut table_registry,
+                    record_address,
+                    &sanitized_values,
+                    &mut writer,
+                )?;
                 Ok(())
             })?;
         }
@@ -665,9 +973,9 @@ where
     {
         let filter = patch.where_clause().clone();
         if self.transaction.is_some() {
-            let pks = self.existing_primary_keys_for_filter::<T>(filter.clone())?;
-            let count = pks.len() as u64;
-            self.with_transaction_mut(|tx| tx.update::<T>(patch, filter, pks))?;
+            let rows = self.existing_rows_for_filter::<T>(filter.clone())?;
+            let count = rows.len() as u64;
+            self.with_transaction_mut(|tx| tx.update::<T>(patch, filter, rows))?;
 
             return Ok(count);
         }
@@ -697,6 +1005,7 @@ where
                     .clone();
 
                 let previous_record = values_to_schema_entity::<T>(record_values.clone())?;
+                let old_values_for_index = record_values.clone();
                 let mut record_values = record_values;
 
                 for (patch_col_def, patch_value) in &patch {
@@ -714,23 +1023,29 @@ where
                     &record_values,
                     current_pk_value.clone(),
                 )?;
-                let updated_record = values_to_schema_entity::<T>(record_values)?;
+                let updated_record = values_to_schema_entity::<T>(record_values.clone())?;
                 {
                     let mut mm = db.ctx.mm.borrow_mut();
+                    // update journal with the update operation before mutating memory
                     let mut journal_ref = db.ctx.journal.borrow_mut();
                     let journal = journal_ref
                         .as_mut()
                         .expect("journal must be active inside atomic");
                     let mut writer = JournaledWriter::new(&mut *mm, journal);
-                    table_registry
-                        .update(
-                            updated_record,
-                            previous_record,
-                            record.page,
-                            record.offset,
-                            &mut writer,
-                        )
+                    // update table registry
+                    let old_address = RecordAddress::new(record.page, record.offset);
+                    let new_address = table_registry
+                        .update(updated_record, previous_record, old_address, &mut writer)
                         .map_err(DbmsError::from)?;
+                    // update indexes if needed
+                    self.update_index::<T>(
+                        &mut table_registry,
+                        old_address,
+                        new_address,
+                        &old_values_for_index,
+                        &record_values,
+                        &mut writer,
+                    )?;
                 }
                 count += 1;
 
@@ -753,10 +1068,10 @@ where
         T: TableSchema,
     {
         if self.transaction.is_some() {
-            let pks = self.existing_primary_keys_for_filter::<T>(filter.clone())?;
-            let count = pks.len() as u64;
+            let rows = self.existing_rows_for_filter::<T>(filter.clone())?;
+            let count = rows.len() as u64;
 
-            self.with_transaction_mut(|tx| tx.delete::<T>(behaviour, filter, pks))?;
+            self.with_transaction_mut(|tx| tx.delete::<T>(behaviour, filter, rows))?;
 
             return Ok(count);
         }
@@ -786,10 +1101,13 @@ where
                 let journal = journal_ref
                     .as_mut()
                     .expect("journal must be active inside atomic");
+                // write table and index deletions to the journal before mutating memory
                 let mut writer = JournaledWriter::new(&mut *mm, journal);
+                let address = RecordAddress::new(record.page, record.offset);
                 table_registry
-                    .delete(record.record, record.page, record.offset, &mut writer)
+                    .delete(record.record, address, &mut writer)
                     .map_err(DbmsError::from)?;
+                self.delete_index::<T>(&mut table_registry, address, &record_values, &mut writer)?;
             }
 
             Ok(count)
@@ -860,402 +1178,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-
-    use std::cmp::Ordering;
-
-    use wasm_dbms_api::prelude::{
-        Database as _, DeleteBehavior, Filter, InsertRecord as _, OrderDirection, Query,
-        TableSchema as _, Text, Uint32, UpdateRecord as _, Value,
-    };
-    use wasm_dbms_macros::{DatabaseSchema, Table};
-    use wasm_dbms_memory::prelude::HeapMemoryProvider;
-
-    use super::sort_values_with_direction;
-    use crate::prelude::{DbmsContext, WasmDbmsDatabase};
-    use crate::schema::DatabaseSchema as _;
-
-    #[derive(Debug, Table, Clone, PartialEq, Eq)]
-    #[table = "users"]
-    pub struct User {
-        #[primary_key]
-        pub id: Uint32,
-        pub name: Text,
-    }
-
-    #[derive(Debug, Table, Clone, PartialEq, Eq)]
-    #[table = "posts"]
-    pub struct Post {
-        #[primary_key]
-        pub id: Uint32,
-        pub title: Text,
-        #[foreign_key(entity = "User", table = "users", column = "id")]
-        pub user_id: Uint32,
-    }
-
-    #[derive(DatabaseSchema)]
-    #[tables(User = "users", Post = "posts")]
-    pub struct TestSchema;
-
-    fn setup() -> DbmsContext<HeapMemoryProvider> {
-        let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        TestSchema::register_tables(&ctx).unwrap();
-        ctx
-    }
-
-    fn insert_user(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>, id: u32, name: &str) {
-        let insert = UserInsertRequest::from_values(&[
-            (User::columns()[0], Value::Uint32(Uint32(id))),
-            (User::columns()[1], Value::Text(Text(name.to_string()))),
-        ])
-        .unwrap();
-        db.insert::<User>(insert).unwrap();
-    }
-
-    fn insert_post(
-        db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
-        id: u32,
-        title: &str,
-        user_id: u32,
-    ) {
-        let insert = PostInsertRequest::from_values(&[
-            (Post::columns()[0], Value::Uint32(Uint32(id))),
-            (Post::columns()[1], Value::Text(Text(title.to_string()))),
-            (Post::columns()[2], Value::Uint32(Uint32(user_id))),
-        ])
-        .unwrap();
-        db.insert::<Post>(insert).unwrap();
-    }
-
-    // -- sort_values_with_direction tests --
-
-    #[test]
-    fn test_sort_values_ascending() {
-        let a = Value::Uint32(Uint32(1));
-        let b = Value::Uint32(Uint32(2));
-        assert_eq!(
-            sort_values_with_direction(Some(&a), Some(&b), OrderDirection::Ascending),
-            Ordering::Less
-        );
-    }
-
-    #[test]
-    fn test_sort_values_descending() {
-        let a = Value::Uint32(Uint32(1));
-        let b = Value::Uint32(Uint32(2));
-        assert_eq!(
-            sort_values_with_direction(Some(&a), Some(&b), OrderDirection::Descending),
-            Ordering::Greater
-        );
-    }
-
-    #[test]
-    fn test_sort_values_some_none() {
-        let a = Value::Uint32(Uint32(1));
-        assert_eq!(
-            sort_values_with_direction(Some(&a), None, OrderDirection::Ascending),
-            Ordering::Greater
-        );
-        assert_eq!(
-            sort_values_with_direction(None, Some(&a), OrderDirection::Ascending),
-            Ordering::Less
-        );
-    }
-
-    #[test]
-    fn test_sort_values_none_none() {
-        assert_eq!(
-            sort_values_with_direction(None, None, OrderDirection::Ascending),
-            Ordering::Equal
-        );
-    }
-
-    // -- select with ordering --
-
-    #[test]
-    fn test_select_with_order_by_ascending() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 3, "charlie");
-        insert_user(&db, 1, "alice");
-        insert_user(&db, 2, "bob");
-
-        let rows = db
-            .select::<User>(Query::builder().all().order_by_asc("name").build())
-            .unwrap();
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].name, Some(Text("alice".to_string())));
-        assert_eq!(rows[1].name, Some(Text("bob".to_string())));
-        assert_eq!(rows[2].name, Some(Text("charlie".to_string())));
-    }
-
-    #[test]
-    fn test_select_with_order_by_descending() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_user(&db, 2, "bob");
-        insert_user(&db, 3, "charlie");
-
-        let rows = db
-            .select::<User>(Query::builder().all().order_by_desc("name").build())
-            .unwrap();
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].name, Some(Text("charlie".to_string())));
-        assert_eq!(rows[1].name, Some(Text("bob".to_string())));
-        assert_eq!(rows[2].name, Some(Text("alice".to_string())));
-    }
-
-    // -- select with offset and limit --
-
-    #[test]
-    fn test_select_with_limit() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_user(&db, 2, "bob");
-        insert_user(&db, 3, "charlie");
-
-        let rows = db
-            .select::<User>(Query::builder().all().limit(2).build())
-            .unwrap();
-        assert_eq!(rows.len(), 2);
-    }
-
-    #[test]
-    fn test_select_with_offset() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_user(&db, 2, "bob");
-        insert_user(&db, 3, "charlie");
-
-        let rows = db
-            .select::<User>(Query::builder().all().offset(1).build())
-            .unwrap();
-        assert_eq!(rows.len(), 2);
-    }
-
-    #[test]
-    fn test_select_with_offset_and_limit() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_user(&db, 2, "bob");
-        insert_user(&db, 3, "charlie");
-
-        let rows = db
-            .select::<User>(Query::builder().all().offset(1).limit(1).build())
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-    }
-
-    // -- select with filter --
-
-    #[test]
-    fn test_select_with_filter() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_user(&db, 2, "bob");
-
-        let rows = db
-            .select::<User>(
-                Query::builder()
-                    .all()
-                    .and_where(Filter::eq("name", Value::Text(Text("alice".to_string()))))
-                    .build(),
-            )
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].name, Some(Text("alice".to_string())));
-    }
-
-    // -- select with column selection --
-
-    #[test]
-    fn test_select_with_column_selection() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-
-        let rows = TestSchema
-            .select(&db, "users", Query::builder().field("name").build())
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-        // Should only have the "name" column
-        assert_eq!(rows[0].len(), 1);
-        assert_eq!(rows[0][0].0.name, "name");
-    }
-
-    // -- update operations --
-
-    #[test]
-    fn test_update_record() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-
-        let patch = UserUpdateRequest::from_values(
-            &[(User::columns()[1], Value::Text(Text("alicia".to_string())))],
-            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-        );
-        let count = db.update::<User>(patch).unwrap();
-        assert_eq!(count, 1);
-
-        let rows = db.select::<User>(Query::builder().build()).unwrap();
-        assert_eq!(rows[0].name, Some(Text("alicia".to_string())));
-    }
-
-    #[test]
-    fn test_update_no_matching_records() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-
-        let patch = UserUpdateRequest::from_values(
-            &[(User::columns()[1], Value::Text(Text("bob".to_string())))],
-            Some(Filter::eq("id", Value::Uint32(Uint32(999)))),
-        );
-        let count = db.update::<User>(patch).unwrap();
-        assert_eq!(count, 0);
-    }
-
-    // -- delete operations --
-
-    #[test]
-    fn test_delete_with_filter() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_user(&db, 2, "bob");
-
-        let count = db
-            .delete::<User>(
-                DeleteBehavior::Restrict,
-                Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-
-        let rows = db.select::<User>(Query::builder().build()).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].id, Some(Uint32(2)));
-    }
-
-    #[test]
-    fn test_delete_restrict_with_fk_reference_fails() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_post(&db, 10, "post1", 1);
-
-        let result = db.delete::<User>(DeleteBehavior::Restrict, None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_delete_cascade_removes_referencing_records() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_post(&db, 10, "post1", 1);
-
-        let count = db.delete::<User>(DeleteBehavior::Cascade, None).unwrap();
-        // 1 user + 1 cascaded post
-        assert_eq!(count, 2);
-
-        let users = db.select::<User>(Query::builder().build()).unwrap();
-        assert!(users.is_empty());
-        let posts = db.select::<Post>(Query::builder().build()).unwrap();
-        assert!(posts.is_empty());
-    }
-
-    // -- commit without transaction --
-
-    #[test]
-    fn test_commit_without_transaction_returns_error() {
-        let ctx = setup();
-        let mut db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        let result = db.commit();
-        assert!(result.is_err());
-    }
-
-    // -- transaction commit with update --
-
-    #[test]
-    fn test_transaction_update_and_commit() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-
-        let owner = vec![1, 2, 3];
-        let tx_id = ctx.begin_transaction(owner);
-        let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
-
-        let patch = UserUpdateRequest::from_values(
-            &[(User::columns()[1], Value::Text(Text("alicia".to_string())))],
-            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-        );
-        db.update::<User>(patch).unwrap();
-        db.commit().unwrap();
-
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        let rows = db.select::<User>(Query::builder().build()).unwrap();
-        assert_eq!(rows[0].name, Some(Text("alicia".to_string())));
-    }
-
-    // -- transaction delete and commit --
-
-    #[test]
-    fn test_transaction_delete_and_commit() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-        insert_user(&db, 2, "bob");
-
-        let owner = vec![1, 2, 3];
-        let tx_id = ctx.begin_transaction(owner);
-        let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
-
-        db.delete::<User>(
-            DeleteBehavior::Restrict,
-            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-        )
-        .unwrap();
-        db.commit().unwrap();
-
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        let rows = db.select::<User>(Query::builder().build()).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].id, Some(Uint32(2)));
-    }
-
-    // -- select_raw --
-
-    #[test]
-    fn test_select_raw() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-        insert_user(&db, 1, "alice");
-
-        let rows = db.select_raw("users", Query::builder().build()).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0][0].1, Value::Uint32(Uint32(1)));
-    }
-
-    // -- select with join returns error on typed select --
-
-    #[test]
-    fn test_typed_select_with_join_returns_error() {
-        let ctx = setup();
-        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
-
-        let query = Query::builder()
-            .all()
-            .inner_join("posts", "id", "user_id")
-            .build();
-        let result = db.select::<User>(query);
-        assert!(result.is_err());
-    }
-}
+mod tests;

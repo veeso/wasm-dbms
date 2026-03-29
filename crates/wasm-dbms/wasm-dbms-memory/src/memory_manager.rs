@@ -60,16 +60,6 @@ where
         SCHEMA_PAGE
     }
 
-    /// Writes raw bytes at the specified page and offset, bypassing
-    /// alignment and encoding checks.
-    ///
-    /// This is used by the journal rollback path which already holds
-    /// pre-captured byte buffers.
-    pub fn write_at_raw(&mut self, page: Page, offset: PageOffset, buf: &[u8]) -> MemoryResult<()> {
-        let absolute_offset = self.absolute_offset(page, offset);
-        self.provider.write(absolute_offset, buf)
-    }
-
     /// Gets the last allocated page number.
     fn last_page(&self) -> Option<Page> {
         match self.provider.pages() {
@@ -192,6 +182,22 @@ where
         }
 
         Ok(())
+    }
+
+    fn write_at_raw(&mut self, page: Page, offset: PageOffset, buf: &[u8]) -> MemoryResult<()> {
+        self.check_unallocated_page(page, offset, buf.len() as MSize)?;
+
+        if offset as u64 + buf.len() as u64 > P::PAGE_SIZE {
+            return Err(MemoryError::SegmentationFault {
+                page,
+                offset,
+                data_size: buf.len() as u64,
+                page_size: P::PAGE_SIZE,
+            });
+        }
+
+        let absolute_offset = self.absolute_offset(page, offset);
+        self.provider.write(absolute_offset, buf)
     }
 
     fn zero<E>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>
