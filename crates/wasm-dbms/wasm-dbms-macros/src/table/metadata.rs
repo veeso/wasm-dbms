@@ -276,6 +276,11 @@ fn collect_indexes(data: &DataStruct, primary_key: &Ident) -> syn::Result<Vec<In
                     syn::Error::new_spanned(field, "`#[index]` can only be used on named fields")
                 })?;
 
+                // Skip redundant `#[index]` on the primary key — it already has an implicit index.
+                if &field_name == primary_key {
+                    continue;
+                }
+
                 let field_index = parse_index_attr(attr)?;
 
                 match field_index {
