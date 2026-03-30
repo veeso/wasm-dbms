@@ -18,7 +18,7 @@ You can import all the useful types and traits by using the prelude module:
 
 ```rust
 use ic_dbms_api::prelude::*;
-```
+```txt
 
 ## Types
 

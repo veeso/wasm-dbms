@@ -9,6 +9,9 @@ use crate::memory::{Page, PageOffset};
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 #[derive(Debug, Error, Deserialize, Serialize)]
 pub enum MemoryError {
+    /// Error when an autoincrement column has reached its maximum value.
+    #[error("Autoincrement overflow: {0} column has reached its maximum value")]
+    AutoincrementOverflow(String),
     /// Error when a constraint prevents the requested operation.
     #[error("Constraint violation: {0}")]
     ConstraintViolation(String),

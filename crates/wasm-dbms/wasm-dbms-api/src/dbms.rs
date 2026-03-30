@@ -1,5 +1,6 @@
 //! This module contains the main DBMS abstractions and functionalities.
 
+pub mod autoincrement;
 pub mod custom_value;
 pub mod database;
 pub mod foreign_fetcher;

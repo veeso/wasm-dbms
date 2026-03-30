@@ -1,5 +1,6 @@
 // Rust guideline compliant 2026-02-28
 
+mod autoincrement_ledger;
 mod free_segments_ledger;
 mod index_ledger;
 mod page_ledger;
@@ -8,8 +9,9 @@ mod record_address;
 mod table_reader;
 mod write_at;
 
-use wasm_dbms_api::prelude::{Encode, MemoryResult, PageOffset};
+use wasm_dbms_api::prelude::{Encode, MemoryResult, PageOffset, Value};
 
+pub use self::autoincrement_ledger::AutoincrementLedger;
 use self::free_segments_ledger::FreeSegmentsLedger;
 pub use self::index_ledger::{IndexLedger, IndexTreeWalker};
 use self::page_ledger::PageLedger;
@@ -31,6 +33,7 @@ pub struct TableRegistry {
     free_segments_ledger: FreeSegmentsLedger,
     pub(crate) page_ledger: PageLedger,
     index_ledger: IndexLedger,
+    auto_increment_ledger: Option<AutoincrementLedger>,
 }
 
 impl TableRegistry {
@@ -40,6 +43,11 @@ impl TableRegistry {
             free_segments_ledger: FreeSegmentsLedger::load(table_pages.free_segments_page, mm)?,
             page_ledger: PageLedger::load(table_pages.pages_list_page, mm)?,
             index_ledger: IndexLedger::load(table_pages.index_registry_page, mm)?,
+            auto_increment_ledger: if let Some(page) = table_pages.autoincrement_registry_page {
+                Some(AutoincrementLedger::load(page, mm)?)
+            } else {
+                None
+            },
         })
     }
 
@@ -147,6 +155,19 @@ impl TableRegistry {
     /// Get a mutable reference to the index ledger, allowing to modify the indexes.
     pub fn index_ledger_mut(&mut self) -> &mut IndexLedger {
         &mut self.index_ledger
+    }
+
+    /// Get next value for an autoincrement column of the given type, and increment it in the ledger.
+    pub fn autoincrement_next(
+        &mut self,
+        column_name: &str,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<Option<Value>> {
+        if let Some(ledger) = &mut self.auto_increment_ledger {
+            ledger.next(column_name, mm).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     /// Update a [`RawRecord`] in place at the given page and offset.
@@ -327,10 +348,12 @@ mod tests {
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
+        let autoincrement_page = mm.allocate_page().expect("failed to get page");
         let table_pages = TableRegistryPage {
             pages_list_page: page_ledger_page,
             free_segments_page,
             index_registry_page,
+            autoincrement_registry_page: Some(autoincrement_page),
         };
 
         let registry: MemoryResult<TableRegistry> = TableRegistry::load(table_pages, &mut mm);
@@ -858,12 +881,423 @@ mod tests {
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
+        let autoincrement_page = mm.allocate_page().expect("failed to get page");
         let table_pages = TableRegistryPage {
             pages_list_page: page_ledger_page,
             free_segments_page,
             index_registry_page,
+            autoincrement_registry_page: Some(autoincrement_page),
         };
 
         TableRegistry::load(table_pages, mm).expect("failed to load")
+    }
+
+    /// Creates a [`TableRegistry`] with a properly initialized autoincrement ledger
+    /// via [`SchemaRegistry::register_table`].
+    fn registry_with_autoincrement(mm: &mut MemoryManager<HeapMemoryProvider>) -> TableRegistry {
+        use crate::SchemaRegistry;
+
+        let mut schema = SchemaRegistry::load(mm).expect("failed to load schema");
+        let pages = schema
+            .register_table::<AutoincUser>(mm)
+            .expect("failed to register table");
+        TableRegistry::load(pages, mm).expect("failed to load")
+    }
+
+    /// Creates a [`TableRegistry`] without an autoincrement ledger.
+    fn registry_without_autoincrement(mm: &mut MemoryManager<HeapMemoryProvider>) -> TableRegistry {
+        let page_ledger_page = mm.allocate_page().expect("failed to get page");
+        let free_segments_page = mm.allocate_page().expect("failed to get page");
+        let index_registry_page = mm.allocate_page().expect("failed to get page");
+        let table_pages = TableRegistryPage {
+            pages_list_page: page_ledger_page,
+            free_segments_page,
+            index_registry_page,
+            autoincrement_registry_page: None,
+        };
+
+        TableRegistry::load(table_pages, mm).expect("failed to load")
+    }
+
+    // -- AutoincUser mock: a table with an autoincrement Uint32 column --
+
+    use candid::CandidType;
+    use serde::{Deserialize, Serialize};
+    use wasm_dbms_api::prelude::{
+        ColumnDef, DbmsResult, IndexDef, InsertRecord, NoForeignFetcher, TableColumns, TableRecord,
+        TableSchema, UpdateRecord,
+    };
+
+    #[derive(Clone, CandidType)]
+    struct AutoincUser;
+
+    impl Encode for AutoincUser {
+        const SIZE: wasm_dbms_api::prelude::DataSize = wasm_dbms_api::prelude::DataSize::Dynamic;
+        const ALIGNMENT: PageOffset = wasm_dbms_api::prelude::DEFAULT_ALIGNMENT;
+
+        fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
+            std::borrow::Cow::Owned(vec![])
+        }
+
+        fn decode(_data: std::borrow::Cow<[u8]>) -> MemoryResult<Self>
+        where
+            Self: Sized,
+        {
+            Ok(Self)
+        }
+
+        fn size(&self) -> wasm_dbms_api::prelude::MSize {
+            0
+        }
+    }
+
+    #[derive(Clone, CandidType, Deserialize)]
+    struct AutoincUserRecord;
+
+    impl TableRecord for AutoincUserRecord {
+        type Schema = AutoincUser;
+
+        fn from_values(_values: TableColumns) -> Self {
+            Self
+        }
+
+        fn to_values(&self) -> Vec<(ColumnDef, Value)> {
+            vec![]
+        }
+    }
+
+    #[derive(Clone, CandidType, Serialize)]
+    struct AutoincUserInsert;
+
+    impl InsertRecord for AutoincUserInsert {
+        type Record = AutoincUserRecord;
+        type Schema = AutoincUser;
+
+        fn from_values(_values: &[(ColumnDef, Value)]) -> DbmsResult<Self> {
+            Ok(Self)
+        }
+
+        fn into_values(self) -> Vec<(ColumnDef, Value)> {
+            vec![]
+        }
+
+        fn into_record(self) -> Self::Schema {
+            AutoincUser
+        }
+    }
+
+    #[derive(Clone, CandidType, Serialize)]
+    struct AutoincUserUpdate;
+
+    impl UpdateRecord for AutoincUserUpdate {
+        type Record = AutoincUserRecord;
+        type Schema = AutoincUser;
+
+        fn from_values(
+            _values: &[(ColumnDef, Value)],
+            _where_clause: Option<wasm_dbms_api::prelude::Filter>,
+        ) -> Self {
+            Self
+        }
+
+        fn update_values(&self) -> Vec<(ColumnDef, Value)> {
+            vec![]
+        }
+
+        fn where_clause(&self) -> Option<wasm_dbms_api::prelude::Filter> {
+            None
+        }
+    }
+
+    impl TableSchema for AutoincUser {
+        type Record = AutoincUserRecord;
+        type Insert = AutoincUserInsert;
+        type Update = AutoincUserUpdate;
+        type ForeignFetcher = NoForeignFetcher;
+
+        fn table_name() -> &'static str {
+            "autoinc_users"
+        }
+
+        fn columns() -> &'static [ColumnDef] {
+            use wasm_dbms_api::prelude::DataTypeKind;
+
+            &[ColumnDef {
+                name: "id",
+                data_type: DataTypeKind::Uint32,
+                auto_increment: true,
+                nullable: false,
+                primary_key: true,
+                unique: true,
+                foreign_key: None,
+            }]
+        }
+
+        fn primary_key() -> &'static str {
+            "id"
+        }
+
+        fn indexes() -> &'static [IndexDef] {
+            &[IndexDef(&["id"])]
+        }
+
+        fn to_values(self) -> Vec<(ColumnDef, Value)> {
+            vec![]
+        }
+
+        fn sanitizer(
+            _column_name: &'static str,
+        ) -> Option<Box<dyn wasm_dbms_api::prelude::Sanitize>> {
+            None
+        }
+
+        fn validator(
+            _column_name: &'static str,
+        ) -> Option<Box<dyn wasm_dbms_api::prelude::Validate>> {
+            None
+        }
+    }
+
+    // -- autoincrement_next tests --
+
+    #[test]
+    fn test_autoincrement_next_returns_sequential_values() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry_with_autoincrement(&mut mm);
+
+        let v1 = registry
+            .autoincrement_next("id", &mut mm)
+            .expect("failed")
+            .expect("expected Some");
+        let v2 = registry
+            .autoincrement_next("id", &mut mm)
+            .expect("failed")
+            .expect("expected Some");
+        let v3 = registry
+            .autoincrement_next("id", &mut mm)
+            .expect("failed")
+            .expect("expected Some");
+
+        assert_eq!(v1, Value::Uint32(1u32.into()));
+        assert_eq!(v2, Value::Uint32(2u32.into()));
+        assert_eq!(v3, Value::Uint32(3u32.into()));
+    }
+
+    #[test]
+    fn test_autoincrement_next_returns_none_without_ledger() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry_without_autoincrement(&mut mm);
+
+        let result = registry.autoincrement_next("id", &mut mm).expect("failed");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_autoincrement_next_persists_across_reload() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+
+        use crate::SchemaRegistry;
+        let mut schema = SchemaRegistry::load(&mut mm).expect("failed to load schema");
+        let pages = schema
+            .register_table::<AutoincUser>(&mut mm)
+            .expect("failed to register table");
+
+        // advance 5 times
+        let mut registry = TableRegistry::load(pages, &mut mm).expect("failed to load");
+        for _ in 0..5 {
+            let _ = registry
+                .autoincrement_next("id", &mut mm)
+                .expect("next failed");
+        }
+
+        // reload the registry from the same pages
+        let mut reloaded = TableRegistry::load(pages, &mut mm).expect("failed to reload");
+        let value = reloaded
+            .autoincrement_next("id", &mut mm)
+            .expect("failed")
+            .expect("expected Some");
+        assert_eq!(value, Value::Uint32(6u32.into()));
+    }
+
+    #[test]
+    fn test_autoincrement_next_overflow_returns_error() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+
+        // manually set up a Uint8 autoincrement to hit overflow quickly
+        let page_ledger_page = mm.allocate_page().expect("failed to get page");
+        let free_segments_page = mm.allocate_page().expect("failed to get page");
+        let index_registry_page = mm.allocate_page().expect("failed to get page");
+        let autoinc_page = mm.allocate_page().expect("failed to get page");
+
+        // init the autoincrement ledger with a Uint8 column manually
+        use wasm_dbms_api::prelude::DataTypeKind;
+
+        use super::autoincrement_ledger::AutoincrementLedger;
+
+        // Use the Uint8AutoincTable from the autoincrement_ledger tests — we replicate the
+        // TableSchema inline since it's in a sibling test module.
+        // Instead, just init the ledger page directly with a Uint8 value.
+        {
+            use wasm_dbms_api::prelude::DEFAULT_ALIGNMENT;
+            let mut registry_data = super::autoincrement_ledger::AutoincrementLedger::init::<
+                Uint8AutoincSchema,
+            >(autoinc_page, &mut mm)
+            .expect("failed to init autoinc ledger");
+
+            // advance to 255
+            for _ in 0..255 {
+                let _ = registry_data.next("val", &mut mm).expect("next failed");
+            }
+        }
+
+        // init index ledger
+        IndexLedger::init(index_registry_page, &[], &mut mm).expect("failed to init index ledger");
+
+        let table_pages = TableRegistryPage {
+            pages_list_page: page_ledger_page,
+            free_segments_page,
+            index_registry_page,
+            autoincrement_registry_page: Some(autoinc_page),
+        };
+
+        let mut registry = TableRegistry::load(table_pages, &mut mm).expect("failed to load");
+        let result = registry.autoincrement_next("val", &mut mm);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            wasm_dbms_api::prelude::MemoryError::AutoincrementOverflow(_)
+        ));
+    }
+
+    // Minimal Uint8 autoincrement schema for overflow test
+
+    #[derive(Clone, CandidType)]
+    struct Uint8AutoincSchema;
+
+    impl Encode for Uint8AutoincSchema {
+        const SIZE: wasm_dbms_api::prelude::DataSize = wasm_dbms_api::prelude::DataSize::Dynamic;
+        const ALIGNMENT: PageOffset = wasm_dbms_api::prelude::DEFAULT_ALIGNMENT;
+
+        fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
+            std::borrow::Cow::Owned(vec![])
+        }
+
+        fn decode(_data: std::borrow::Cow<[u8]>) -> MemoryResult<Self>
+        where
+            Self: Sized,
+        {
+            Ok(Self)
+        }
+
+        fn size(&self) -> wasm_dbms_api::prelude::MSize {
+            0
+        }
+    }
+
+    #[derive(Clone, CandidType, Deserialize)]
+    struct Uint8AutoincSchemaRecord;
+
+    impl TableRecord for Uint8AutoincSchemaRecord {
+        type Schema = Uint8AutoincSchema;
+
+        fn from_values(_values: TableColumns) -> Self {
+            Self
+        }
+
+        fn to_values(&self) -> Vec<(ColumnDef, Value)> {
+            vec![]
+        }
+    }
+
+    #[derive(Clone, CandidType, Serialize)]
+    struct Uint8AutoincSchemaInsert;
+
+    impl InsertRecord for Uint8AutoincSchemaInsert {
+        type Record = Uint8AutoincSchemaRecord;
+        type Schema = Uint8AutoincSchema;
+
+        fn from_values(_values: &[(ColumnDef, Value)]) -> DbmsResult<Self> {
+            Ok(Self)
+        }
+
+        fn into_values(self) -> Vec<(ColumnDef, Value)> {
+            vec![]
+        }
+
+        fn into_record(self) -> Self::Schema {
+            Uint8AutoincSchema
+        }
+    }
+
+    #[derive(Clone, CandidType, Serialize)]
+    struct Uint8AutoincSchemaUpdate;
+
+    impl UpdateRecord for Uint8AutoincSchemaUpdate {
+        type Record = Uint8AutoincSchemaRecord;
+        type Schema = Uint8AutoincSchema;
+
+        fn from_values(
+            _values: &[(ColumnDef, Value)],
+            _where_clause: Option<wasm_dbms_api::prelude::Filter>,
+        ) -> Self {
+            Self
+        }
+
+        fn update_values(&self) -> Vec<(ColumnDef, Value)> {
+            vec![]
+        }
+
+        fn where_clause(&self) -> Option<wasm_dbms_api::prelude::Filter> {
+            None
+        }
+    }
+
+    impl TableSchema for Uint8AutoincSchema {
+        type Record = Uint8AutoincSchemaRecord;
+        type Insert = Uint8AutoincSchemaInsert;
+        type Update = Uint8AutoincSchemaUpdate;
+        type ForeignFetcher = NoForeignFetcher;
+
+        fn table_name() -> &'static str {
+            "uint8_autoinc_schema"
+        }
+
+        fn columns() -> &'static [ColumnDef] {
+            use wasm_dbms_api::prelude::DataTypeKind;
+
+            &[ColumnDef {
+                name: "val",
+                data_type: DataTypeKind::Uint8,
+                auto_increment: true,
+                nullable: false,
+                primary_key: true,
+                unique: true,
+                foreign_key: None,
+            }]
+        }
+
+        fn primary_key() -> &'static str {
+            "val"
+        }
+
+        fn indexes() -> &'static [IndexDef] {
+            &[IndexDef(&["val"])]
+        }
+
+        fn to_values(self) -> Vec<(ColumnDef, Value)> {
+            vec![]
+        }
+
+        fn sanitizer(
+            _column_name: &'static str,
+        ) -> Option<Box<dyn wasm_dbms_api::prelude::Sanitize>> {
+            None
+        }
+
+        fn validator(
+            _column_name: &'static str,
+        ) -> Option<Box<dyn wasm_dbms_api::prelude::Validate>> {
+            None
+        }
     }
 }

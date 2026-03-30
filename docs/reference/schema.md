@@ -7,6 +7,7 @@
     - [Table Attribute](#table-attribute)
   - [Column Attributes](#column-attributes)
     - [Primary Key](#primary-key)
+    - [Autoincrement](#autoincrement)
     - [Unique](#unique)
     - [Index](#index)
     - [Foreign Key](#foreign-key)
@@ -117,6 +118,50 @@ pub struct Order {
     pub id: Uuid,  // UUID primary key
     pub total: Decimal,
 }
+```
+
+### Autoincrement
+
+Automatically generate sequential values for a column on insert:
+
+```rust
+#[derive(Table, ...)]
+#[table = "users"]
+pub struct User {
+    #[primary_key]
+    #[autoincrement]
+    pub id: Uint32,  // Automatically assigned 1, 2, 3, ...
+    pub name: Text,
+}
+```
+
+**Autoincrement rules:**
+
+- Only integer types are supported: `Int8`, `Int16`, `Int32`, `Int64`, `Uint8`, `Uint16`, `Uint32`, `Uint64`
+- The counter starts at zero and increments by one on each insert
+- Each autoincrement column has an independent counter
+- Counters persist across canister upgrades (stored in stable memory)
+- When the counter reaches the type's maximum value, inserts return an `AutoincrementOverflow` error
+- Deleted records do **not** recycle their autoincrement values
+- A table can have multiple `#[autoincrement]` columns
+
+**Choosing the right type:**
+
+| Type | Max Records |
+|------|-------------|
+| `Uint32` | ~4.3 billion |
+| `Uint64` | ~18.4 quintillion |
+| `Int32` | ~2.1 billion |
+| `Int64` | ~9.2 quintillion |
+
+> **Tip:** `Uint64` is recommended for most use cases. Only use smaller types when storage space is critical and you are certain the record count will stay within bounds.
+
+**Combining with other attributes:**
+
+```rust
+#[primary_key]
+#[autoincrement]
+pub id: Uint64,  // Auto-generated unique primary key
 ```
 
 ### Unique

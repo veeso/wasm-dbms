@@ -309,6 +309,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -324,6 +325,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -343,6 +345,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -358,6 +361,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -377,6 +381,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -392,6 +397,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -411,6 +417,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -426,6 +433,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -445,6 +453,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -461,6 +470,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -477,6 +487,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -496,6 +507,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -512,6 +524,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -528,6 +541,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -547,6 +561,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: true,
                 primary_key: false,
                 unique: false,
@@ -562,6 +577,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: true,
                 primary_key: false,
                 unique: false,
@@ -581,6 +597,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: true,
                 primary_key: false,
                 unique: false,
@@ -595,6 +612,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: true,
                 primary_key: false,
                 unique: false,
@@ -613,6 +631,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -628,6 +647,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -647,6 +667,7 @@ mod tests {
             ColumnDef {
                 name: "age",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -666,6 +687,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -689,6 +711,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -700,6 +723,7 @@ mod tests {
                 ColumnDef {
                     name: "age",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -711,6 +735,7 @@ mod tests {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: true,
                     primary_key: false,
                     unique: false,
@@ -729,6 +754,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -740,6 +766,7 @@ mod tests {
                 ColumnDef {
                     name: "age",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -751,6 +778,7 @@ mod tests {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: true,
                     primary_key: false,
                     unique: false,
@@ -771,6 +799,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: true,
                 primary_key: false,
                 unique: false,
@@ -786,6 +815,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: true,
                 primary_key: false,
                 unique: false,
@@ -812,6 +842,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -826,6 +857,7 @@ mod tests {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Int32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -852,6 +884,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -879,6 +912,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -904,6 +938,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -928,6 +963,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -945,6 +981,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -964,6 +1001,7 @@ mod tests {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -994,6 +1032,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -1028,6 +1067,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -1043,6 +1083,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -1058,6 +1099,7 @@ mod tests {
             ColumnDef {
                 name: "data",
                 data_type: DataTypeKind::Json,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -1085,6 +1127,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1096,6 +1139,7 @@ mod tests {
                 ColumnDef {
                     name: "data",
                     data_type: DataTypeKind::Json,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1115,6 +1159,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1126,6 +1171,7 @@ mod tests {
                 ColumnDef {
                     name: "data",
                     data_type: DataTypeKind::Json,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1150,6 +1196,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1171,6 +1218,7 @@ mod tests {
                     ColumnDef {
                         name: "id",
                         data_type: DataTypeKind::Int32,
+                        auto_increment: false,
                         nullable: false,
                         primary_key: true,
                         unique: false,
@@ -1185,6 +1233,7 @@ mod tests {
                     ColumnDef {
                         name: "title",
                         data_type: DataTypeKind::Text,
+                        auto_increment: false,
                         nullable: false,
                         primary_key: false,
                         unique: false,
@@ -1207,6 +1256,7 @@ mod tests {
                     ColumnDef {
                         name: "id",
                         data_type: DataTypeKind::Int32,
+                        auto_increment: false,
                         nullable: false,
                         primary_key: true,
                         unique: false,
@@ -1221,6 +1271,7 @@ mod tests {
                     ColumnDef {
                         name: "id",
                         data_type: DataTypeKind::Int32,
+                        auto_increment: false,
                         nullable: false,
                         primary_key: true,
                         unique: false,
@@ -1246,6 +1297,7 @@ mod tests {
                     ColumnDef {
                         name: "id",
                         data_type: DataTypeKind::Int32,
+                        auto_increment: false,
                         nullable: false,
                         primary_key: true,
                         unique: false,
@@ -1260,6 +1312,7 @@ mod tests {
                     ColumnDef {
                         name: "title",
                         data_type: DataTypeKind::Text,
+                        auto_increment: false,
                         nullable: false,
                         primary_key: false,
                         unique: false,
@@ -1281,6 +1334,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1301,6 +1355,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1321,6 +1376,7 @@ mod tests {
                 ColumnDef {
                     name: "age",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1344,6 +1400,7 @@ mod tests {
                 ColumnDef {
                     name: "age",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1367,6 +1424,7 @@ mod tests {
                 ColumnDef {
                     name: "age",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1390,6 +1448,7 @@ mod tests {
                 ColumnDef {
                     name: "age",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1420,6 +1479,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1446,6 +1506,7 @@ mod tests {
                 ColumnDef {
                     name: "title",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1469,6 +1530,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1489,6 +1551,7 @@ mod tests {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: true,
                     primary_key: false,
                     unique: false,
@@ -1505,6 +1568,7 @@ mod tests {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: true,
                     primary_key: false,
                     unique: false,
@@ -1525,6 +1589,7 @@ mod tests {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: true,
                     primary_key: false,
                     unique: false,
@@ -1541,6 +1606,7 @@ mod tests {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: true,
                     primary_key: false,
                     unique: false,
@@ -1562,6 +1628,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1578,6 +1645,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1598,6 +1666,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1614,6 +1683,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1642,6 +1712,7 @@ mod tests {
                 ColumnDef {
                     name: "data",
                     data_type: DataTypeKind::Json,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1662,6 +1733,7 @@ mod tests {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -1682,6 +1754,7 @@ mod tests {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Int32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -1702,6 +1775,7 @@ mod tests {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: true,
                     primary_key: false,
                     unique: false,

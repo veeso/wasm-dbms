@@ -148,6 +148,7 @@ impl UpdateRecord for UserUpdateRequest {
                 ColumnDef {
                     name: "id",
                     data_type: DataTypeKind::Uint32,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: true,
                     unique: false,
@@ -161,6 +162,7 @@ impl UpdateRecord for UserUpdateRequest {
                 ColumnDef {
                     name: "name",
                     data_type: DataTypeKind::Text,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,
@@ -241,6 +243,7 @@ impl TableSchema for User {
             ColumnDef {
                 name: "id",
                 data_type: DataTypeKind::Uint32,
+                auto_increment: false,
                 nullable: false,
                 primary_key: true,
                 unique: false,
@@ -249,6 +252,7 @@ impl TableSchema for User {
             ColumnDef {
                 name: "name",
                 data_type: DataTypeKind::Text,
+                auto_increment: false,
                 nullable: false,
                 primary_key: false,
                 unique: false,

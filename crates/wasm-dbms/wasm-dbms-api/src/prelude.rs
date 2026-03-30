@@ -1,5 +1,6 @@
 //! Prelude exposes all public types for the `wasm-dbms-api` crate.
 
+pub use crate::dbms::autoincrement::Autoincrement;
 pub use crate::dbms::custom_value::CustomValue;
 pub use crate::dbms::database::Database;
 pub use crate::dbms::foreign_fetcher::{ForeignFetcher, NoForeignFetcher};

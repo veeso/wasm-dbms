@@ -12,6 +12,7 @@
 //! - [`AccessControlList`] for identity-based access control
 //! - [`NoAccessControl`] for runtimes without access control
 //! - [`TableRegistry`] for record-level storage and retrieval
+//! - [`AutoincrementLedger`] for autoincrement column value tracking
 
 extern crate self as wasm_dbms_memory;
 
@@ -39,6 +40,7 @@ pub mod prelude {
     pub use super::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
     pub use super::schema_registry::{SchemaRegistry, TableRegistryPage};
     pub use super::table_registry::{
-        IndexLedger, IndexTreeWalker, NextRecord, RecordAddress, TableReader, TableRegistry,
+        AutoincrementLedger, IndexLedger, IndexTreeWalker, NextRecord, RecordAddress, TableReader,
+        TableRegistry,
     };
 }

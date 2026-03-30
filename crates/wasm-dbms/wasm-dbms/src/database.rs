@@ -690,6 +690,7 @@ where
                 ColumnDef {
                     name: ref_col,
                     data_type,
+                    auto_increment: false,
                     nullable: false,
                     primary_key: false,
                     unique: false,

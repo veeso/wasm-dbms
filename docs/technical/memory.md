@@ -12,6 +12,7 @@
   - [Table Registry](#table-registry)
     - [Page Ledger](#page-ledger)
     - [Free Segments Ledger](#free-segments-ledger)
+    - [Autoincrement Ledger](#autoincrement-ledger)
   - [Record Storage](#record-storage)
     - [Record Encoding](#record-encoding)
     - [Record Alignment](#record-alignment)
@@ -53,43 +54,47 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 ## Memory Model
 
 ```txt
-┌─────────────────────────────────────────────┐
-│ Page 0: Schema Registry (65 KiB)            │
-│   - Table fingerprints → Page ledger pages  │
-├─────────────────────────────────────────────┤
-│ Page 1: ACL Table (65 KiB)                  │
-│   - List of allowed principals              │
-├─────────────────────────────────────────────┤
-│ Page 2: Table "users" Page Ledger           │
-├─────────────────────────────────────────────┤
-│ Page 3: Table "users" Free Segments Ledger  │
-├─────────────────────────────────────────────┤
-│ Page 4: Table "users" Index Ledger          │
-├─────────────────────────────────────────────┤
-│ Page 5: Table "posts" Page Ledger           │
-├─────────────────────────────────────────────┤
-│ Page 6: Table "posts" Free Segments Ledger  │
-├─────────────────────────────────────────────┤
-│ Page 7: Table "posts" Index Ledger          │
-├─────────────────────────────────────────────┤
-│ Page 8: Table "users" Records - Page 1      │
-├─────────────────────────────────────────────┤
-│ Page 9: Table "users" Records - Page 2      │
-├─────────────────────────────────────────────┤
-│ Page 10: B-Tree Node (index on users.id)    │
-├─────────────────────────────────────────────┤
-│ Page 11: B-Tree Node (index on users.email) │
-├─────────────────────────────────────────────┤
-│ Page 12: Table "posts" Records - Page 1     │
-├─────────────────────────────────────────────┤
-│ ...                                         │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ Page 0: Schema Registry (65 KiB)                 │
+│   - Table fingerprints → Page ledger pages       │
+├──────────────────────────────────────────────────┤
+│ Page 1: ACL Table (65 KiB)                       │
+│   - List of allowed principals                   │
+├──────────────────────────────────────────────────┤
+│ Page 2: Table "users" Page Ledger                │
+├──────────────────────────────────────────────────┤
+│ Page 3: Table "users" Free Segments Ledger       │
+├──────────────────────────────────────────────────┤
+│ Page 4: Table "users" Index Ledger               │
+├──────────────────────────────────────────────────┤
+│ Page 5: Table "users" Autoincrement Ledger (*)   │
+├──────────────────────────────────────────────────┤
+│ Page 6: Table "posts" Page Ledger                │
+├──────────────────────────────────────────────────┤
+│ Page 7: Table "posts" Free Segments Ledger       │
+├──────────────────────────────────────────────────┤
+│ Page 8: Table "posts" Index Ledger               │
+├──────────────────────────────────────────────────┤
+│ Page 9: Table "users" Records - Page 1           │
+├──────────────────────────────────────────────────┤
+│ Page 10: Table "users" Records - Page 2          │
+├──────────────────────────────────────────────────┤
+│ Page 11: B-Tree Node (index on users.id)         │
+├──────────────────────────────────────────────────┤
+│ Page 12: B-Tree Node (index on users.email)      │
+├──────────────────────────────────────────────────┤
+│ Page 13: Table "posts" Records - Page 1          │
+├──────────────────────────────────────────────────┤
+│ ...                                              │
+└──────────────────────────────────────────────────┘
+(*) Only allocated for tables with #[autoincrement] columns
 ```
 
 **Layout characteristics:**
 
 - Reserved pages (0-1) are allocated at initialization
 - Each table gets a Page Ledger, Free Segments Ledger, and Index Ledger
+- Tables with `#[autoincrement]` columns also get an Autoincrement Ledger page
 - Record pages and B-tree node pages are allocated on demand
 - Pages can be interleaved between tables
 
@@ -271,9 +276,10 @@ The Schema Registry maps tables to their storage pages:
 ```rust
 /// Information about a table's storage pages
 pub struct TableRegistryPage {
-    pub pages_list_page: Page,        // Page Ledger location
-    pub free_segments_page: Page,     // Free Segments Ledger location
-    pub index_registry_page: Page,    // Index Ledger location
+    pub pages_list_page: Page,                      // Page Ledger location
+    pub free_segments_page: Page,                   // Free Segments Ledger location
+    pub index_registry_page: Page,                  // Index Ledger location
+    pub autoincrement_registry_page: Option<Page>,  // Autoincrement Ledger (if needed)
 }
 
 /// Maps table fingerprints to storage locations
@@ -281,6 +287,10 @@ pub struct SchemaRegistry {
     tables: HashMap<TableFingerprint, TableRegistryPage>,
 }
 ```
+
+The `autoincrement_registry_page` is only allocated when a table has at least one column
+with the `#[autoincrement]` attribute. For tables without autoincrement columns, this
+field is `None`, avoiding unnecessary page allocation.
 
 **Table Fingerprint:**
 
@@ -325,7 +335,8 @@ which wraps `AccessControlList` and uses `Principal` as its identity type.
 
 ## Table Registry
 
-Each table has a `TableRegistry` managing its records:
+Each table has a `TableRegistry` managing its records, plus an optional
+`AutoincrementLedger` for tables with autoincrement columns:
 
 ```rust
 pub struct TableRegistry {
@@ -404,6 +415,51 @@ impl FreeSegmentsLedger {
 2. When inserting, check for suitable free segment first
 3. If found, reuse the space; remaining space becomes new free segment
 4. Adjacent free segments are merged to reduce fragmentation
+
+### Autoincrement Ledger
+
+Tables with `#[autoincrement]` columns have a dedicated page storing the current counter
+value for each autoincrement column. The `AutoincrementLedger` manages these counters:
+
+```rust
+pub struct AutoincrementLedger {
+    page: Page,
+    registry: AutoincrementRegistry,  // column name → current Value
+}
+```
+
+**Serialization format:**
+
+```txt
+Offset   Size    Field
+0        1       Number of entries (u8)
+1+       var     For each entry:
+                 - 1 byte: column name length (u8)
+                 - N bytes: UTF-8 column name
+                 - var bytes: encoded Value (type-tagged)
+```
+
+**Behavior:**
+
+- Initialized with zero values matching each column's integer type when a table is registered
+- `next()` increments the counter by one and persists the updated value to memory
+- Uses `checked_add` — returns `MemoryError::AutoincrementOverflow` when a column reaches
+  its type's maximum value, preventing duplicate key generation
+- Each column's counter is independent; advancing one does not affect others
+- State survives across `load()`/`save()` cycles (persisted to the dedicated page)
+
+**Supported types:**
+
+| Type | Range |
+|------|-------|
+| `Int8` | -128 to 127 |
+| `Int16` | -32,768 to 32,767 |
+| `Int32` | -2,147,483,648 to 2,147,483,647 |
+| `Int64` | -9.2 × 10¹⁸ to 9.2 × 10¹⁸ |
+| `Uint8` | 0 to 255 |
+| `Uint16` | 0 to 65,535 |
+| `Uint32` | 0 to 4,294,967,295 |
+| `Uint64` | 0 to 18.4 × 10¹⁸ |
 
 ---
 

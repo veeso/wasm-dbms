@@ -162,6 +162,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///                 ColumnDef {
 ///                     name: "id",
 ///                     data_type: DataTypeKind::Uint32,
+///                     auto_increment: false,
 ///                     nullable: false,
 ///                     primary_key: true,
 ///                     unique: true,
@@ -170,6 +171,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///                 ColumnDef {
 ///                     name: "title",
 ///                     data_type: DataTypeKind::Text,
+///                     auto_increment: false,
 ///                     nullable: false,
 ///                     primary_key: false,
 ///                     unique: false,
@@ -178,6 +180,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///                 ColumnDef {
 ///                     name: "content",
 ///                     data_type: DataTypeKind::Text,
+///                     auto_increment: false,
 ///                     nullable: false,
 ///                     primary_key: false,
 ///                     unique: false,
@@ -186,6 +189,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///                 ColumnDef {
 ///                     name: "user_id",
 ///                     data_type: DataTypeKind::Uint32,
+///                     auto_increment: false,
 ///                     nullable: false,
 ///                     primary_key: false,
 ///                     unique: false,

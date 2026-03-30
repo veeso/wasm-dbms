@@ -347,6 +347,7 @@ mod tests {
                 pages_list_page: page_ledger_page,
                 free_segments_page,
                 index_registry_page,
+                autoincrement_registry_page: None,
             },
             mm,
         )

@@ -2,12 +2,13 @@
 
 This example demonstrates using wasm-dbms with the [WebAssembly Component Model](https://component-model.bytecodealliance.org/) (WIT) and [Wasmtime](https://wasmtime.dev/).
 
-- [Architecture](#architecture)
-- [WIT Interface](#wit-interface)
-- [Prerequisites](#prerequisites)
-- [Build](#build)
-- [Run](#run)
-- [Extending with Custom Tables](#extending-with-custom-tables)
+- [wasm-dbms Wasmtime Example](#wasm-dbms-wasmtime-example)
+  - [Architecture](#architecture)
+  - [WIT Interface](#wit-interface)
+  - [Prerequisites](#prerequisites)
+  - [Build](#build)
+  - [Run](#run)
+  - [Extending with Custom Tables](#extending-with-custom-tables)
 
 ---
 
@@ -83,7 +84,7 @@ cargo run --release -p wasm-dbms-example-host -- .artifact/wasm-dbms-example-gue
 
 Expected output:
 
-```
+```txt
 === wasm-dbms WIT Component Model Demo ===
 --- Inserting users ---
   Inserted user 1: Alice

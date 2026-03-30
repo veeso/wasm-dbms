@@ -52,6 +52,7 @@ use wasm_dbms_api::prelude::*;
 
 #### Table
 
+- [`Autoincrement`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/enum.Autoincrement.html)
 - [`ColumnDef`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/struct.ColumnDef.html)
 - [`ForeignKeyDef`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/struct.ForeignKeyDef.html)
 - [`InsertRecord`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/trait.InsertRecord.html)

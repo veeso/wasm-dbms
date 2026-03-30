@@ -9,6 +9,9 @@ pub struct ColumnDef {
     pub name: &'static str,
     /// The data type of the column.
     pub data_type: DataTypeKind,
+    /// Indicates if this column is auto-incrementing (applicable for integer types).
+    /// Cannot be `nullable`.
+    pub auto_increment: bool,
     /// Indicates if this column can contain NULL values.
     pub nullable: bool,
     /// Indicates if this column is part of the primary key.
@@ -163,6 +166,7 @@ mod test {
         let column = ColumnDef {
             name: "id",
             data_type: DataTypeKind::Uint32,
+            auto_increment: false,
             nullable: false,
             primary_key: true,
             unique: false,
@@ -171,6 +175,7 @@ mod test {
 
         assert_eq!(column.name, "id");
         assert_eq!(column.data_type, DataTypeKind::Uint32);
+        assert!(!column.auto_increment);
         assert!(!column.nullable);
         assert!(column.primary_key);
         assert!(!column.unique);
@@ -188,6 +193,7 @@ mod test {
         let column = ColumnDef {
             name: "user_id",
             data_type: DataTypeKind::Uint32,
+            auto_increment: false,
             nullable: false,
             primary_key: false,
             unique: false,
@@ -208,6 +214,7 @@ mod test {
         let column = ColumnDef {
             name: "email",
             data_type: DataTypeKind::Text,
+            auto_increment: false,
             nullable: true,
             primary_key: false,
             unique: true,
@@ -223,6 +230,7 @@ mod test {
         let column1 = ColumnDef {
             name: "id",
             data_type: DataTypeKind::Uint32,
+            auto_increment: false,
             nullable: false,
             primary_key: true,
             unique: false,
@@ -232,6 +240,7 @@ mod test {
         let column2 = ColumnDef {
             name: "id",
             data_type: DataTypeKind::Uint32,
+            auto_increment: false,
             nullable: false,
             primary_key: true,
             unique: false,
@@ -241,6 +250,7 @@ mod test {
         let column3 = ColumnDef {
             name: "name",
             data_type: DataTypeKind::Text,
+            auto_increment: false,
             nullable: true,
             primary_key: false,
             unique: true,
@@ -319,6 +329,7 @@ mod test {
         let col = ColumnDef {
             name: "id",
             data_type: DataTypeKind::Uint32,
+            auto_increment: false,
             nullable: false,
             primary_key: true,
             unique: false,
@@ -348,6 +359,7 @@ mod test {
         let col = ColumnDef {
             name: "role",
             data_type: DataTypeKind::Custom("role"),
+            auto_increment: false,
             nullable: false,
             primary_key: false,
             unique: false,

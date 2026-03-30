@@ -25,28 +25,32 @@ operations, schema persistence, access control, and record-level storage.
 - [`SchemaRegistry`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.SchemaRegistry.html) - Table schema persistence
 - [`AccessControlList`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.AccessControlList.html) - Identity-based access control
 - [`TableRegistry`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.TableRegistry.html) - Record-level storage and retrieval
+- [`AutoincrementLedger`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.AutoincrementLedger.html) - Autoincrement counter tracking per column
 
 ## Memory Model
 
 The memory is organized into 64 KiB pages:
 
 ```text
-+-------------------------------------+
-| Schema Registry (1 page)            |
-+-------------------------------------+
-| ACL Table (1 page)                  |
-+-------------------------------------+
-| Table XX Page Ledger (1 page)       |
-| Table XX Free Segments Ledger       |
-+-------------------------------------+
-| Table YY Page Ledger (1 page)       |
-| Table YY Free Segments Ledger       |
-+-------------------------------------+
-| Table XX Records - Page 1           |
-| Table XX Records - Page 2           |
-| Table YY Records - Page 1           |
-| ...                                 |
-+-------------------------------------+
++---------------------------------------------+
+| Schema Registry (1 page)                    |
++---------------------------------------------+
+| ACL Table (1 page)                          |
++---------------------------------------------+
+| Table XX Page Ledger (1 page)               |
+| Table XX Free Segments Ledger               |
+| Table XX Index Ledger                       |
+| Table XX Autoincrement Ledger (if needed)   |
++---------------------------------------------+
+| Table YY Page Ledger (1 page)               |
+| Table YY Free Segments Ledger               |
+| Table YY Index Ledger                       |
++---------------------------------------------+
+| Table XX Records - Page 1                   |
+| Table XX Records - Page 2                   |
+| Table YY Records - Page 1                   |
+| ...                                         |
++---------------------------------------------+
 ```
 
 ## Usage

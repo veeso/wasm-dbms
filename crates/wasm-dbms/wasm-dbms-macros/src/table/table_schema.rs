@@ -107,6 +107,7 @@ fn column_def(metadata: &TableMetadata) -> syn::Result<TokenStream2> {
                 data_type: #data_type_kind,
                 foreign_key: #foreign_key_def,
                 name: #name,
+                auto_increment: false, // TODO: support auto_increment in the future
                 nullable: #nullable,
                 unique: #unique,
                 primary_key: #primary_key,
