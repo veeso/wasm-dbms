@@ -6,6 +6,7 @@
   - [DbmsError](#dbmserror)
   - [Query Errors](#query-errors)
     - [PrimaryKeyConflict](#primarykeyconflict)
+    - [UniqueConstraintViolation](#uniqueconstraintviolation)
     - [BrokenForeignKeyReference](#brokenforeignkeyreference)
     - [ForeignKeyConstraintViolation](#foreignkeyconstraintviolation)
     - [UnknownColumn](#unknowncolumn)
@@ -26,7 +27,7 @@
 wasm-dbms uses a structured error system to provide clear information about what went wrong. Errors are categorized by their source:
 
 | Category | Description |
-|----------|-------------|
+| -------- | ----------- |
 | Query | Database operation errors (constraints, missing data) |
 | Transaction | Transaction state errors |
 | Validation | Data validation failures |
@@ -38,10 +39,11 @@ wasm-dbms uses a structured error system to provide clear information about what
 
 ## Error Hierarchy
 
-```
+```txt
 DbmsError
 ├── Query(QueryError)
 │   ├── PrimaryKeyConflict
+│   ├── UniqueConstraintViolation
 │   ├── BrokenForeignKeyReference
 │   ├── ForeignKeyConstraintViolation
 │   ├── UnknownColumn
@@ -136,9 +138,55 @@ match result {
 ```
 
 **Solutions:**
+
 - Use a unique primary key (e.g., UUID)
 - Check if record exists before inserting
 - Use upsert pattern (check, then insert or update)
+
+### UniqueConstraintViolation
+
+**Cause:** Attempting to insert or update a record with a value that violates a `#[unique]` constraint.
+
+```rust
+// Insert first user
+database.insert::<User>(UserInsertRequest {
+    id: 1.into(),
+    email: "alice@example.com".into(),
+    ..
+})?;
+
+// Insert second user with same email - FAILS
+let result = database.insert::<User>(UserInsertRequest {
+    id: 2.into(),
+    email: "alice@example.com".into(),  // Duplicate!
+    ..
+});
+
+match result {
+    Err(DbmsError::Query(QueryError::UniqueConstraintViolation { field })) => {
+        println!("Duplicate value on field: {}", field);
+        // field == "email"
+    }
+    _ => {}
+}
+```
+
+**Also triggered on update:**
+
+```rust
+// Update user 2's email to match user 1's email - FAILS
+let result = database.update::<User>(
+    UserUpdateRequest::from_values(
+        &[(email_col, Value::Text("alice@example.com".into()))],
+        Some(Filter::eq("id", Value::Uint32(2.into()))),
+    ),
+);
+```
+
+**Solutions:**
+
+- Check if a record with the same value exists before inserting
+- Use a different value
 
 ### BrokenForeignKeyReference
 
@@ -162,6 +210,7 @@ match result {
 ```
 
 **Solutions:**
+
 - Ensure referenced record exists before inserting
 - Create referenced record first in a transaction
 
@@ -210,6 +259,7 @@ match result {
 ```
 
 **Solutions:**
+
 - Check column names in your schema
 - Use IDE autocompletion with typed column names
 
@@ -223,6 +273,7 @@ match result {
 ```
 
 **Solutions:**
+
 - Provide all required fields
 - Use `Nullable<T>` for optional fields
 
@@ -268,6 +319,7 @@ match result {
 ```
 
 **Common causes:**
+
 - Invalid JSON paths (trailing dots, unclosed brackets)
 - Applying JSON filter to non-JSON column
 - Type mismatches in comparisons
@@ -292,6 +344,7 @@ match database.commit() {
 ```
 
 **Causes:**
+
 - Transaction ID never existed
 - Transaction was already committed
 - Transaction was already rolled back
@@ -327,6 +380,7 @@ match result {
 ```
 
 **Common validation errors:**
+
 - String too long (`MaxStrlenValidator`)
 - String too short (`MinStrlenValidator`)
 - Invalid email format (`EmailValidator`)
@@ -366,6 +420,7 @@ pub enum MemoryError {
 ```
 
 **Memory errors are rare** and usually indicate:
+
 - Running out of available memory
 - Corrupted memory state
 - Bug in wasm-dbms (please report!)
@@ -383,6 +438,9 @@ match result {
     Ok(()) => println!("Insert successful"),
     Err(DbmsError::Query(QueryError::PrimaryKeyConflict)) => {
         println!("User already exists");
+    }
+    Err(DbmsError::Query(QueryError::UniqueConstraintViolation { field })) => {
+        println!("Duplicate value on field: {}", field);
     }
     Err(DbmsError::Query(QueryError::BrokenForeignKeyReference)) => {
         println!("Referenced record doesn't exist");
@@ -403,6 +461,8 @@ fn handle_db_error(error: DbmsError) -> String {
     match error {
         DbmsError::Query(QueryError::PrimaryKeyConflict) =>
             "Record with this ID already exists".to_string(),
+        DbmsError::Query(QueryError::UniqueConstraintViolation { field }) =>
+            format!("Duplicate value on unique field: {}", field),
         DbmsError::Query(QueryError::BrokenForeignKeyReference) =>
             "Referenced record not found".to_string(),
         DbmsError::Query(QueryError::ForeignKeyConstraintViolation) =>

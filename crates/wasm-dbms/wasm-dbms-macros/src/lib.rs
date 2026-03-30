@@ -164,6 +164,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///                     data_type: DataTypeKind::Uint32,
 ///                     nullable: false,
 ///                     primary_key: true,
+///                     unique: true,
 ///                     foreign_key: None,
 ///                 },
 ///                 ColumnDef {
@@ -171,6 +172,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///                     data_type: DataTypeKind::Text,
 ///                     nullable: false,
 ///                     primary_key: false,
+///                     unique: false,
 ///                     foreign_key: None,
 ///                 },
 ///                 ColumnDef {
@@ -178,6 +180,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///                     data_type: DataTypeKind::Text,
 ///                     nullable: false,
 ///                     primary_key: false,
+///                     unique: false,
 ///                     foreign_key: None,
 ///                 },
 ///                 ColumnDef {
@@ -185,6 +188,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///                     data_type: DataTypeKind::Uint32,
 ///                     nullable: false,
 ///                     primary_key: false,
+///                     unique: false,
 ///                     foreign_key: Some(ForeignKeyDef {
 ///                         local_column: "user_id",
 ///                         foreign_table: "users",
@@ -231,11 +235,15 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///
 /// The `Table` derive macro supports the following attributes:
 ///
-/// - `#[table = "table_name"]`: Specifies the name of the table in the database.
 /// - `#[alignment = N]`: (optional) Specifies the alignment for the table records. Use only if you know what you are doing.
-/// - `#[primary_key]`: Marks a field as the primary key of the table.
+/// - `#[candid]`: Marks the table as compatible with Candid serialization.
+/// - `#[custom_type = "TypeName"]`: Specifies a custom data type for the
 /// - `#[foreign_key(entity = "EntityName", table = "table_name", column = "column_name")]`: Defines a foreign key relationship.
+/// - `#[index]`: Marks a field to be indexed for faster queries.
+/// - `#[primary_key]`: Marks a field as the primary key of the table.
 /// - `#[sanitizer(SanitizerType)]`: Specifies a sanitize for the field.
+/// - `#[table = "table_name"]`: Specifies the name of the table in the database.
+/// - `#[unique]`: Marks a field to have a unique constraint.
 /// - `#[validate(ValidatorType)]`: Specifies a validator for the field.
 ///
 #[proc_macro_derive(
@@ -243,13 +251,14 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
     attributes(
         alignment,
         candid,
-        table,
+        custom_type,
+        foreign_key,
         index,
         primary_key,
-        foreign_key,
         sanitizer,
-        validate,
-        custom_type
+        table,
+        unique,
+        validate
     )
 )]
 pub fn derive_table(input: TokenStream) -> TokenStream {

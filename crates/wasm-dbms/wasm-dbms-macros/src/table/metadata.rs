@@ -9,6 +9,7 @@ const MIN_ALIGNMENT: u16 = 8;
 const ATTRIBUTE_ALIGNMENT: &str = "alignment";
 const ATTRIBUTE_TABLE: &str = "table";
 const ATTRIBUTE_INDEX: &str = "index";
+const ATTRIBUTE_UNIQUE: &str = "unique";
 const ATTRIBUTE_PRIMARY_KEY: &str = "primary_key";
 const ATTRIBUTE_FOREIGN_KEY: &str = "foreign_key";
 const ATTRIBUTE_FOREIGN_KEY_ENTITY: &str = "entity";
@@ -43,6 +44,8 @@ pub struct Field {
     pub nullable: bool,
     /// Whether the field is a primary key
     pub primary_key: bool,
+    /// Whether the field is unique
+    pub unique: bool,
     /// Whether the field uses `#[custom_type]`
     pub custom_type: bool,
     /// For custom types: the inner type ident (with Nullable stripped).
@@ -155,7 +158,8 @@ pub fn collect_table_metadata(
     let alignment = get_alignment(attrs)?;
     let table_name = get_table_name(attrs)?;
     let primary_key = get_primary_key_field(data)?;
-    let indexes = collect_indexes(data, &primary_key)?;
+    let unique_fields = get_unique_fields(data);
+    let indexes = collect_indexes(data, &primary_key, &unique_fields)?;
     let foreign_keys = collect_foreign_keys(data)?;
     let validates = collect_validates(data)?;
     let sanitizes = collect_sanitizes(data)?;
@@ -260,11 +264,23 @@ fn get_table_name(attrs: &[syn::Attribute]) -> syn::Result<Ident> {
 /// Bare `#[index]` fields each produce a single-column index.
 /// Fields sharing the same `group` name are merged into one composite index,
 /// with columns ordered by field declaration order.
-fn collect_indexes(data: &DataStruct, primary_key: &Ident) -> syn::Result<Vec<Index>> {
+fn collect_indexes(
+    data: &DataStruct,
+    primary_key: &Ident,
+    unique: &[Ident],
+) -> syn::Result<Vec<Index>> {
     // PK is always an index.
     let mut indexes = vec![Index {
         columns: vec![primary_key.clone()],
     }];
+    // Unique fields also always have an index, but we skip them if they are the primary key since it's redundant.
+    for unique in unique {
+        if unique != primary_key {
+            indexes.push(Index {
+                columns: vec![(*unique).clone()],
+            });
+        }
+    }
 
     // Collect per-field annotations: (field_name, FieldIndex).
     let mut grouped: HashMap<String, Vec<Ident>> = HashMap::new();
@@ -277,7 +293,8 @@ fn collect_indexes(data: &DataStruct, primary_key: &Ident) -> syn::Result<Vec<In
                 })?;
 
                 // Skip redundant `#[index]` on the primary key — it already has an implicit index.
-                if &field_name == primary_key {
+                // skip also redundant `#[index]` on unique fields since they also have implicit indexes.
+                if &field_name == primary_key && !unique.contains(&field_name) {
                     continue;
                 }
 
@@ -367,6 +384,24 @@ fn get_primary_key_field(data: &DataStruct) -> syn::Result<Ident> {
             "no primary key found",
         ))
     }
+}
+
+fn get_unique_fields(data: &DataStruct) -> Vec<Ident> {
+    let mut unique_fields = Vec::new();
+
+    for field in &data.fields {
+        for attr in &field.attrs {
+            if attr.path().is_ident(ATTRIBUTE_UNIQUE) {
+                let field_name = field
+                    .ident
+                    .clone()
+                    .expect("unique can only be used on named fields");
+                unique_fields.push(field_name);
+            }
+        }
+    }
+
+    unique_fields
 }
 
 /// Collect foreign keys from the struct fields
@@ -609,8 +644,9 @@ fn get_fields(
             #field_type
         };
 
-        // Step 2: detect custom_type attribute
+        // Step 2: detect field attributes
         let custom_type = is_custom_type(field);
+        let unique = unique(field);
 
         // Validate: #[custom_type] and #[foreign_key] cannot be combined
         if custom_type && is_fk {
@@ -658,6 +694,7 @@ fn get_fields(
             ty,
             data_type_kind,
             nullable,
+            unique,
             primary_key,
             custom_type,
             custom_type_ident,
@@ -683,4 +720,12 @@ fn is_custom_type(field: &syn::Field) -> bool {
         .attrs
         .iter()
         .any(|attr| attr.path().is_ident("custom_type"))
+}
+
+/// Returns `true` if the field has a `#[unique]` attribute.
+fn unique(field: &syn::Field) -> bool {
+    field
+        .attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("unique"))
 }
