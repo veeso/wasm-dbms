@@ -30,7 +30,7 @@ pub struct IcAccessControlList(AccessControlList);
 impl AccessControl for IcAccessControlList {
     type Id = Principal;
 
-    fn load<M>(mm: &MemoryManager<M>) -> MemoryResult<Self>
+    fn load<M>(mm: &mut MemoryManager<M>) -> MemoryResult<Self>
     where
         M: MemoryProvider,
     {

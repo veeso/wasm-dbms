@@ -298,7 +298,7 @@ where
         }
     }
 
-    fn read(page: Page, mm: &impl MemoryAccess) -> MemoryResult<Self> {
+    fn read(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         let mut buf = vec![0u8; mm.page_size() as usize];
         mm.read_at_raw(page, 0, &mut buf)?;
         Self::deserialize(page, &buf)
@@ -486,7 +486,7 @@ where
     }
 
     /// Looks up all pointers matching `key`.
-    pub fn search(&self, key: &K, mm: &impl MemoryAccess) -> MemoryResult<Vec<RecordAddress>> {
+    pub fn search(&self, key: &K, mm: &mut impl MemoryAccess) -> MemoryResult<Vec<RecordAddress>> {
         let mut leaf = self.find_search_start_leaf(key, mm)?;
         let mut results = Vec::new();
 
@@ -607,7 +607,7 @@ where
         &self,
         start_key: &K,
         end_key: Option<&K>,
-        mm: &impl MemoryAccess,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<IndexTreeWalker<K>> {
         let leaf = self.find_search_start_leaf(start_key, mm)?;
         match leaf.body {
@@ -626,7 +626,7 @@ where
         }
     }
 
-    fn read_path(&self, key: &K, mm: &impl MemoryAccess) -> MemoryResult<Vec<BTreeNode<K>>> {
+    fn read_path(&self, key: &K, mm: &mut impl MemoryAccess) -> MemoryResult<Vec<BTreeNode<K>>> {
         let mut page = self.root_page;
         let mut path = Vec::new();
         loop {
@@ -648,7 +648,7 @@ where
     fn find_search_start_leaf(
         &self,
         key: &K,
-        mm: &impl MemoryAccess,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<BTreeNode<K>> {
         let mut leaf = BTreeNode::<K>::read(self.find_leaf_page(key, mm)?, mm)?;
         loop {
@@ -674,7 +674,7 @@ where
         }
     }
 
-    fn find_leaf_page(&self, key: &K, mm: &impl MemoryAccess) -> MemoryResult<Page> {
+    fn find_leaf_page(&self, key: &K, mm: &mut impl MemoryAccess) -> MemoryResult<Page> {
         let mut page = self.root_page;
         loop {
             let node = BTreeNode::<K>::read(page, mm)?;
@@ -962,7 +962,7 @@ mod tests {
     fn test_index_tree_init_creates_empty_root_leaf() {
         let mut mm = make_mm();
         let tree = IndexTree::<Uint32>::init(&mut mm).expect("tree init failed");
-        let root = BTreeNode::<Uint32>::read(tree.root_page(), &mm).expect("root read failed");
+        let root = BTreeNode::<Uint32>::read(tree.root_page(), &mut mm).expect("root read failed");
         match root.body {
             NodeBody::Leaf(leaf) => assert!(leaf.entries.is_empty()),
             NodeBody::Internal(_) => panic!("expected leaf root"),
@@ -987,7 +987,7 @@ mod tests {
         }
 
         for value in 0..64u32 {
-            let hits = tree.search(&Uint32(value), &mm).expect("search failed");
+            let hits = tree.search(&Uint32(value), &mut mm).expect("search failed");
             assert_eq!(
                 hits,
                 vec![RecordAddress {
@@ -1005,7 +1005,7 @@ mod tests {
         tree.insert(Uint32(42), RecordAddress { page: 9, offset: 1 }, &mut mm)
             .expect("insert failed");
 
-        let hits = tree.search(&Uint32(99), &mm).expect("search failed");
+        let hits = tree.search(&Uint32(99), &mut mm).expect("search failed");
         assert!(hits.is_empty());
     }
 
@@ -1028,7 +1028,7 @@ mod tests {
         }
 
         let hits = tree
-            .search(&Uint32(7), &mm)
+            .search(&Uint32(7), &mut mm)
             .expect("duplicate search failed");
         assert_eq!(hits.len(), duplicate_count as usize);
         assert_eq!(hits.first(), Some(&RecordAddress { page: 0, offset: 0 }));
@@ -1060,7 +1060,7 @@ mod tests {
 
         for index in [0usize, 1, 7, 32, 89, 139] {
             let key = padded_text_key(index, 7_000);
-            let hits = tree.search(&key, &mm).expect("text search failed");
+            let hits = tree.search(&key, &mut mm).expect("text search failed");
             assert_eq!(
                 hits,
                 vec![RecordAddress {
@@ -1070,7 +1070,7 @@ mod tests {
             );
         }
 
-        let root = BTreeNode::<Text>::read(tree.root_page(), &mm).expect("root read failed");
+        let root = BTreeNode::<Text>::read(tree.root_page(), &mut mm).expect("root read failed");
         assert!(matches!(root.body, NodeBody::Internal(_)));
     }
 
@@ -1088,7 +1088,7 @@ mod tests {
         tree.delete(&Uint32(42), ptr, &mut mm)
             .expect("delete failed");
 
-        let hits = tree.search(&Uint32(42), &mm).expect("search failed");
+        let hits = tree.search(&Uint32(42), &mut mm).expect("search failed");
         assert!(hits.is_empty());
     }
 
@@ -1117,7 +1117,7 @@ mod tests {
         tree.delete(&Uint32(11), removed, &mut mm)
             .expect("delete duplicate failed");
 
-        let hits = tree.search(&Uint32(11), &mm).expect("search failed");
+        let hits = tree.search(&Uint32(11), &mut mm).expect("search failed");
         assert_eq!(hits.len(), count as usize - 1);
         assert!(!hits.contains(&removed));
     }
@@ -1157,7 +1157,7 @@ mod tests {
         tree.update(&Uint32(42), old, new.clone(), &mut mm)
             .expect("update failed");
 
-        let hits = tree.search(&Uint32(42), &mm).expect("search failed");
+        let hits = tree.search(&Uint32(42), &mut mm).expect("search failed");
         assert_eq!(hits, vec![new]);
     }
 
@@ -1179,11 +1179,11 @@ mod tests {
         }
 
         let mut walker = tree
-            .range_scan(&Uint32(20), Some(&Uint32(30)), &mm)
+            .range_scan(&Uint32(20), Some(&Uint32(30)), &mut mm)
             .expect("range scan failed");
 
         for expected in 20..30u32 {
-            let next = walker.next(&mm).expect("walker next failed");
+            let next = walker.next(&mut mm).expect("walker next failed");
             assert_eq!(
                 next,
                 Some(RecordAddress {
@@ -1192,7 +1192,10 @@ mod tests {
                 })
             );
         }
-        assert_eq!(walker.next(&mm).expect("walker exhaustion failed"), None);
+        assert_eq!(
+            walker.next(&mut mm).expect("walker exhaustion failed"),
+            None
+        );
     }
 
     #[test]
@@ -1257,8 +1260,8 @@ mod tests {
         }
 
         // Verify the root is internal (tree has > 1 level)
-        let root =
-            BTreeNode::<Text>::read(tree.root_page(), &mm).expect("root read after cascade failed");
+        let root = BTreeNode::<Text>::read(tree.root_page(), &mut mm)
+            .expect("root read after cascade failed");
         assert!(
             matches!(root.body, NodeBody::Internal(_)),
             "root must be internal after cascading splits"
@@ -1267,8 +1270,8 @@ mod tests {
         // Verify the root has internal children (at least 3 levels)
         if let NodeBody::Internal(ref internal) = root.body {
             let first_child_page = internal.entries[0].child_page;
-            let first_child =
-                BTreeNode::<Text>::read(first_child_page, &mm).expect("first child read failed");
+            let first_child = BTreeNode::<Text>::read(first_child_page, &mut mm)
+                .expect("first child read failed");
             assert!(
                 matches!(first_child.body, NodeBody::Internal(_)),
                 "root's children must be internal (3+ levels)"
@@ -1279,7 +1282,7 @@ mod tests {
         for i in [0, 1, 50, 100, 200, 400, 600, 799] {
             let key = padded_text_key(i, 7_000);
             let hits = tree
-                .search(&key, &mm)
+                .search(&key, &mut mm)
                 .unwrap_or_else(|_| panic!("search failed for key {i}"));
             assert_eq!(
                 hits.len(),
@@ -1292,10 +1295,10 @@ mod tests {
 
         // Verify range scan across the full tree works correctly
         let mut walker = tree
-            .range_scan(&padded_text_key(0, 7_000), None, &mm)
+            .range_scan(&padded_text_key(0, 7_000), None, &mut mm)
             .expect("range scan after cascade failed");
         let mut scanned = 0usize;
-        while walker.next(&mm).expect("walker next failed").is_some() {
+        while walker.next(&mut mm).expect("walker next failed").is_some() {
             scanned += 1;
         }
         assert_eq!(scanned, count, "range scan must return all {count} entries");
@@ -1322,7 +1325,7 @@ mod tests {
 
         // Search should return empty for every key
         for i in [0, 1, 100, 5000, 10000, 19999] {
-            let hits = tree.search(&Uint32(i), &mm).expect("search failed");
+            let hits = tree.search(&Uint32(i), &mut mm).expect("search failed");
             assert!(hits.is_empty(), "key {i} should have been deleted");
         }
     }
@@ -1360,12 +1363,12 @@ mod tests {
 
         // Verify all 10_000 entries are searchable
         for i in 0..5_000u32 {
-            let hits = tree.search(&Uint32(i), &mm).expect("search failed");
+            let hits = tree.search(&Uint32(i), &mut mm).expect("search failed");
             assert_eq!(hits.len(), 1, "key {i} should have exactly 1 hit");
             assert_eq!(hits[0].page, i + 20_000);
         }
         for i in 5_000..10_000u32 {
-            let hits = tree.search(&Uint32(i), &mm).expect("search failed");
+            let hits = tree.search(&Uint32(i), &mut mm).expect("search failed");
             assert_eq!(hits.len(), 1, "key {i} should have exactly 1 hit");
             assert_eq!(hits[0].page, i);
         }
@@ -1398,10 +1401,10 @@ mod tests {
         .expect("sentinel insert failed");
 
         let mut walker = tree
-            .range_scan(&Uint32(15), Some(&Uint32(16)), &mm)
+            .range_scan(&Uint32(15), Some(&Uint32(16)), &mut mm)
             .expect("range scan failed");
         let mut count = 0usize;
-        while let Some(pointer) = walker.next(&mm).expect("walker next failed") {
+        while let Some(pointer) = walker.next(&mut mm).expect("walker next failed") {
             assert_eq!(pointer.page, count as u32);
             count += 1;
         }

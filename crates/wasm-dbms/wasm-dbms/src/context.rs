@@ -63,9 +63,9 @@ where
     /// Creates a new DBMS context with the default [`AccessControlList`],
     /// initializing the memory manager and loading persisted state.
     pub fn new(memory: M) -> Self {
-        let mm = MemoryManager::init(memory);
-        let schema_registry = SchemaRegistry::load(&mm).unwrap_or_default();
-        let acl = AccessControlList::load(&mm).unwrap_or_default();
+        let mut mm = MemoryManager::init(memory);
+        let schema_registry = SchemaRegistry::load(&mut mm).unwrap_or_default();
+        let acl = AccessControlList::load(&mut mm).unwrap_or_default();
 
         Self {
             mm: RefCell::new(mm),
@@ -84,9 +84,9 @@ where
 {
     /// Creates a new DBMS context with a custom access control provider.
     pub fn with_acl(memory: M) -> Self {
-        let mm = MemoryManager::init(memory);
-        let schema_registry = SchemaRegistry::load(&mm).unwrap_or_default();
-        let acl = A::load(&mm).unwrap_or_default();
+        let mut mm = MemoryManager::init(memory);
+        let schema_registry = SchemaRegistry::load(&mut mm).unwrap_or_default();
+        let acl = A::load(&mut mm).unwrap_or_default();
 
         Self {
             mm: RefCell::new(mm),

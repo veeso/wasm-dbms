@@ -51,7 +51,7 @@ where
     /// Buffer used to read records from memory.
     buffer: Vec<u8>,
     /// Reference to the memory access implementor.
-    mm: &'a MA,
+    mm: &'a mut MA,
     page_ledger: &'a PageLedger,
     page_size: usize,
     phantom: PhantomData<E>,
@@ -66,7 +66,7 @@ where
     MA: MemoryAccess,
 {
     /// Creates a new table reader starting from the beginning of the table registry.
-    pub fn new(page_ledger: &'a PageLedger, mm: &'a MA) -> Self {
+    pub fn new(page_ledger: &'a PageLedger, mm: &'a mut MA) -> Self {
         // init position
         let position = page_ledger.pages().first().map(|page_record| Position {
             page: page_record.page,
@@ -234,7 +234,7 @@ mod tests {
         const COUNT: u32 = 4_000;
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let table_registry = mock_table_registry(COUNT, &mut mm);
-        let mut reader = mocked(&table_registry, &mm);
+        let mut reader = mocked(&table_registry, &mut mm);
 
         // should read all records
         let mut id = 0;
@@ -253,7 +253,7 @@ mod tests {
     fn test_should_find_next_page() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let table_registry = mock_table_registry(4_000, &mut mm);
-        let reader = mocked(&table_registry, &mm);
+        let reader = mocked(&table_registry, &mut mm);
 
         let page = reader.position.expect("should have position").page;
 
@@ -275,7 +275,7 @@ mod tests {
     fn test_should_find_next_record_position() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let table_registry = mock_table_registry(1, &mut mm);
-        let reader = mocked(&table_registry, &mm);
+        let reader = mocked(&table_registry, &mut mm);
 
         let mut buf = vec![0u8; User::ALIGNMENT as usize];
         buf.extend_from_slice(&[5u8, 0u8, 0u8, 0, 0, 0, 0, 0, 0]);
@@ -293,7 +293,7 @@ mod tests {
     fn test_should_not_find_next_record_position_none() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let table_registry = mock_table_registry(1, &mut mm);
-        let reader = mocked(&table_registry, &mm);
+        let reader = mocked(&table_registry, &mut mm);
 
         let buf = vec![0u8; User::ALIGNMENT as usize * 2];
         let result = reader
@@ -307,7 +307,7 @@ mod tests {
     fn test_should_not_find_next_record_position_too_short_for_length() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let table_registry = mock_table_registry(1, &mut mm);
-        let reader = mocked(&table_registry, &mm);
+        let reader = mocked(&table_registry, &mut mm);
 
         let buf = [5u8, 16u8];
         let result = reader.find_next_record_position(&buf, 0);
@@ -324,7 +324,7 @@ mod tests {
     fn test_should_not_find_next_record_position_too_short_for_data() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let table_registry = mock_table_registry(1, &mut mm);
-        let reader = mocked(&table_registry, &mm);
+        let reader = mocked(&table_registry, &mut mm);
 
         let buf = [5u8, 0u8, 0u8, 0, 0];
         let result = reader.find_next_record_position(&buf, 0);
@@ -368,7 +368,7 @@ mod tests {
 
     fn mocked<'a>(
         table_registry: &'a TableRegistry,
-        mm: &'a MemoryManager<HeapMemoryProvider>,
+        mm: &'a mut MemoryManager<HeapMemoryProvider>,
     ) -> TableReader<'a, User, MemoryManager<HeapMemoryProvider>> {
         TableReader::new(&table_registry.page_ledger, mm)
     }

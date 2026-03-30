@@ -38,7 +38,7 @@ where
     }
 
     /// Returns the next pointer in the scan, or `None` when exhausted.
-    pub fn next(&mut self, mm: &impl MemoryAccess) -> MemoryResult<Option<RecordAddress>> {
+    pub fn next(&mut self, mm: &mut impl MemoryAccess) -> MemoryResult<Option<RecordAddress>> {
         loop {
             if let Some(entry) = self.entries.get(self.cursor) {
                 if self

@@ -19,7 +19,7 @@ pub trait AccessControl: Default {
     type Id;
 
     /// Loads ACL state from persisted memory.
-    fn load<M>(mm: &MemoryManager<M>) -> MemoryResult<Self>
+    fn load<M>(mm: &mut MemoryManager<M>) -> MemoryResult<Self>
     where
         M: MemoryProvider,
         Self: Sized;
@@ -59,7 +59,7 @@ pub struct NoAccessControl;
 impl AccessControl for NoAccessControl {
     type Id = ();
 
-    fn load<M>(_mm: &MemoryManager<M>) -> MemoryResult<Self>
+    fn load<M>(_mm: &mut MemoryManager<M>) -> MemoryResult<Self>
     where
         M: MemoryProvider,
     {
@@ -119,7 +119,7 @@ impl AccessControlList {
 impl AccessControl for AccessControlList {
     type Id = Vec<u8>;
 
-    fn load<M>(mm: &MemoryManager<M>) -> MemoryResult<Self>
+    fn load<M>(mm: &mut MemoryManager<M>) -> MemoryResult<Self>
     where
         M: MemoryProvider,
     {
@@ -308,7 +308,7 @@ mod tests {
         acl.add_identity(identity.clone(), &mut mm).unwrap();
 
         // Load from memory and check if the identity is present
-        let loaded_acl = AccessControlList::load(&mm).unwrap();
+        let loaded_acl = AccessControlList::load(&mut mm).unwrap();
         assert!(loaded_acl.is_allowed(&identity));
     }
 
@@ -346,8 +346,8 @@ mod tests {
 
     #[test]
     fn test_no_access_control_load() {
-        let mm = make_mm();
-        let acl = NoAccessControl::load(&mm).unwrap();
+        let mut mm = make_mm();
+        let acl = NoAccessControl::load(&mut mm).unwrap();
         assert!(acl.is_allowed(&()));
     }
 

@@ -29,7 +29,7 @@ pub trait MemoryProvider {
     /// Reads data from memory starting at `offset` into the provided buffer `buf`.
     ///
     /// Returns an error if `offset + buf.len()` exceeds the current memory size.
-    fn read(&self, offset: u64, buf: &mut [u8]) -> MemoryResult<()>;
+    fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()>;
 
     /// Writes data from the provided buffer `buf` into memory starting at `offset`.
     ///
@@ -62,7 +62,7 @@ impl MemoryProvider for HeapMemoryProvider {
         self.size() / Self::PAGE_SIZE
     }
 
-    fn read(&self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
+    fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
         // check if the read is within bounds
         if offset + buf.len() as u64 > self.size() {
             return Err(MemoryError::OutOfBounds);

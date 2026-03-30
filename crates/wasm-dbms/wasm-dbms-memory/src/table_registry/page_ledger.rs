@@ -20,7 +20,7 @@ pub struct PageLedger {
 
 impl PageLedger {
     /// Load the page ledger from memory at the given [`Page`].
-    pub fn load(page: Page, mm: &impl MemoryAccess) -> MemoryResult<Self> {
+    pub fn load(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
             pages: mm.read_at(page, 0)?,
             ledger_page: page,
@@ -152,7 +152,7 @@ mod tests {
         page_ledger
             .write(&mut mm)
             .expect("failed to write page ledger");
-        let loaded_ledger = PageLedger::load(page, &mm).expect("failed to load page ledger");
+        let loaded_ledger = PageLedger::load(page, &mut mm).expect("failed to load page ledger");
         assert_eq!(page_ledger.pages.pages, loaded_ledger.pages.pages);
     }
 
@@ -162,7 +162,7 @@ mod tests {
         // allocate page
         let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
         let mut page_ledger =
-            PageLedger::load(ledger_page, &mm).expect("failed to load page ledger");
+            PageLedger::load(ledger_page, &mut mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());
 
         // create test record
@@ -189,7 +189,7 @@ mod tests {
 
         // reload
         let reloaded_ledger =
-            PageLedger::load(ledger_page, &mm).expect("failed to load page ledger");
+            PageLedger::load(ledger_page, &mut mm).expect("failed to load page ledger");
         assert_eq!(page_ledger.pages.pages, reloaded_ledger.pages.pages);
     }
 
@@ -199,7 +199,7 @@ mod tests {
         // allocate page
         let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
         let mut page_ledger =
-            PageLedger::load(ledger_page, &mm).expect("failed to load page ledger");
+            PageLedger::load(ledger_page, &mut mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());
 
         // create test record
@@ -248,7 +248,7 @@ mod tests {
         // allocate page
         let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
         let mut page_ledger =
-            PageLedger::load(ledger_page, &mm).expect("failed to load page ledger");
+            PageLedger::load(ledger_page, &mut mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());
 
         // create test record with 32 bytes alignment

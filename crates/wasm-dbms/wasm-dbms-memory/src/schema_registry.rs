@@ -26,7 +26,7 @@ pub struct SchemaRegistry {
 
 impl SchemaRegistry {
     /// Load the schema registry from memory.
-    pub fn load(mm: &MemoryManager<impl MemoryProvider>) -> MemoryResult<Self> {
+    pub fn load(mm: &mut MemoryManager<impl MemoryProvider>) -> MemoryResult<Self> {
         let page = mm.schema_page();
         let registry: Self = mm.read_at(page, 0)?;
         Ok(registry)
@@ -175,7 +175,8 @@ mod tests {
         let mut mm = make_mm();
 
         // load
-        let mut registry = SchemaRegistry::load(&mm).expect("failed to load init schema registry");
+        let mut registry =
+            SchemaRegistry::load(&mut mm).expect("failed to load init schema registry");
 
         // register table
         let registry_page = registry
@@ -204,7 +205,7 @@ mod tests {
         assert_eq!(another_registry_page, another_fetched_page);
 
         // re-init
-        let reloaded = SchemaRegistry::load(&mm).expect("failed to reload schema registry");
+        let reloaded = SchemaRegistry::load(&mut mm).expect("failed to reload schema registry");
         assert_eq!(registry, reloaded);
         // should have two
         assert_eq!(reloaded.tables.len(), 2);
@@ -248,8 +249,8 @@ mod tests {
             .expect("failed to register table");
 
         // check that index ledger is initialized with the correct indexes
-        let mut index_ledger =
-            IndexLedger::load(pages.index_registry_page, &mm).expect("failed to load index ledger");
+        let mut index_ledger = IndexLedger::load(pages.index_registry_page, &mut mm)
+            .expect("failed to load index ledger");
 
         // insert an index for id
         index_ledger
@@ -262,7 +263,7 @@ mod tests {
             .expect("failed to insert index");
         // search the index
         let result = index_ledger
-            .search(&["id"], &Int32::from(1i32), &mm)
+            .search(&["id"], &Int32::from(1i32), &mut mm)
             .expect("failed to search index")
             .get(0)
             .copied()
@@ -530,8 +531,8 @@ mod tests {
 
     #[test]
     fn test_load_fresh_memory_returns_empty_registry() {
-        let mm = make_mm();
-        let registry = SchemaRegistry::load(&mm).expect("failed to load from fresh memory");
+        let mut mm = make_mm();
+        let registry = SchemaRegistry::load(&mut mm).expect("failed to load from fresh memory");
         assert_eq!(registry.tables.len(), 0);
     }
 
@@ -548,7 +549,7 @@ mod tests {
             .expect("failed to register another");
         registry.save(&mut mm).expect("failed to save");
 
-        let reloaded = SchemaRegistry::load(&mm).expect("failed to reload");
+        let reloaded = SchemaRegistry::load(&mut mm).expect("failed to reload");
         assert_eq!(reloaded.tables.len(), 2);
         assert_eq!(registry, reloaded);
     }

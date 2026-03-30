@@ -22,7 +22,7 @@ struct FreeSegmentsList(Vec<FreeSegment>);
 
 impl FreeSegmentsTable {
     /// Loads the [`FreeSegmentsTable`] from the given page.
-    pub fn load(page: Page, mm: &impl MemoryAccess) -> MemoryResult<Self> {
+    pub fn load(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         let records = mm.read_at(page, 0)?;
         let max_records = Self::max_segments(mm);
         Ok(Self {
@@ -515,7 +515,7 @@ mod tests {
             .expect("Insert failed");
 
         // Load the table again to verify persistence
-        let reloaded_table = FreeSegmentsTable::load(table.page, &mm).expect("Reload failed");
+        let reloaded_table = FreeSegmentsTable::load(table.page, &mut mm).expect("Reload failed");
         assert_eq!(reloaded_table.records.0.len(), 1);
         assert_eq!(
             reloaded_table.records.0[0],
@@ -535,7 +535,7 @@ mod tests {
             .insert_free_segment(1, 0, 100, &mut mm)
             .expect("Insert failed");
 
-        let mut table = FreeSegmentsTable::load(table.page, &mm).expect("Reload failed");
+        let mut table = FreeSegmentsTable::load(table.page, &mut mm).expect("Reload failed");
         assert_eq!(table.records.0.len(), 1);
 
         table
@@ -551,7 +551,7 @@ mod tests {
             .expect("remove failed");
 
         // Load the table again to verify persistence
-        let reloaded_table = FreeSegmentsTable::load(table.page, &mm).expect("Reload failed");
+        let reloaded_table = FreeSegmentsTable::load(table.page, &mut mm).expect("Reload failed");
         assert!(reloaded_table.records.0.is_empty());
     }
 
