@@ -2,10 +2,10 @@
 
 ![logo](https://wasm-dbms.cc/logo-128.png)
 
-[![license-mit](https://img.shields.io/crates/l/ic-dbms-client.svg)](https://opensource.org/licenses/MIT)
+[![license-mit](https://img.shields.io/crates/l/ic-dbms-client.svg?logo=rust)](https://opensource.org/licenses/MIT)
 [![repo-stars](https://img.shields.io/github/stars/veeso/wasm-dbms?style=flat)](https://github.com/veeso/wasm-dbms/stargazers)
-[![downloads](https://img.shields.io/crates/d/ic-dbms-client.svg)](https://crates.io/crates/ic-dbms-client)
-[![latest-version](https://img.shields.io/crates/v/ic-dbms-client.svg)](https://crates.io/crates/ic-dbms-client)
+[![downloads](https://img.shields.io/crates/d/ic-dbms-client.svg?logo=rust)](https://crates.io/crates/ic-dbms-client)
+[![latest-version](https://img.shields.io/crates/v/ic-dbms-client.svg?logo=rust)](https://crates.io/crates/ic-dbms-client)
 [![ko-fi](https://img.shields.io/badge/donate-ko--fi-red)](https://ko-fi.com/veeso)
 [![conventional-commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://conventionalcommits.org)
 
