@@ -8,6 +8,7 @@ members = [
   "crates/ic-dbms/integration-tests/dbms-canister-client-integration",
   "crates/ic-dbms/integration-tests/pocket-ic-tests",
   "crates/ic-dbms/integration-tests/pocket-ic-tests-macro",
+  "crates/wasi-dbms/wasi-dbms-memory",
   "crates/wasm-dbms/wasm-dbms-api",
   "crates/wasm-dbms/wasm-dbms-memory",
   "crates/wasm-dbms/wasm-dbms",

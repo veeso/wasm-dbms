@@ -6,7 +6,7 @@ clean:
   cargo clean
 
 [group('build')]
-build_all: build_wasm_dbms build_library_wasm32 build_all_canisters build_wasm_dbms_example
+build_all: build_wasm_dbms build_wasi_dbms build_library_wasm32 build_all_canisters build_wasm_dbms_example
 
 # Build generic wasm-dbms crates for wasm32-unknown-unknown
 [group('build')]
@@ -15,6 +15,11 @@ build_wasm_dbms:
   cargo build --target wasm32-unknown-unknown --release --package "wasm-dbms-api"
   cargo build --target wasm32-unknown-unknown --release --package "wasm-dbms-memory"
   cargo build --target wasm32-unknown-unknown --release --package "wasm-dbms"
+
+# Build generic wasi-dbms crates for wasm32-unknown-unknown
+[group('build')]
+build_wasi_dbms:
+  cargo build --target wasm32-unknown-unknown --release --package "wasi-dbms-memory"
 
 # Build IC-specific library crates for wasm32-unknown-unknown
 [group('build')]
