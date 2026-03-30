@@ -37,7 +37,7 @@ impl MemoryProvider for HashMapMemoryProvider {
         Ok(previous_size)
     }
 
-    fn read(&self, offset: u64, buf: &mut [u8]) -> wasm_dbms_api::prelude::MemoryResult<()> {
+    fn read(&mut self, offset: u64, buf: &mut [u8]) -> wasm_dbms_api::prelude::MemoryResult<()> {
         if offset + buf.len() as u64 > self.size() {
             return Err(MemoryError::OutOfBounds);
         }

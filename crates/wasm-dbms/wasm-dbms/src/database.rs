@@ -414,8 +414,8 @@ where
             .table_registry_page::<T>()
             .ok_or(DbmsError::Table(TableError::TableNotFound))?;
 
-        let mm = self.ctx.mm.borrow();
-        TableRegistry::load(registry_pages, &*mm).map_err(DbmsError::from)
+        let mut mm = self.ctx.mm.borrow_mut();
+        TableRegistry::load(registry_pages, &mut *mm).map_err(DbmsError::from)
     }
 
     /// Sorts query results by a column.
@@ -451,7 +451,7 @@ where
         &self,
         reader: &IndexReader<'_>,
         plan: &IndexPlan,
-        mm: &MA,
+        mm: &mut MA,
     ) -> DbmsResult<IndexSearchResult>
     where
         MA: MemoryAccess,
@@ -502,19 +502,19 @@ where
             return Ok(None);
         };
 
-        let mm = self.ctx.mm.borrow();
+        let mut mm = self.ctx.mm.borrow_mut();
         let reader = IndexReader::new(
             table_registry.index_ledger(),
             table_overlay.index_overlay(T::table_name()),
         );
-        let search_result = self.execute_index_plan(&reader, &analyzed.plan, &*mm)?;
+        let search_result = self.execute_index_plan(&reader, &analyzed.plan, &mut *mm)?;
 
         let mut indexed_rows = Vec::new();
         let pk_name = T::primary_key();
 
         for address in &search_result.addresses {
             let record: T = table_registry
-                .read_at(*address, &*mm)
+                .read_at(*address, &mut *mm)
                 .map_err(DbmsError::from)?;
             let values = record.to_values();
             let Some(pk) = values
@@ -568,10 +568,10 @@ where
 
                 for pk in pending_overlay_pks {
                     let pk_key = [pk];
-                    let pk_lookup = pk_reader.search_eq(&pk_columns, &pk_key, &*mm)?;
+                    let pk_lookup = pk_reader.search_eq(&pk_columns, &pk_key, &mut *mm)?;
                     for address in pk_lookup.addresses {
                         let record: T = table_registry
-                            .read_at(address, &*mm)
+                            .read_at(address, &mut *mm)
                             .map_err(DbmsError::from)?;
                         let values = record.to_values();
                         let Some(patched_values) = overlay.patch_row(values) else {
@@ -623,8 +623,8 @@ where
                 }
             }
         } else {
-            let mm = self.ctx.mm.borrow();
-            let table_reader = table_registry.read::<T, _>(&*mm);
+            let mut mm = self.ctx.mm.borrow_mut();
+            let table_reader = table_registry.read::<T, _>(&mut *mm);
             let mut table_reader = table_overlay.reader(table_reader);
 
             while let Some(values) = table_reader.try_next()? {
@@ -739,7 +739,7 @@ where
     where
         T: TableSchema,
     {
-        let mm = self.ctx.mm.borrow();
+        let mut mm = self.ctx.mm.borrow_mut();
 
         // `collect_matching_records` is only used by the non-transactional update/delete paths.
         // Transactional mutations first resolve rows via `existing_rows_for_filter`, which reads
@@ -749,12 +749,12 @@ where
             && let Some(analyzed) = analyze_filter(filter, T::indexes())
         {
             let reader = IndexReader::new(table_registry.index_ledger(), None);
-            let search_result = self.execute_index_plan(&reader, &analyzed.plan, &*mm)?;
+            let search_result = self.execute_index_plan(&reader, &analyzed.plan, &mut *mm)?;
 
             let mut records = Vec::new();
             for address in search_result.addresses {
                 let record: T = table_registry
-                    .read_at(address, &*mm)
+                    .read_at(address, &mut *mm)
                     .map_err(DbmsError::from)?;
                 let record_values = record.clone().to_values();
                 if let Some(remaining_filter) = &analyzed.remaining_filter
@@ -775,7 +775,7 @@ where
             return Ok(records);
         }
 
-        let mut table_reader = table_registry.read::<T, _>(&*mm);
+        let mut table_reader = table_registry.read::<T, _>(&mut *mm);
         let mut records = vec![];
         while let Some(values) = table_reader.try_next()? {
             let record_values = values.record.clone().to_values();

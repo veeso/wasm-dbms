@@ -35,7 +35,7 @@ pub struct TableRegistry {
 
 impl TableRegistry {
     /// Loads the table registry from memory.
-    pub fn load(table_pages: TableRegistryPage, mm: &impl MemoryAccess) -> MemoryResult<Self> {
+    pub fn load(table_pages: TableRegistryPage, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
             free_segments_ledger: FreeSegmentsLedger::load(table_pages.free_segments_page, mm)?,
             page_ledger: PageLedger::load(table_pages.pages_list_page, mm)?,
@@ -80,7 +80,7 @@ impl TableRegistry {
     /// Creates a [`TableReader`] to read records from the table registry.
     ///
     /// Use [`TableReader::try_next`] to read records one by one.
-    pub fn read<'a, E, MA>(&'a self, mm: &'a MA) -> TableReader<'a, E, MA>
+    pub fn read<'a, E, MA>(&'a self, mm: &'a mut MA) -> TableReader<'a, E, MA>
     where
         E: Encode,
         MA: MemoryAccess,
@@ -89,7 +89,7 @@ impl TableRegistry {
     }
 
     /// Reads a single record at the given address.
-    pub fn read_at<E, MA>(&self, address: RecordAddress, mm: &MA) -> MemoryResult<E>
+    pub fn read_at<E, MA>(&self, address: RecordAddress, mm: &mut MA) -> MemoryResult<E>
     where
         E: Encode,
         MA: MemoryAccess,
@@ -333,7 +333,7 @@ mod tests {
             index_registry_page,
         };
 
-        let registry: MemoryResult<TableRegistry> = TableRegistry::load(table_pages, &mm);
+        let registry: MemoryResult<TableRegistry> = TableRegistry::load(table_pages, &mut mm);
         assert!(registry.is_ok());
     }
 
@@ -452,7 +452,7 @@ mod tests {
             .expect("failed to insert");
 
         // find where it was written
-        let mut reader = registry.read(&mm);
+        let mut reader = registry.read(&mut mm);
         let next_record: NextRecord<User> = reader
             .try_next()
             .expect("failed to read")
@@ -471,7 +471,7 @@ mod tests {
         );
 
         // should have been deleted
-        let mut reader = registry.read::<User, _>(&mm);
+        let mut reader = registry.read::<User, _>(&mut mm);
         assert!(reader.try_next().expect("failed to read").is_none());
 
         // should have a free segment
@@ -484,7 +484,7 @@ mod tests {
                     email: "new_user@example.com".to_string(),
                     age: 25,
                 },
-                &mm,
+                &mut mm,
             )
             .expect("failed to find free segment")
             .expect("could not find the free segment after free")
@@ -516,7 +516,7 @@ mod tests {
             .expect("failed to insert record");
 
         let stored: User = registry
-            .read_at(address, &mm)
+            .read_at(address, &mut mm)
             .expect("failed to read record");
         assert_eq!(stored, record);
     }
@@ -546,7 +546,7 @@ mod tests {
             .expect("failed to update record");
 
         let stored: User = registry
-            .read_at(new_address, &mm)
+            .read_at(new_address, &mut mm)
             .expect("failed to read updated record");
         assert_eq!(stored, new_record);
     }
@@ -575,7 +575,7 @@ mod tests {
             .expect("failed to insert");
 
         // find where it was written
-        let mut reader = registry.read::<User, _>(&mm);
+        let mut reader = registry.read::<User, _>(&mut mm);
         let next_record = reader
             .try_next()
             .expect("failed to read")
@@ -596,7 +596,7 @@ mod tests {
         assert_eq!(new_location, old_address); // should be same address
 
         // read back the record
-        let mut reader = registry.read::<User, _>(&mm);
+        let mut reader = registry.read::<User, _>(&mut mm);
         let next_record = reader
             .try_next()
             .expect("failed to read")
@@ -641,7 +641,7 @@ mod tests {
             .expect("failed to insert extra user");
 
         // find where it was written
-        let mut reader = registry.read::<User, _>(&mm);
+        let mut reader = registry.read::<User, _>(&mut mm);
         let old_record_from_db = reader
             .try_next()
             .expect("failed to read")
@@ -663,7 +663,7 @@ mod tests {
         assert_ne!(new_location, old_address); // should be different page
 
         // read back the record
-        let mut reader = registry.read::<User, _>(&mm);
+        let mut reader = registry.read::<User, _>(&mut mm);
 
         // find extra record first
         let _ = reader
@@ -707,7 +707,7 @@ mod tests {
                 age: 20,
             };
             // find where it was written
-            let mut reader = registry.read::<User, _>(&mm);
+            let mut reader = registry.read::<User, _>(&mut mm);
             let mut deleted = false;
             while let Some(next_record) = reader.try_next().expect("failed to read") {
                 if next_record.record.id == id {
@@ -737,7 +737,7 @@ mod tests {
                 age: 20,
             };
             // find where it was written
-            let mut reader = registry.read::<User, _>(&mm);
+            let mut reader = registry.read::<User, _>(&mut mm);
             let mut deleted = false;
             while let Some(next_record) = reader.try_next().expect("failed to read") {
                 if next_record.record.id == id {
@@ -791,7 +791,7 @@ mod tests {
             .insert(record.clone(), &mut mm)
             .expect("failed to insert");
         // get record page
-        let mut reader = registry.read::<User, _>(&mm);
+        let mut reader = registry.read::<User, _>(&mut mm);
         let next_record = reader
             .try_next()
             .expect("failed to read")
@@ -812,7 +812,7 @@ mod tests {
         let raw_record = RawRecord::new(record.clone());
         let free_segment = registry
             .free_segments_ledger
-            .find_reusable_segment(&raw_record, &mm)
+            .find_reusable_segment(&raw_record, &mut mm)
             .expect("failed to find reusable segment")
             .expect("could not find the free segment after free")
             .segment;
@@ -834,7 +834,7 @@ mod tests {
         // get free segment
         let free_segment_after = registry
             .free_segments_ledger
-            .find_reusable_segment(&small_record, &mm)
+            .find_reusable_segment(&small_record, &mut mm)
             .expect("failed to find reusable segment")
             .expect("could not find the free segment after inserting small user")
             .segment;

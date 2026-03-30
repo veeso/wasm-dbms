@@ -62,7 +62,7 @@ impl Journal {
     /// written.
     fn record<P>(
         &mut self,
-        mm: &MemoryManager<P>,
+        mm: &mut MemoryManager<P>,
         page: Page,
         offset: PageOffset,
         len: usize,
@@ -115,7 +115,7 @@ where
         self.mm.allocate_page()
     }
 
-    fn read_at<D>(&self, page: Page, offset: PageOffset) -> MemoryResult<D>
+    fn read_at<D>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>
     where
         D: Encode,
     {
@@ -146,7 +146,12 @@ where
         self.mm.zero(page, offset, data)
     }
 
-    fn read_at_raw(&self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize> {
+    fn read_at_raw(
+        &mut self,
+        page: Page,
+        offset: PageOffset,
+        buf: &mut [u8],
+    ) -> MemoryResult<usize> {
         self.mm.read_at_raw(page, offset, buf)
     }
 }

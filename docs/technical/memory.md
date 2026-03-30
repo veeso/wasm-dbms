@@ -115,7 +115,7 @@ pub trait MemoryProvider {
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64>;
 
     /// Read bytes from memory at offset
-    fn read(&self, offset: u64, buf: &mut [u8]) -> MemoryResult<()>;
+    fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()>;
 
     /// Write bytes to memory at offset
     fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()>;
@@ -126,7 +126,8 @@ pub trait MemoryProvider {
 
 | Implementation | Use Case |
 |----------------|----------|
-| `IcMemoryProvider` | Production (uses `ic_cdk::stable::*`) |
+| `IcMemoryProvider` | IC production (uses `ic_cdk::stable::*`) |
+| `WasiMemoryProvider` | WASI production (file-backed, single flat file) |
 | `HeapMemoryProvider` | Testing (uses `Vec<u8>`) |
 
 ```rust
@@ -142,7 +143,7 @@ impl MemoryProvider for IcMemoryProvider {
             .map_err(MemoryError::ProviderError)
     }
 
-    fn read(&self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
+    fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
         ic_cdk::stable::stable_read(offset, buf);
         Ok(())
     }
@@ -176,10 +177,10 @@ to substitute a journaled writer for atomic transactions (see [Atomicity](./atom
 pub trait MemoryAccess {
     fn page_size(&self) -> u64;
     fn allocate_page(&mut self) -> MemoryResult<Page>;
-    fn read_at<D: Encode>(&self, page: Page, offset: PageOffset) -> MemoryResult<D>;
+    fn read_at<D: Encode>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>;
     fn write_at<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
     fn zero<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
-    fn read_at_raw(&self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize>;
+    fn read_at_raw(&mut self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize>;
 }
 ```
 

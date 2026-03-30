@@ -49,7 +49,7 @@ impl IndexReader<'_> {
         &self,
         columns: &[&'static str],
         key: &[Value],
-        mm: &MA,
+        mm: &mut MA,
     ) -> MemoryResult<IndexSearchResult>
     where
         MA: MemoryAccess,
@@ -71,7 +71,7 @@ impl IndexReader<'_> {
         columns: &[&'static str],
         start: Option<&[Value]>,
         end: Option<&[Value]>,
-        mm: &MA,
+        mm: &mut MA,
     ) -> MemoryResult<IndexSearchResult>
     where
         MA: MemoryAccess,
@@ -108,7 +108,7 @@ impl IndexReader<'_> {
         &self,
         columns: &[&'static str],
         values: &[Vec<Value>],
-        mm: &MA,
+        mm: &mut MA,
     ) -> MemoryResult<IndexSearchResult>
     where
         MA: MemoryAccess,
@@ -144,7 +144,7 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let ledger_page = mm.allocate_page().expect("failed to allocate page");
         IndexLedger::init(ledger_page, &[IndexDef(&["name"])], &mut mm).expect("init failed");
-        let ledger = IndexLedger::load(ledger_page, &mm).expect("load failed");
+        let ledger = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
         (mm, ledger)
     }
 
@@ -169,7 +169,7 @@ mod tests {
             .expect("insert failed");
 
         let result = IndexReader::new(&ledger, None)
-            .search_eq(&["name"], &name_key("alice"), &mm)
+            .search_eq(&["name"], &name_key("alice"), &mut mm)
             .expect("search failed");
 
         assert_eq!(
@@ -184,12 +184,12 @@ mod tests {
 
     #[test]
     fn test_search_eq_with_overlay_additions() {
-        let (mm, ledger) = setup_ledger();
+        let (mut mm, ledger) = setup_ledger();
         let mut overlay = IndexOverlay::default();
         overlay.insert(&["name"], name_key("alice"), pk(1));
 
         let result = IndexReader::new(&ledger, Some(&overlay))
-            .search_eq(&["name"], &name_key("alice"), &mm)
+            .search_eq(&["name"], &name_key("alice"), &mut mm)
             .expect("search failed");
 
         assert!(result.addresses.is_empty());
@@ -222,7 +222,7 @@ mod tests {
                 &["name"],
                 Some(name_key("alice").as_slice()),
                 Some(name_key("carol").as_slice()),
-                &mm,
+                &mut mm,
             )
             .expect("range search failed");
 
@@ -247,7 +247,7 @@ mod tests {
             .search_in(
                 &["name"],
                 &[name_key("alice"), name_key("bob"), name_key("alice")],
-                &mm,
+                &mut mm,
             )
             .expect("search failed");
 

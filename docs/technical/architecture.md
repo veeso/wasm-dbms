@@ -476,11 +476,13 @@ pub trait MemoryProvider {
     fn size(&self) -> u64;
     fn pages(&self) -> u64;
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64>;
-    fn read(&self, offset: u64, buf: &mut [u8]) -> MemoryResult<()>;
+    fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()>;
     fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()>;
 }
 ```
 
 Built-in providers:
-- `IcMemoryProvider` - Uses IC stable memory (production)
+
+- `IcMemoryProvider` - Uses IC stable memory (IC production)
+- `WasiMemoryProvider` - Uses a single flat file (WASI production)
 - `HeapMemoryProvider` - Uses heap memory (testing)

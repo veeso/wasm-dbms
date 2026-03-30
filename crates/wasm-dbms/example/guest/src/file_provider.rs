@@ -75,7 +75,7 @@ impl MemoryProvider for FileMemoryProvider {
         Ok(previous_size)
     }
 
-    fn read(&self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
+    fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
         if offset + buf.len() as u64 > self.size {
             return Err(MemoryError::OutOfBounds);
         }
@@ -221,7 +221,7 @@ mod tests {
 
         // Reopen and verify the data survives.
         {
-            let provider = FileMemoryProvider::new(&path).unwrap();
+            let mut provider = FileMemoryProvider::new(&path).unwrap();
             assert_eq!(provider.size(), WASM_PAGE_SIZE);
             assert_eq!(provider.pages(), 1);
 

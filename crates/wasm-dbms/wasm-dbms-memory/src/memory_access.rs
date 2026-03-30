@@ -23,7 +23,7 @@ pub trait MemoryAccess {
     fn allocate_page(&mut self) -> MemoryResult<Page>;
 
     /// Reads a typed value from the specified page and offset.
-    fn read_at<D>(&self, page: Page, offset: PageOffset) -> MemoryResult<D>
+    fn read_at<D>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>
     where
         D: Encode;
 
@@ -45,5 +45,10 @@ pub trait MemoryAccess {
     /// Reads raw bytes into `buf` at the specified page and offset.
     ///
     /// Returns the number of bytes actually read.
-    fn read_at_raw(&self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize>;
+    fn read_at_raw(
+        &mut self,
+        page: Page,
+        offset: PageOffset,
+        buf: &mut [u8],
+    ) -> MemoryResult<usize>;
 }

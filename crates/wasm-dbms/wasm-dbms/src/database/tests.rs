@@ -771,7 +771,7 @@ fn test_insert_index_populates_single_column_index() {
     let key = vec![Value::Text(Text("alice@example.com".to_string()))];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &key, &*mm)
+        .search(&["email"], &key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], record_address);
@@ -809,7 +809,7 @@ fn test_insert_index_populates_composite_index() {
     ];
     let results = table_registry
         .index_ledger()
-        .search(&["first_name", "last_name"], &key, &*mm)
+        .search(&["first_name", "last_name"], &key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], record_address);
@@ -835,7 +835,7 @@ fn test_insert_index_missing_column_defaults_to_null() {
     let key = vec![Value::Null];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &key, &*mm)
+        .search(&["email"], &key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], record_address);
@@ -864,7 +864,7 @@ fn test_insert_index_always_includes_pk_index() {
     let pk_key = vec![Value::Uint32(Uint32(42))];
     let results = table_registry
         .index_ledger()
-        .search(&["id"], &pk_key, &*mm)
+        .search(&["id"], &pk_key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], record_address);
@@ -889,11 +889,11 @@ fn test_insert_populates_single_column_index() {
 
     // Load the table registry and verify the index was populated.
     let table_registry = db.load_table_registry::<IndexedUser>().unwrap();
-    let mm = db.ctx.mm.borrow();
+    let mut mm = db.ctx.mm.borrow_mut();
     let key = vec![Value::Text(Text("alice@example.com".to_string()))];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &key, &*mm)
+        .search(&["email"], &key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
 }
@@ -916,7 +916,7 @@ fn test_insert_multiple_records_populates_index() {
     }
 
     let table_registry = db.load_table_registry::<IndexedUser>().unwrap();
-    let mm = db.ctx.mm.borrow();
+    let mut mm = db.ctx.mm.borrow_mut();
 
     // Both entries should be individually searchable.
     let alice_key = vec![Value::Text(Text("alice@example.com".to_string()))];
@@ -924,7 +924,7 @@ fn test_insert_multiple_records_populates_index() {
     assert_eq!(
         table_registry
             .index_ledger()
-            .search(&["email"], &alice_key, &*mm)
+            .search(&["email"], &alice_key, &mut *mm)
             .unwrap()
             .len(),
         1
@@ -932,7 +932,7 @@ fn test_insert_multiple_records_populates_index() {
     assert_eq!(
         table_registry
             .index_ledger()
-            .search(&["email"], &bob_key, &*mm)
+            .search(&["email"], &bob_key, &mut *mm)
             .unwrap()
             .len(),
         1
@@ -959,14 +959,14 @@ fn test_insert_populates_composite_index() {
     db.insert::<CompositeUser>(insert).unwrap();
 
     let table_registry = db.load_table_registry::<CompositeUser>().unwrap();
-    let mm = db.ctx.mm.borrow();
+    let mut mm = db.ctx.mm.borrow_mut();
     let key = vec![
         Value::Text(Text("Alice".to_string())),
         Value::Text(Text("Smith".to_string())),
     ];
     let results = table_registry
         .index_ledger()
-        .search(&["first_name", "last_name"], &key, &*mm)
+        .search(&["first_name", "last_name"], &key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
 }
@@ -1050,7 +1050,7 @@ fn test_delete_index_removes_entry() {
     let key = vec![Value::Text(Text("alice@example.com".to_string()))];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &key, &*mm)
+        .search(&["email"], &key, &mut *mm)
         .unwrap();
     assert!(results.is_empty());
 }
@@ -1080,7 +1080,7 @@ fn test_delete_index_removes_pk_index() {
     let pk_key = vec![Value::Uint32(Uint32(42))];
     let results = table_registry
         .index_ledger()
-        .search(&["id"], &pk_key, &*mm)
+        .search(&["id"], &pk_key, &mut *mm)
         .unwrap();
     assert!(results.is_empty());
 }
@@ -1124,7 +1124,7 @@ fn test_update_index_same_key_updates_pointer() {
     let key = vec![Value::Text(Text("alice@example.com".to_string()))];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &key, &*mm)
+        .search(&["email"], &key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], new_address);
@@ -1174,7 +1174,7 @@ fn test_update_index_changed_key_replaces_entry() {
     let old_key = vec![Value::Text(Text("old@example.com".to_string()))];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &old_key, &*mm)
+        .search(&["email"], &old_key, &mut *mm)
         .unwrap();
     assert!(results.is_empty());
 
@@ -1182,7 +1182,7 @@ fn test_update_index_changed_key_replaces_entry() {
     let new_key = vec![Value::Text(Text("new@example.com".to_string()))];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &new_key, &*mm)
+        .search(&["email"], &new_key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], new_address);
@@ -1209,11 +1209,11 @@ fn test_delete_removes_index_entry() {
         .unwrap();
 
     let table_registry = db.load_table_registry::<IndexedUser>().unwrap();
-    let mm = db.ctx.mm.borrow();
+    let mut mm = db.ctx.mm.borrow_mut();
     let key = vec![Value::Text(Text("alice@example.com".to_string()))];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &key, &*mm)
+        .search(&["email"], &key, &mut *mm)
         .unwrap();
     assert!(results.is_empty());
 }
@@ -1242,14 +1242,14 @@ fn test_delete_with_filter_removes_only_matching_index_entries() {
     .unwrap();
 
     let table_registry = db.load_table_registry::<IndexedUser>().unwrap();
-    let mm = db.ctx.mm.borrow();
+    let mut mm = db.ctx.mm.borrow_mut();
 
     // alice's index entry should be gone.
     let alice_key = vec![Value::Text(Text("alice@example.com".to_string()))];
     assert!(
         table_registry
             .index_ledger()
-            .search(&["email"], &alice_key, &*mm)
+            .search(&["email"], &alice_key, &mut *mm)
             .unwrap()
             .is_empty()
     );
@@ -1259,7 +1259,7 @@ fn test_delete_with_filter_removes_only_matching_index_entries() {
     assert_eq!(
         table_registry
             .index_ledger()
-            .search(&["email"], &bob_key, &*mm)
+            .search(&["email"], &bob_key, &mut *mm)
             .unwrap()
             .len(),
         1
@@ -1299,11 +1299,11 @@ fn test_update_non_indexed_column_preserves_index() {
     db.update::<IndexedUser>(patch).unwrap();
 
     let table_registry = db.load_table_registry::<IndexedUser>().unwrap();
-    let mm = db.ctx.mm.borrow();
+    let mut mm = db.ctx.mm.borrow_mut();
     let key = vec![Value::Text(Text("alice@example.com".to_string()))];
     let results = table_registry
         .index_ledger()
-        .search(&["email"], &key, &*mm)
+        .search(&["email"], &key, &mut *mm)
         .unwrap();
     assert_eq!(results.len(), 1);
 }
@@ -1334,14 +1334,14 @@ fn test_update_indexed_column_updates_index() {
     db.update::<IndexedUser>(patch).unwrap();
 
     let table_registry = db.load_table_registry::<IndexedUser>().unwrap();
-    let mm = db.ctx.mm.borrow();
+    let mut mm = db.ctx.mm.borrow_mut();
 
     // The old key should no longer be in the index.
     let old_key = vec![Value::Text(Text("old@example.com".to_string()))];
     assert!(
         table_registry
             .index_ledger()
-            .search(&["email"], &old_key, &*mm)
+            .search(&["email"], &old_key, &mut *mm)
             .unwrap()
             .is_empty()
     );
@@ -1351,7 +1351,7 @@ fn test_update_indexed_column_updates_index() {
     assert_eq!(
         table_registry
             .index_ledger()
-            .search(&["email"], &new_key, &*mm)
+            .search(&["email"], &new_key, &mut *mm)
             .unwrap()
             .len(),
         1

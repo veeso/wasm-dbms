@@ -132,7 +132,7 @@ where
         }
     }
 
-    fn read_at<D>(&self, page: Page, offset: PageOffset) -> MemoryResult<D>
+    fn read_at<D>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>
     where
         D: Encode,
     {
@@ -223,7 +223,12 @@ where
         self.provider.write(absolute_offset, buffer.as_ref())
     }
 
-    fn read_at_raw(&self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize> {
+    fn read_at_raw(
+        &mut self,
+        page: Page,
+        offset: PageOffset,
+        buf: &mut [u8],
+    ) -> MemoryResult<usize> {
         if self.last_page().is_none_or(|last_page| page > last_page) {
             return Err(MemoryError::SegmentationFault {
                 page,
@@ -379,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_should_check_whether_read_is_aligned() {
-        let mm = make_mm();
+        let mut mm = make_mm();
         let result: MemoryResult<FixedSizeData> = mm.read_at(ACL_PAGE, 3);
         assert!(matches!(result, Err(MemoryError::OffsetNotAligned { .. })));
     }
