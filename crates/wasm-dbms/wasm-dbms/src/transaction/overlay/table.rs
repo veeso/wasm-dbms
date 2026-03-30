@@ -154,22 +154,41 @@ impl TableOverlay {
     ///
     /// The return may be [`None`] if the row has been deleted in the overlay.
     ///
+    /// The current PK is tracked across operations so that a PK update
+    /// (e.g. `id: 1 → 2`) correctly chains subsequent operations keyed by
+    /// the new PK value. See <https://github.com/veeso/wasm-dbms/issues/65>.
+    ///
     /// NOTE: `clippy::manual_try_fold`
     /// this lint is TOTALLY WRONG HERE. We may have a row which first becomes None (deleted), then an insert again returns Some.
     #[allow(clippy::manual_try_fold)]
     pub fn patch_row(&self, row: Vec<(ColumnDef, Value)>) -> Option<Vec<(ColumnDef, Value)>> {
         // get primary key value
-        let pk = row
+        let mut current_pk = row
             .iter()
             .find(|(col_def, _)| col_def.primary_key)
             .map(|(_, value)| value)
             .cloned()?;
 
-        // apply all operations for this primary key to the row
-        self.operations
-            .iter()
-            .filter(|op| op.primary_key_value() == &pk)
-            .fold(Some(row), |acc, op| self.apply_operation(acc, op))
+        // apply all operations for this primary key to the row, tracking PK changes
+        let mut current_row = Some(row);
+        for op in &self.operations {
+            if op.primary_key_value() != &current_pk {
+                continue;
+            }
+            current_row = self.apply_operation(current_row, op);
+            // If an update changed the PK column, track the new value
+            if let (Some(patched), Operation::Update(_, updates)) = (&current_row, op)
+                && let Some((_, new_pk)) = updates.iter().find(|(name, _)| {
+                    patched
+                        .iter()
+                        .any(|(col_def, _)| col_def.primary_key && col_def.name == *name)
+                })
+            {
+                current_pk = new_pk.clone();
+            }
+        }
+
+        current_row
     }
 
     /// Applies a single [`Operation`] to a row.
@@ -849,6 +868,76 @@ mod tests {
     }
 
     // -- insert then delete consistency --
+
+    #[test]
+    fn test_patch_row_after_pk_update_applies_subsequent_operations() {
+        // Reproduce #65: update PK (id: 1 → 2), then update another column keyed by new PK.
+        // patch_row must apply both operations to the base row.
+        let mut overlay = TableOverlay::new(index_defs());
+        let original_pk = Value::Uint32(1.into());
+        let row = make_row(1, "Alice", 24);
+
+        // First op: update PK from 1 to 2 (keyed by original PK = 1)
+        overlay.update(
+            original_pk.clone(),
+            vec![("id", Value::Uint32(2.into()))],
+            &row,
+        );
+
+        // After the PK update, existing_rows_for_filter would return the row with PK = 2.
+        // So the second op is keyed by the new PK = 2.
+        let new_pk = Value::Uint32(2.into());
+        let row_after_pk_update = make_row(2, "Alice", 24);
+        overlay.update(
+            new_pk.clone(),
+            vec![("name", Value::Text("Bob".to_string().into()))],
+            &row_after_pk_update,
+        );
+
+        // patch_row receives the original base row (PK = 1)
+        let patched = overlay.patch_row(row).expect("row should not be deleted");
+        assert_eq!(
+            patched[0].1,
+            Value::Uint32(2.into()),
+            "PK should be updated to 2"
+        );
+        assert_eq!(
+            patched[1].1,
+            Value::Text("Bob".to_string().into()),
+            "name should be updated to Bob"
+        );
+        assert_eq!(
+            patched[2].1,
+            Value::Uint32(24.into()),
+            "age should remain 24"
+        );
+    }
+
+    #[test]
+    fn test_patch_row_after_pk_update_then_delete() {
+        // Reproduce #65 variant: update PK then delete by new PK.
+        let mut overlay = TableOverlay::new(index_defs());
+        let original_pk = Value::Uint32(1.into());
+        let row = make_row(1, "Alice", 24);
+
+        // Update PK: 1 → 2
+        overlay.update(
+            original_pk.clone(),
+            vec![("id", Value::Uint32(2.into()))],
+            &row,
+        );
+
+        // Delete by new PK = 2
+        let row_after_pk_update = make_row(2, "Alice", 24);
+        overlay.delete(Value::Uint32(2.into()), &row_after_pk_update);
+
+        // patch_row with original row (PK = 1) should return None (deleted)
+        let patched = overlay.patch_row(row);
+        assert!(
+            patched.is_none(),
+            "row should be deleted after PK update + delete"
+        );
+    }
 
     #[test]
     fn test_insert_then_delete_leaves_clean_index_overlay() {

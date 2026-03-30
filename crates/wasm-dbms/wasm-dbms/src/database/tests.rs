@@ -362,6 +362,84 @@ fn test_transaction_delete_and_commit() {
     assert_eq!(rows[0].id, Some(Uint32(2)));
 }
 
+// -- transaction PK update then subsequent update and commit (#65) --
+
+#[test]
+fn test_transaction_pk_update_then_column_update_and_commit() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    let owner = vec![1, 2, 3];
+    let tx_id = ctx.begin_transaction(owner);
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+    // Step 1: update PK from 1 to 10
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[0], Value::Uint32(Uint32(10)))],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    db.update::<User>(patch).unwrap();
+
+    // Step 2: update name on the same row (now keyed by id=10)
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[1], Value::Text(Text("alicia".to_string())))],
+        Some(Filter::eq("id", Value::Uint32(Uint32(10)))),
+    );
+    db.update::<User>(patch).unwrap();
+
+    // Verify within transaction: select should return the row with both updates
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(10)));
+    assert_eq!(rows[0].name, Some(Text("alicia".to_string())));
+
+    // Commit and verify persistence
+    db.commit().unwrap();
+
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(10)));
+    assert_eq!(rows[0].name, Some(Text("alicia".to_string())));
+}
+
+#[test]
+fn test_transaction_pk_update_then_delete() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    let owner = vec![1, 2, 3];
+    let tx_id = ctx.begin_transaction(owner);
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+    // Step 1: update PK from 1 to 10
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[0], Value::Uint32(Uint32(10)))],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    db.update::<User>(patch).unwrap();
+
+    // Step 2: delete the row by new PK
+    db.delete::<User>(
+        DeleteBehavior::Restrict,
+        Some(Filter::eq("id", Value::Uint32(Uint32(10)))),
+    )
+    .unwrap();
+
+    // Verify within transaction: row should be gone
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 0);
+
+    // Commit and verify
+    db.commit().unwrap();
+
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 0);
+}
+
 // -- select_raw --
 
 #[test]
