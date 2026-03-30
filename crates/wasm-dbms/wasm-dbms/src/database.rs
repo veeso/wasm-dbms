@@ -865,6 +865,33 @@ where
         }
         Ok(())
     }
+
+    /// Fills in auto-increment values for columns that are missing from the input.
+    fn fill_auto_increment_values<T>(
+        &self,
+        table_registry: &mut TableRegistry,
+        mut values: Vec<(ColumnDef, Value)>,
+    ) -> DbmsResult<Vec<(ColumnDef, Value)>>
+    where
+        T: TableSchema,
+    {
+        let mut mm = self.ctx.mm.borrow_mut();
+        // iter over auto-increment columns, for each of them check if the value is provided, if not get the next auto-increment value.
+        for auto_increment_column in T::columns().iter().filter(|col| col.auto_increment) {
+            if values
+                .iter()
+                .any(|(col_def, _)| col_def.name == auto_increment_column.name)
+            {
+                continue;
+            }
+            let next_value = table_registry
+                .next_autoincrement(auto_increment_column.name, &mut *mm)?
+                .ok_or(DbmsError::Table(TableError::SchemaMismatch))?;
+            values.push((*auto_increment_column, next_value));
+        }
+
+        Ok(values)
+    }
 }
 
 /// Provides ordering for two optional values by direction.
@@ -934,7 +961,10 @@ where
         T: TableSchema,
         T::Insert: InsertRecord<Schema = T>,
     {
+        let mut table_registry = self.load_table_registry::<T>()?;
         let record_values = record.clone().into_values();
+        let record_values =
+            self.fill_auto_increment_values::<T>(&mut table_registry, record_values)?;
         let sanitized_values = self.sanitize_values::<T>(record_values)?;
         self.schema
             .validate_insert(self, T::table_name(), &sanitized_values)?;
@@ -942,7 +972,6 @@ where
             self.with_transaction_mut(|tx| tx.insert::<T>(sanitized_values))?;
         } else {
             self.atomic(|db| {
-                let mut table_registry = db.load_table_registry::<T>()?;
                 let record = T::Insert::from_values(&sanitized_values)?;
                 let mut mm = db.ctx.mm.borrow_mut();
                 // update journal with the insert operation before mutating memory

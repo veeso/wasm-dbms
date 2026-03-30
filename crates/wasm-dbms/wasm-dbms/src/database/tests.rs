@@ -36,6 +36,8 @@ pub struct Contract {
     pub id: Uint32,
     #[unique]
     pub code: Text,
+    #[autoincrement]
+    pub order: Uint32,
     #[foreign_key(entity = "User", table = "users", column = "id")]
     pub user_id: Uint32,
 }
@@ -68,7 +70,8 @@ fn insert_contract(
     let insert = ContractInsertRequest::from_values(&[
         (Contract::columns()[0], Value::Uint32(Uint32(id))),
         (Contract::columns()[1], Value::Text(Text(code.to_string()))),
-        (Contract::columns()[2], Value::Uint32(Uint32(user_id))),
+        // columns()[2] is `order` (autoincrement) — omitted so DBMS auto-generates it
+        (Contract::columns()[3], Value::Uint32(Uint32(user_id))),
     ])
     .unwrap();
     db.insert::<Contract>(insert).unwrap();
@@ -1456,7 +1459,8 @@ fn test_insert_contract_with_duplicate_code_fails() {
             Contract::columns()[1],
             Value::Text(Text("CONTRACT-001".to_string())),
         ),
-        (Contract::columns()[2], Value::Uint32(Uint32(1))),
+        // columns()[2] is `order` (autoincrement) — omitted
+        (Contract::columns()[3], Value::Uint32(Uint32(1))),
     ])
     .unwrap();
     let result = db.insert::<Contract>(insert);
@@ -1556,7 +1560,8 @@ fn test_unique_constraint_with_transaction_commit() {
             Contract::columns()[1],
             Value::Text(Text("CONTRACT-002".to_string())),
         ),
-        (Contract::columns()[2], Value::Uint32(Uint32(1))),
+        // columns()[2] is `order` (autoincrement) — omitted
+        (Contract::columns()[3], Value::Uint32(Uint32(1))),
     ])
     .unwrap();
     assert!(matches!(
@@ -1583,4 +1588,234 @@ fn test_unique_constraint_after_delete_allows_reuse() {
 
     // Now inserting a new contract with the same code should succeed
     insert_contract(&db, 2, "CONTRACT-001", 1);
+}
+
+// -- autoincrement tests --
+
+#[test]
+fn test_autoincrement_auto_generates_sequential_values() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    insert_contract(&db, 1, "C-001", 1);
+    insert_contract(&db, 2, "C-002", 1);
+    insert_contract(&db, 3, "C-003", 1);
+
+    let rows = db
+        .select::<Contract>(Query::builder().order_by_asc("id").build())
+        .unwrap();
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].order, Some(Uint32(1)));
+    assert_eq!(rows[1].order, Some(Uint32(2)));
+    assert_eq!(rows[2].order, Some(Uint32(3)));
+}
+
+#[test]
+fn test_autoincrement_explicit_value_overrides_auto() {
+    use wasm_dbms_api::prelude::Autoincrement;
+
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    // Insert with an explicit autoincrement value
+    let insert = ContractInsertRequest {
+        id: Uint32(1),
+        code: Text("C-001".to_string()),
+        order: Autoincrement::Value(Uint32(42)),
+        user_id: Uint32(1),
+    };
+    db.insert::<Contract>(insert).unwrap();
+
+    let rows = db.select::<Contract>(Query::builder().build()).unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].order, Some(Uint32(42)));
+}
+
+#[test]
+fn test_autoincrement_does_not_recycle_after_delete() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    insert_contract(&db, 1, "C-001", 1); // order = 1
+    insert_contract(&db, 2, "C-002", 1); // order = 2
+
+    // Delete the first contract
+    db.delete::<Contract>(
+        DeleteBehavior::Restrict,
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    )
+    .unwrap();
+
+    // Next insert should get order = 3, not 1
+    insert_contract(&db, 3, "C-003", 1);
+
+    let rows = db
+        .select::<Contract>(
+            Query::builder()
+                .and_where(Filter::eq("id", Value::Uint32(Uint32(3))))
+                .build(),
+        )
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].order, Some(Uint32(3)));
+}
+
+#[test]
+fn test_autoincrement_with_transaction_commit() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    // Insert outside transaction
+    insert_contract(&db, 1, "C-001", 1); // order = 1
+
+    // Insert inside transaction
+    let owner = vec![1, 2, 3];
+    let tx_id = ctx.begin_transaction(owner);
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    insert_contract(&db, 2, "C-002", 1); // order = 2
+    db.commit().unwrap();
+
+    // After commit, next auto value should be 3
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_contract(&db, 3, "C-003", 1);
+
+    let rows = db
+        .select::<Contract>(Query::builder().order_by_asc("id").build())
+        .unwrap();
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].order, Some(Uint32(1)));
+    assert_eq!(rows[1].order, Some(Uint32(2)));
+    assert_eq!(rows[2].order, Some(Uint32(3)));
+}
+
+#[test]
+fn test_autoincrement_with_transaction_rollback_does_not_revert_counter() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    insert_contract(&db, 1, "C-001", 1); // order = 1
+
+    // Insert inside transaction then rollback
+    let owner = vec![1, 2, 3];
+    let tx_id = ctx.begin_transaction(owner.clone());
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    insert_contract(&db, 2, "C-002", 1); // order = 2 (consumed)
+    db.rollback().unwrap();
+
+    // After rollback, counter should still have advanced (order = 2 is consumed)
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_contract(&db, 3, "C-003", 1);
+
+    let rows = db
+        .select::<Contract>(Query::builder().order_by_asc("id").build())
+        .unwrap();
+
+    assert_eq!(rows.len(), 2); // only C-001 and C-003
+    assert_eq!(rows[0].order, Some(Uint32(1)));
+    assert_eq!(rows[1].order, Some(Uint32(3))); // 2 was consumed by the rolled-back tx
+}
+
+#[test]
+fn test_autoincrement_from_values_with_auto_variant() {
+    use wasm_dbms_api::prelude::Autoincrement;
+
+    // from_values without the autoincrement column should produce Auto
+    let insert = ContractInsertRequest::from_values(&[
+        (Contract::columns()[0], Value::Uint32(Uint32(1))),
+        (
+            Contract::columns()[1],
+            Value::Text(Text("C-001".to_string())),
+        ),
+        (Contract::columns()[3], Value::Uint32(Uint32(1))),
+    ])
+    .unwrap();
+
+    assert_eq!(insert.order, Autoincrement::Auto);
+}
+
+#[test]
+fn test_autoincrement_from_values_with_value_variant() {
+    use wasm_dbms_api::prelude::Autoincrement;
+
+    // from_values with the autoincrement column should produce Value
+    let insert = ContractInsertRequest::from_values(&[
+        (Contract::columns()[0], Value::Uint32(Uint32(1))),
+        (
+            Contract::columns()[1],
+            Value::Text(Text("C-001".to_string())),
+        ),
+        (Contract::columns()[2], Value::Uint32(Uint32(99))),
+        (Contract::columns()[3], Value::Uint32(Uint32(1))),
+    ])
+    .unwrap();
+
+    assert_eq!(insert.order, Autoincrement::Value(Uint32(99)));
+}
+
+#[test]
+fn test_autoincrement_into_values_skips_auto() {
+    use wasm_dbms_api::prelude::{Autoincrement, InsertRecord as _};
+
+    let insert = ContractInsertRequest {
+        id: Uint32(1),
+        code: Text("C-001".to_string()),
+        order: Autoincrement::Auto,
+        user_id: Uint32(1),
+    };
+    let values = insert.into_values();
+
+    // Should have 3 values (id, code, user_id) — order is skipped
+    assert_eq!(values.len(), 3);
+    assert!(values.iter().all(|(col, _)| col.name != "order"));
+}
+
+#[test]
+fn test_autoincrement_into_values_includes_explicit_value() {
+    use wasm_dbms_api::prelude::{Autoincrement, InsertRecord as _};
+
+    let insert = ContractInsertRequest {
+        id: Uint32(1),
+        code: Text("C-001".to_string()),
+        order: Autoincrement::Value(Uint32(42)),
+        user_id: Uint32(1),
+    };
+    let values = insert.into_values();
+
+    // Should have 4 values (id, code, order, user_id)
+    assert_eq!(values.len(), 4);
+    let order_val = values.iter().find(|(col, _)| col.name == "order");
+    assert!(order_val.is_some());
+    assert_eq!(order_val.unwrap().1, Value::Uint32(Uint32(42)));
+}
+
+#[test]
+fn test_autoincrement_select_filter_on_autoincrement_column() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    insert_contract(&db, 1, "C-001", 1); // order = 1
+    insert_contract(&db, 2, "C-002", 1); // order = 2
+    insert_contract(&db, 3, "C-003", 1); // order = 3
+
+    let rows = db
+        .select::<Contract>(
+            Query::builder()
+                .and_where(Filter::eq("order", Value::Uint32(Uint32(2))))
+                .build(),
+        )
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(2)));
+    assert_eq!(rows[0].order, Some(Uint32(2)));
 }
