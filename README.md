@@ -10,15 +10,16 @@
 
 [![ci](https://github.com/veeso/wasm-dbms/actions/workflows/ci.yml/badge.svg)](https://github.com/veeso/wasm-dbms/actions)
 [![coveralls](https://coveralls.io/repos/github/veeso/wasm-dbms/badge.svg)](https://coveralls.io/github/veeso/wasm-dbms)
-[![docs](https://docs.rs/wasm-dbms/badge.svg)](https://docs.rs/wasm-dbms)
+[![docs](https://docs.rs/wasm-dbms/badge.svg?logo=rust)](https://docs.rs/wasm-dbms)
 
 A Rust framework for building database applications on WASM runtimes, with first-class support for Internet Computer
 canisters.
 
 ## Overview
 
-This repository contains two crate families:
+This repository contains three crate families:
 
+- **wasi-dbms**: Crates for building a DBMS on any WASM runtime that supports WASI (Wasmtime, Wasmer, WasmEdge)
 - **wasm-dbms** - A runtime-agnostic DBMS engine that runs on any WASM runtime (Wasmtime, Wasmer, WasmEdge, IC)
 - **ic-dbms** - A thin IC-specific adapter that provides Internet Computer canister integration
 
@@ -30,6 +31,7 @@ This repository contains two crate families:
 | `wasm-dbms-memory` | Memory abstraction and page management                      |
 | `wasm-dbms`        | Core DBMS engine with transactions, joins, integrity checks |
 | `wasm-dbms-macros` | Procedural macros: `Encode`, `Table`, `CustomDataType`      |
+| `wasi-dbms-memory` | Memory provider implementations for WASI runtimes           |
 | `ic-dbms-api`      | IC-specific types (re-exports `wasm-dbms-api`)              |
 | `ic-dbms-canister` | IC canister DBMS implementation                             |
 | `ic-dbms-macros`   | IC-specific macro: `DbmsCanister`                           |

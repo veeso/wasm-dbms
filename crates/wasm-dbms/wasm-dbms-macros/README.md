@@ -10,7 +10,7 @@
 
 [![ci](https://github.com/veeso/wasm-dbms/actions/workflows/ci.yml/badge.svg)](https://github.com/veeso/wasm-dbms/actions)
 [![coveralls](https://coveralls.io/repos/github/veeso/wasm-dbms/badge.svg)](https://coveralls.io/github/veeso/wasm-dbms)
-[![docs](https://docs.rs/wasm-dbms-macros/badge.svg)](https://docs.rs/wasm-dbms-macros)
+[![docs](https://docs.rs/wasm-dbms-macros/badge.svg?logo=rust)](https://docs.rs/wasm-dbms-macros)
 
 Runtime-agnostic procedural macros for the wasm-dbms DBMS engine.
 
