@@ -76,10 +76,14 @@ pub enum DataTypeKind {
     Date,
     DateTime,
     Decimal,
+    Int8,
+    Int16,
     Int32,
     Int64,
     Json,
     Text,
+    Uint8,
+    Uint16,
     Uint32,
     Uint64,
     Uuid,
@@ -101,16 +105,20 @@ mod test {
             DataTypeKind::Date,
             DataTypeKind::DateTime,
             DataTypeKind::Decimal,
+            DataTypeKind::Int8,
+            DataTypeKind::Int16,
             DataTypeKind::Int32,
             DataTypeKind::Int64,
             DataTypeKind::Json,
             DataTypeKind::Text,
+            DataTypeKind::Uint8,
+            DataTypeKind::Uint16,
             DataTypeKind::Uint32,
             DataTypeKind::Uint64,
             DataTypeKind::Uuid,
         ];
 
-        assert_eq!(kinds.len(), 12);
+        assert_eq!(kinds.len(), 16);
     }
 
     #[test]
@@ -157,10 +165,14 @@ mod test {
         assert_eq!(format!("{:?}", DataTypeKind::Date), "Date");
         assert_eq!(format!("{:?}", DataTypeKind::DateTime), "DateTime");
         assert_eq!(format!("{:?}", DataTypeKind::Decimal), "Decimal");
+        assert_eq!(format!("{:?}", DataTypeKind::Int8), "Int8");
+        assert_eq!(format!("{:?}", DataTypeKind::Int16), "Int16");
         assert_eq!(format!("{:?}", DataTypeKind::Int32), "Int32");
         assert_eq!(format!("{:?}", DataTypeKind::Int64), "Int64");
         assert_eq!(format!("{:?}", DataTypeKind::Json), "Json");
         assert_eq!(format!("{:?}", DataTypeKind::Text), "Text");
+        assert_eq!(format!("{:?}", DataTypeKind::Uint8), "Uint8");
+        assert_eq!(format!("{:?}", DataTypeKind::Uint16), "Uint16");
         assert_eq!(format!("{:?}", DataTypeKind::Uint32), "Uint32");
         assert_eq!(format!("{:?}", DataTypeKind::Uint64), "Uint64");
         assert_eq!(format!("{:?}", DataTypeKind::Uuid), "Uuid");
