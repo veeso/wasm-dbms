@@ -42,6 +42,10 @@ pub struct Field {
     pub is_fk: bool,
     /// Whether the field is nullable
     pub nullable: bool,
+    /// Whether the field is auto-incrementing (i.e. `#[autoincrement]`); only valid for integer primary keys
+    /// Conflicts with `nullable`.
+    /// Applicable only for numeric types.
+    pub auto_increment: bool,
     /// Whether the field is a primary key
     pub primary_key: bool,
     /// Whether the field is unique
@@ -647,12 +651,20 @@ fn get_fields(
         // Step 2: detect field attributes
         let custom_type = is_custom_type(field);
         let unique = unique(field);
+        let autoincrement = autoincrement(field)?;
 
         // Validate: #[custom_type] and #[foreign_key] cannot be combined
         if custom_type && is_fk {
             return Err(syn::Error::new_spanned(
                 field,
                 "`#[custom_type]` and `#[foreign_key]` cannot be used on the same field",
+            ));
+        }
+        // Validate: #[autoincrement] cannot be combined with #[nullable], since autoincrement fields must have a value and cannot be null
+        if autoincrement && nullable {
+            return Err(syn::Error::new_spanned(
+                field,
+                "`#[autoincrement]` fields cannot be nullable",
             ));
         }
 
@@ -694,6 +706,7 @@ fn get_fields(
             ty,
             data_type_kind,
             nullable,
+            auto_increment: autoincrement,
             unique,
             primary_key,
             custom_type,
@@ -728,4 +741,32 @@ fn unique(field: &syn::Field) -> bool {
         .attrs
         .iter()
         .any(|attr| attr.path().is_ident("unique"))
+}
+
+/// Check whethers the field has a `#[autoincrement]` attribute; only valid for integer primary keys
+fn autoincrement(field: &syn::Field) -> syn::Result<bool> {
+    let autoincrement = field
+        .attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("autoincrement"));
+
+    if !autoincrement {
+        return Ok(false);
+    }
+
+    // Validate that autoincrement is only used on integer primary keys
+    let field_type = &field.ty;
+    let field_type_name = field_type.to_token_stream().to_string();
+    let is_integer = matches!(
+        field_type_name.as_str(),
+        "Int8" | "Int16" | "Int32" | "Int64" | "Uint8" | "Uint16" | "Uint32" | "Uint64"
+    );
+    if !is_integer {
+        return Err(syn::Error::new_spanned(
+            field,
+            "`#[autoincrement]` can only be used on integer primary keys",
+        ));
+    }
+
+    Ok(true)
 }

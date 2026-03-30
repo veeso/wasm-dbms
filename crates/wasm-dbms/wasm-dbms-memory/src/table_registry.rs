@@ -158,7 +158,7 @@ impl TableRegistry {
     }
 
     /// Get next value for an autoincrement column of the given type, and increment it in the ledger.
-    pub fn autoincrement_next(
+    pub fn next_autoincrement(
         &mut self,
         column_name: &str,
         mm: &mut impl MemoryAccess,
@@ -1058,23 +1058,23 @@ mod tests {
         }
     }
 
-    // -- autoincrement_next tests --
+    // -- next_autoincrement tests --
 
     #[test]
-    fn test_autoincrement_next_returns_sequential_values() {
+    fn test_next_autoincrement_returns_sequential_values() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let mut registry = registry_with_autoincrement(&mut mm);
 
         let v1 = registry
-            .autoincrement_next("id", &mut mm)
+            .next_autoincrement("id", &mut mm)
             .expect("failed")
             .expect("expected Some");
         let v2 = registry
-            .autoincrement_next("id", &mut mm)
+            .next_autoincrement("id", &mut mm)
             .expect("failed")
             .expect("expected Some");
         let v3 = registry
-            .autoincrement_next("id", &mut mm)
+            .next_autoincrement("id", &mut mm)
             .expect("failed")
             .expect("expected Some");
 
@@ -1084,16 +1084,16 @@ mod tests {
     }
 
     #[test]
-    fn test_autoincrement_next_returns_none_without_ledger() {
+    fn test_next_autoincrement_returns_none_without_ledger() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let mut registry = registry_without_autoincrement(&mut mm);
 
-        let result = registry.autoincrement_next("id", &mut mm).expect("failed");
+        let result = registry.next_autoincrement("id", &mut mm).expect("failed");
         assert!(result.is_none());
     }
 
     #[test]
-    fn test_autoincrement_next_persists_across_reload() {
+    fn test_next_autoincrement_persists_across_reload() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
 
         use crate::SchemaRegistry;
@@ -1106,21 +1106,21 @@ mod tests {
         let mut registry = TableRegistry::load(pages, &mut mm).expect("failed to load");
         for _ in 0..5 {
             let _ = registry
-                .autoincrement_next("id", &mut mm)
+                .next_autoincrement("id", &mut mm)
                 .expect("next failed");
         }
 
         // reload the registry from the same pages
         let mut reloaded = TableRegistry::load(pages, &mut mm).expect("failed to reload");
         let value = reloaded
-            .autoincrement_next("id", &mut mm)
+            .next_autoincrement("id", &mut mm)
             .expect("failed")
             .expect("expected Some");
         assert_eq!(value, Value::Uint32(6u32.into()));
     }
 
     #[test]
-    fn test_autoincrement_next_overflow_returns_error() {
+    fn test_next_autoincrement_overflow_returns_error() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
 
         // manually set up a Uint8 autoincrement to hit overflow quickly
@@ -1129,16 +1129,10 @@ mod tests {
         let index_registry_page = mm.allocate_page().expect("failed to get page");
         let autoinc_page = mm.allocate_page().expect("failed to get page");
 
-        // init the autoincrement ledger with a Uint8 column manually
-        use wasm_dbms_api::prelude::DataTypeKind;
-
-        use super::autoincrement_ledger::AutoincrementLedger;
-
         // Use the Uint8AutoincTable from the autoincrement_ledger tests — we replicate the
         // TableSchema inline since it's in a sibling test module.
         // Instead, just init the ledger page directly with a Uint8 value.
         {
-            use wasm_dbms_api::prelude::DEFAULT_ALIGNMENT;
             let mut registry_data = super::autoincrement_ledger::AutoincrementLedger::init::<
                 Uint8AutoincSchema,
             >(autoinc_page, &mut mm)
@@ -1161,7 +1155,7 @@ mod tests {
         };
 
         let mut registry = TableRegistry::load(table_pages, &mut mm).expect("failed to load");
-        let result = registry.autoincrement_next("val", &mut mm);
+        let result = registry.next_autoincrement("val", &mut mm);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
