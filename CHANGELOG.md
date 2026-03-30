@@ -1,13 +1,174 @@
 # Changelog
 
-- [Changelog](#changelog)
-  - [0.6.0](#060)
-  - [0.5.0](#050)
-  - [0.4.0](#040)
-  - [0.3.0](#030)
-  - [0.2.1](#021)
-  - [0.2.0](#020)
-  - [0.1.0](#010)
+## 0.7.0
+
+Released on 2026-03-30
+
+### ⚠ Breaking Changes
+
+- change `MemoryProvider::read` and `MemoryAccess::read_at` to take `&mut self`
+  > MemoryProvider::read signature changed from &self to &mut self.
+
+### Added
+
+- **bench:** add benchmark comparison crate against other in-memory DBMS
+  > Add wasm-dbms-bench crate with Criterion benchmarks comparing wasm-dbms
+  > against SQLite (in-memory) and DuckDB (in-memory) across CRUD operations,
+  > bulk inserts, queries (filter, order, join), and transactions.
+  >
+  > Includes CI workflow for running benchmarks and uploading artifacts.
+- B+ tree **indexes** for accelerated queries
+  > Add a complete B+ tree index system to wasm-dbms. Every table
+  > automatically gets an index on its primary key, and users can declare
+  > additional single-column or composite indexes with the `#[index]`
+  > attribute.
+  >
+  > Key changes:
+  >
+  > Memory layer (wasm-dbms-memory):
+  > - IndexLedger: per-table registry mapping column sets to B-tree roots
+  > - IndexTree: page-per-node B+ tree with variable-size keys, doubly-linked
+  >   leaves for range scans, and automatic node splitting/merging
+  > - RecordAddress: lightweight (page, offset) pointer stored in leaf entries
+  > - SchemaRegistry/TableRegistryPage extended with index_registry_page
+  > - TableRegistry now owns and exposes an IndexLedger
+  > - INSERT/UPDATE/DELETE maintain all indexes eagerly
+  >
+  > DBMS layer (wasm-dbms):
+  > - FilterAnalyzer: extracts index plans (Eq, Range, In) from query filters
+  > - IndexReader: unified view merging base B-tree results with transaction
+  >   overlay additions/removals
+  > - IndexOverlay: in-memory BTreeMap tracking uncommitted index changes per
+  >   transaction, flushed on commit, discarded on rollback
+  > - SELECT, UPDATE, DELETE, and JOIN queries use indexes when a suitable
+  >   plan is found; remaining filter conditions applied as residual checks
+  >
+  > Macro layer (wasm-dbms-macros):
+  > - `#[index]` attribute on fields for single-column indexes
+  > - `#[index(group = "name")]` for composite indexes
+  > - Automatic primary key index generation in TableSchema
+  > - Deduplicated shared macro logic from ic-dbms-macros into wasm-dbms-macros
+  >
+  > Also includes CI improvements, dependency updates, and documentation
+  > updates covering the index memory layout, query optimization, and
+  > architecture changes.
+- add wasi-dbms-memory crate with file-backed MemoryProvider
+  > Implements WasiMemoryProvider backed by a single flat file,
+  > enabling wasm-dbms to persist data on any WASI-compliant runtime
+  > (Wasmer, Wasmtime, WasmEdge). The file layout is byte-for-byte
+  > equivalent to IC stable memory.
+- add #[unique] attribute for table fields
+  > Add support for the #[unique] field attribute that enforces uniqueness
+  > constraints on non-primary-key columns. A unique field automatically
+  > gets a B+ tree index for efficient O(log n) duplicate detection.
+  >
+  > - Parse #[unique] in Table derive macro, set ColumnDef::unique and
+  >   auto-generate an index for the field
+  > - Add UniqueConstraintViolation error variant to QueryError
+  > - Enforce uniqueness in InsertIntegrityValidator and
+  >   UpdateIntegrityValidator (update allows keeping own value)
+  > - Add comprehensive tests for insert, update, and transaction scenarios
+  > - Update schema, errors, and IC reference documentation
+- add #[autoincrement] attribute for table fields
+  > Add support for autoincrement columns in table schemas. Fields annotated
+  > with `#[autoincrement]` automatically generate sequential values on
+  > insert, starting from zero and incrementing by one.
+  >
+  > Implementation across all layers:
+  >
+  > **Memory layer (wasm-dbms-memory):**
+  > - AutoincrementLedger: per-table ledger storing current counter values
+  >   for each autoincrement column, persisted to a dedicated memory page
+  > - AutoincrementRegistry: HashMap-based registry mapping column names to
+  >   their current Value, with custom Encode implementation
+  > - SchemaRegistry: conditionally allocates an autoincrement page when a
+  >   table has autoincrement columns (Option<Page> in TableRegistryPage)
+  > - TableRegistry: integrates AutoincrementLedger as an optional field,
+  >   exposes autoincrement_next() to get the next value for a column
+  >
+  > **API layer (wasm-dbms-api):**
+  > - ColumnDef: add auto_increment field to column definitions
+  > - MemoryError::AutoincrementOverflow: new error variant returned when
+  >   a column reaches its type's maximum value (uses checked_add)
+  > - Filter: support autoincrement columns in query filters
+  >
+  > **Macro layer (wasm-dbms-macros):**
+  > - Table derive macro: parse #[autoincrement] attribute on fields,
+  >   propagate auto_increment flag to generated TableSchema impl
+  >
+  > **DBMS layer (wasm-dbms):**
+  > - Database: wire autoincrement through insert operations
+  > - Transaction overlay: support autoincrement in transactional context
+  >
+  > **Supported types:** Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32,
+  > Uint64. Overflow returns AutoincrementOverflow error to prevent
+  > duplicate key generation.
+
+### CI
+
+- run workflow only once in pr (branches `main`)
+- run ci workflow against `x.y.z` branches
+- install nightly and check format before installing stable toolchain
+- install ic-wasm with curl
+
+### Changed
+
+- remove duplicated macros from ic-dbms-macros
+  > Remove Encode, Table, CustomDataType, and DatabaseSchema derive macros
+  > from ic-dbms-macros, keeping only DbmsCanister. These macros were
+  > duplicated from wasm-dbms-macros with the only differences being crate
+  > path prefixes and Candid/Serde derives on generated types.
+  >
+  > IC crates now re-export the wasm-dbms-macros versions through their
+  > preludes. To support the IC requirement of Candid-serializable generated
+  > types, a #[candid] attribute is added to wasm-dbms-macros' Table derive:
+  > when present, generated Record, InsertRequest, and UpdateRequest types
+  > derive CandidType, Serialize, and Deserialize.
+- 💥 change `MemoryProvider::read` and `MemoryAccess::read_at` to take `&mut self`
+  > File-backed providers need mutable access to seek before reading.
+  > Previously this was worked around with try_clone() on every read.
+  > Making the trait honest about mutation removes that overhead and
+  > simplifies implementations.
+
+### Documentation
+
+- add WASI documentation
+- update project description to better match the project identity
+
+### Fixed
+
+- prevent PK from being indexed twice
+  > using `#[index]` on the primary key lead to duplicated index for the primary key
+- track PK changes in overlay patch_row to chain subsequent operations
+- add missing Int8, Int16, Uint8, Uint16 variants to DataTypeKind and CandidDataTypeKind
+  > Value enum already had these variants but DataTypeKind did not,
+  > causing compile errors when using 8-bit or 16-bit integer types
+  > in table field definitions via the derive macro.
+- autoincrement macro codegen and DBMS integration
+  > Fix InsertRequest codegen for autoincrement fields:
+  > - from_values: wraps found values in Autoincrement::Value, absent ones
+  >   in Autoincrement::Auto
+  > - into_values: skips Autoincrement::Auto fields, includes Value fields
+  > - into_record: unwraps Autoincrement::Value to inner type for schema
+  >
+  > Fix insert_contract test helper using wrong column index (order vs
+  > user_id). Add full coverage tests for autoincrement at the DBMS layer:
+  > sequential generation, explicit override, no recycle after delete,
+  > transaction commit/rollback counter behavior, from_values/into_values
+  > variants, and filter on autoincrement column.
+  >
+  > Wire autoincrement_next into TableRegistry as a public method.
+
+### Miscellaneous
+
+- remove repeated compare benchmarks
+- add Rust logo to crates.io badges in all READMEs
+- removed kofi badge
+- ignore `.DS_Store`
+
+### Build
+
+- update dependencies
 
 ## 0.6.0
 
