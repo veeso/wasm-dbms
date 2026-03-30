@@ -12,8 +12,8 @@
 [![coveralls](https://coveralls.io/repos/github/veeso/wasm-dbms/badge.svg)](https://coveralls.io/github/veeso/wasm-dbms)
 [![docs](https://docs.rs/wasm-dbms/badge.svg?logo=rust)](https://docs.rs/wasm-dbms)
 
-A Rust framework for building database applications on WASM runtimes, with first-class support for Internet Computer
-canisters.
+An embeddable relational database engine written in Rust, designed to run inside WASM runtimes, with first-class support
+for Internet Computer canisters.
 
 ## Overview
 

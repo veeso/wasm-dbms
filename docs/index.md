@@ -1,6 +1,6 @@
 ---
 title: "wasm-dbms"
-description: "A framework to implement relational databases on any WASM runtime."
+description: "An embeddable relational database engine written in Rust, designed to run inside WASM runtimes."
 nav_order: 1
 ---
 
@@ -15,6 +15,20 @@ nav_order: 1
 [![ci](https://github.com/veeso/wasm-dbms/actions/workflows/ci.yml/badge.svg)](https://github.com/veeso/wasm-dbms/actions)
 [![coveralls](https://coveralls.io/repos/github/veeso/wasm-dbms/badge.svg)](https://coveralls.io/github/veeso/wasm-dbms)
 [![docs](https://docs.rs/wasm-dbms/badge.svg?logo=rust)](https://docs.rs/wasm-dbms)
+
+---
+
+## What is wasm-dbms?
+
+wasm-dbms is an embeddable relational database engine written in Rust, designed to run entirely inside WebAssembly
+runtimes. Unlike traditional databases that run as external services, wasm-dbms compiles into your WASM module and
+manages data directly in linear or stable memory — no network calls, no external dependencies.
+
+You define your schema as Rust structs with derive macros, and wasm-dbms provides full CRUD operations, ACID
+transactions, foreign key integrity, validation, and sanitization — all running within the sandbox of your WASM module.
+
+wasm-dbms supports any WASM runtime (Wasmtime, Wasmer, WasmEdge) and offers first-class integration with
+Internet Computer canisters through the `ic-dbms` adapter.
 
 ---
 
