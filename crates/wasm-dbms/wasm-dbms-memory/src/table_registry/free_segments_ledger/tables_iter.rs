@@ -13,7 +13,7 @@ where
     /// Tracks the current index.
     index: usize,
     /// Reference to the memory access implementor.
-    mm: &'a MA,
+    mm: &'a mut MA,
     /// The pages to iterate over.
     pages: &'a [Page],
 }
@@ -23,7 +23,7 @@ where
     MA: MemoryAccess,
 {
     /// Creates a new [`TablesIter`].
-    pub fn new(pages: &'a [Page], mm: &'a MA) -> Self {
+    pub fn new(pages: &'a [Page], mm: &'a mut MA) -> Self {
         Self {
             index: 0,
             mm,
@@ -57,9 +57,9 @@ mod tests {
 
     #[test]
     fn test_tables_iter_empty() {
-        let mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let pages = vec![];
-        let mut iter = TablesIter::new(&pages, &mm);
+        let mut iter = TablesIter::new(&pages, &mut mm);
         assert!(iter.next().is_none());
     }
 
@@ -70,7 +70,7 @@ mod tests {
         let mut pages = Vec::new();
         for _ in 0..COUNT {
             let page = mm.allocate_page().expect("Failed to allocate page");
-            let mut table = FreeSegmentsTable::load(page, &mm).expect("Failed to load page");
+            let mut table = FreeSegmentsTable::load(page, &mut mm).expect("Failed to load page");
             // insert a segment
             table
                 .insert_free_segment(100 + page as Page, 0, 50, &mut mm)
@@ -78,7 +78,7 @@ mod tests {
             pages.push(page);
         }
 
-        let mut iter = TablesIter::new(&pages, &mm);
+        let mut iter = TablesIter::new(&pages, &mut mm);
         for expected_page in &pages {
             let table_result = iter.next();
             assert!(table_result.is_some());

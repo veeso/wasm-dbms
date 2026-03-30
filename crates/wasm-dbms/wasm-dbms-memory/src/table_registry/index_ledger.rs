@@ -57,7 +57,7 @@ impl IndexLedger {
     }
 
     /// Load the page ledger from memory at the given [`Page`].
-    pub fn load(page: Page, mm: &impl MemoryAccess) -> MemoryResult<Self> {
+    pub fn load(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
             tables: mm.read_at(page, 0)?,
             ledger_page: page,
@@ -86,7 +86,7 @@ impl IndexLedger {
         &self,
         columns: &[&str],
         key: &K,
-        mm: &impl MemoryAccess,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<Vec<RecordAddress>>
     where
         K: Encode + Ord,
@@ -134,7 +134,7 @@ impl IndexLedger {
         columns: &[&str],
         start_key: &K,
         end_key: Option<&K>,
-        mm: &impl MemoryAccess,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<IndexTreeWalker<K>>
     where
         K: Encode + Ord,
@@ -354,7 +354,7 @@ mod tests {
 
         IndexLedger::init(ledger_page, &[], &mut mm).expect("init failed");
 
-        let loaded = IndexLedger::load(ledger_page, &mm).expect("load failed");
+        let loaded = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
         assert!(loaded.tables.0.is_empty());
     }
 
@@ -366,7 +366,7 @@ mod tests {
         let indexes = [IndexDef(&["email"])];
         IndexLedger::init(ledger_page, &indexes, &mut mm).expect("init failed");
 
-        let loaded = IndexLedger::load(ledger_page, &mm).expect("load failed");
+        let loaded = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
         assert_eq!(loaded.tables.0.len(), 1);
         assert!(loaded.tables.0.contains_key(&vec!["email".to_string()]));
     }
@@ -379,7 +379,7 @@ mod tests {
         let indexes = [IndexDef(&["id"]), IndexDef(&["first_name", "last_name"])];
         IndexLedger::init(ledger_page, &indexes, &mut mm).expect("init failed");
 
-        let loaded = IndexLedger::load(ledger_page, &mm).expect("load failed");
+        let loaded = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
         assert_eq!(loaded.tables.0.len(), 2);
         assert!(loaded.tables.0.contains_key(&vec!["id".to_string()]));
         assert!(
@@ -398,7 +398,7 @@ mod tests {
         let indexes = [IndexDef(&["a"]), IndexDef(&["b"]), IndexDef(&["c"])];
         IndexLedger::init(ledger_page, &indexes, &mut mm).expect("init failed");
 
-        let loaded = IndexLedger::load(ledger_page, &mm).expect("load failed");
+        let loaded = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
         let pages: Vec<Page> = loaded.tables.0.values().copied().collect();
         // All root pages should be distinct
         let mut unique_pages = pages.clone();
@@ -413,7 +413,7 @@ mod tests {
         let ledger_page = mm.allocate_page().expect("failed to allocate page");
         let indexes = [IndexDef(&["email"])];
         IndexLedger::init(ledger_page, &indexes, &mut mm).expect("init failed");
-        let mut ledger = IndexLedger::load(ledger_page, &mm).expect("load failed");
+        let mut ledger = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
 
         let first = RecordAddress { page: 1, offset: 0 };
         let second = RecordAddress { page: 2, offset: 0 };
@@ -433,7 +433,7 @@ mod tests {
             .expect("third insert failed");
 
         let hits = ledger
-            .search(&["email"], &Uint32(10), &mm)
+            .search(&["email"], &Uint32(10), &mut mm)
             .expect("search failed");
         assert_eq!(hits, vec![first.clone(), second.clone()]);
 
@@ -441,7 +441,7 @@ mod tests {
             .delete(&["email"], &Uint32(10), first, &mut mm)
             .expect("delete failed");
         let hits = ledger
-            .search(&["email"], &Uint32(10), &mm)
+            .search(&["email"], &Uint32(10), &mut mm)
             .expect("search after delete failed");
         assert_eq!(hits, vec![second.clone()]);
 
@@ -456,22 +456,22 @@ mod tests {
             )
             .expect("update failed");
         let hits = ledger
-            .search(&["email"], &Uint32(10), &mm)
+            .search(&["email"], &Uint32(10), &mut mm)
             .expect("search after update failed");
         assert_eq!(hits, vec![replacement]);
 
         let mut walker = ledger
-            .range_scan(&["email"], &Uint32(10), Some(&Uint32(12)), &mm)
+            .range_scan(&["email"], &Uint32(10), Some(&Uint32(12)), &mut mm)
             .expect("range scan failed");
         assert_eq!(
-            walker.next(&mm).expect("walker next failed"),
+            walker.next(&mut mm).expect("walker next failed"),
             Some(RecordAddress { page: 4, offset: 0 })
         );
         assert_eq!(
-            walker.next(&mm).expect("walker next failed"),
+            walker.next(&mut mm).expect("walker next failed"),
             Some(RecordAddress { page: 3, offset: 0 })
         );
-        assert_eq!(walker.next(&mm).expect("walker end failed"), None);
+        assert_eq!(walker.next(&mut mm).expect("walker end failed"), None);
     }
 
     #[test]
@@ -479,7 +479,7 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let ledger_page = mm.allocate_page().expect("failed to allocate page");
         IndexLedger::init(ledger_page, &[], &mut mm).expect("init failed");
-        let mut ledger = IndexLedger::load(ledger_page, &mm).expect("load failed");
+        let mut ledger = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
 
         let error = ledger
             .insert(

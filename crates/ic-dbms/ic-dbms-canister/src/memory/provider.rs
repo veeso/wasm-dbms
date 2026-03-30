@@ -25,7 +25,7 @@ impl MemoryProvider for IcMemoryProvider {
         ic_cdk::stable::stable_size()
     }
 
-    fn read(&self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
+    fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
         // check if the read is within bounds
         if offset + buf.len() as u64 > self.size() {
             return Err(MemoryError::OutOfBounds);

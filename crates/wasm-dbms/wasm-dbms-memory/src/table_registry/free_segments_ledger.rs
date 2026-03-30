@@ -55,7 +55,7 @@ pub struct FreeSegmentsLedger {
 
 impl FreeSegmentsLedger {
     /// Loads the deleted records ledger from memory.
-    pub fn load(free_segments_page: Page, mm: &impl MemoryAccess) -> MemoryResult<Self> {
+    pub fn load(free_segments_page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         // read from memory
         let tables = mm.read_at(free_segments_page, 0)?;
 
@@ -105,7 +105,7 @@ impl FreeSegmentsLedger {
     pub fn find_reusable_segment<E>(
         &self,
         record: &E,
-        mm: &impl MemoryAccess,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<Option<FreeSegmentTicket>>
     where
         E: Encode,
@@ -168,7 +168,7 @@ impl FreeSegmentsLedger {
     }
 
     /// Returns an iterator over the [`FreeSegmentsTable`]s in the ledger.
-    fn tables<'a, MA>(&'a self, mm: &'a MA) -> TablesIter<'a, MA>
+    fn tables<'a, MA>(&'a self, mm: &'a mut MA) -> TablesIter<'a, MA>
     where
         MA: MemoryAccess,
     {
@@ -190,7 +190,7 @@ mod tests {
         let page = mm.allocate_page().expect("Failed to allocate page");
 
         let ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
         assert_eq!(ledger.free_segments_page, page);
         assert!(ledger.tables.pages().is_empty());
     }
@@ -202,7 +202,7 @@ mod tests {
         let page = mm.allocate_page().expect("Failed to allocate page");
 
         let mut ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
         let record = TestRecord { data: [0; 100] };
 
@@ -217,7 +217,7 @@ mod tests {
         let page = mm.allocate_page().expect("Failed to allocate page");
 
         let mut ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
         let record = TestRecord { data: [0; 100] };
 
@@ -227,7 +227,7 @@ mod tests {
 
         let record = TestRecord { data: [0; 100] };
         let reusable_space = ledger
-            .find_reusable_segment(&record, &mm)
+            .find_reusable_segment(&record, &mut mm)
             .expect("should find reusable space")
             .map(|ticket| ticket.segment);
         assert_eq!(
@@ -246,7 +246,7 @@ mod tests {
         let page = mm.allocate_page().expect("Failed to allocate page");
 
         let mut ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
         let record = TestRecord { data: [0; 100] };
 
@@ -256,7 +256,7 @@ mod tests {
 
         let record = BigTestRecord { data: [0; 200] };
         let reusable_space = ledger
-            .find_reusable_segment(&record, &mm)
+            .find_reusable_segment(&record, &mut mm)
             .expect("should not find reusable space")
             .map(|ticket| ticket.segment);
         assert_eq!(reusable_space, None);
@@ -268,7 +268,7 @@ mod tests {
         let page = mm.allocate_page().expect("Failed to allocate page");
 
         let mut ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
         let record = TestRecord { data: [0; 100] };
 
@@ -277,7 +277,7 @@ mod tests {
             .expect("Failed to insert deleted record");
 
         let reusable_space = ledger
-            .find_reusable_segment(&record, &mm)
+            .find_reusable_segment(&record, &mut mm)
             .expect("should find reusable space")
             .expect("should find reusable space");
 
@@ -286,14 +286,14 @@ mod tests {
             .expect("Failed to commit reused space");
 
         // should be empty
-        let record = find_record(&ledger, &mm, 4, 0, 100);
+        let record = find_record(&ledger, &mut mm, 4, 0, 100);
         assert!(record.is_none());
 
         // reload
         let reloaded_ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
-        let record = find_record(&reloaded_ledger, &mm, 4, 0, 100);
+        let record = find_record(&reloaded_ledger, &mut mm, 4, 0, 100);
         assert!(record.is_none());
     }
 
@@ -302,7 +302,7 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let page = mm.allocate_page().expect("Failed to allocate page");
         let mut ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
         let big_record = BigTestRecord { data: [1; 200] };
 
@@ -312,7 +312,7 @@ mod tests {
 
         let small_record = TestRecord { data: [0; 100] };
         let reusable_space = ledger
-            .find_reusable_segment(&small_record, &mm)
+            .find_reusable_segment(&small_record, &mut mm)
             .expect("memory error")
             .expect("should find reusable space");
 
@@ -321,7 +321,7 @@ mod tests {
             .expect("Failed to commit reused space");
 
         // should have a new record for the remaining space
-        let record = find_record(&ledger, &mm, 4, 100, 100);
+        let record = find_record(&ledger, &mut mm, 4, 100, 100);
         assert!(record.is_some());
     }
 
@@ -330,7 +330,7 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let page = mm.allocate_page().expect("Failed to allocate page");
         let mut ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
         let dyn_record = DynamicTestRecord { data: [1; 200] };
 
@@ -340,7 +340,7 @@ mod tests {
 
         // check if padded
         let reusable_space = ledger
-            .find_reusable_segment(&dyn_record, &mm)
+            .find_reusable_segment(&dyn_record, &mut mm)
             .expect("memory error")
             .expect("should find reusable space");
         assert_eq!(reusable_space.segment.size, 224);
@@ -353,7 +353,7 @@ mod tests {
             .expect("Failed to insert deleted record");
         // there should be a contiguous free segment of size 448 now
         let reusable_space = ledger
-            .find_reusable_segment(&dyn_record, &mm)
+            .find_reusable_segment(&dyn_record, &mut mm)
             .expect("memory error")
             .expect("should find reusable space");
         assert_eq!(reusable_space.segment.size, 448);
@@ -367,7 +367,7 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let page = mm.allocate_page().expect("Failed to allocate page");
         let mut ledger =
-            FreeSegmentsLedger::load(page, &mm).expect("Failed to load DeletedRecordsLedger");
+            FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
         for _ in 0..14_500 {
             let record = SmallRecord { data: 42 };
@@ -499,7 +499,7 @@ mod tests {
 
     fn find_record(
         ledger: &FreeSegmentsLedger,
-        mm: &MemoryManager<HeapMemoryProvider>,
+        mm: &mut MemoryManager<HeapMemoryProvider>,
         page: Page,
         offset: PageOffset,
         size: MSize,
