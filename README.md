@@ -6,7 +6,6 @@
 [![repo-stars](https://img.shields.io/github/stars/veeso/wasm-dbms?style=flat)](https://github.com/veeso/wasm-dbms/stargazers)
 [![downloads](https://img.shields.io/crates/d/wasm-dbms.svg?logo=rust)](https://crates.io/crates/wasm-dbms)
 [![latest-version](https://img.shields.io/crates/v/wasm-dbms.svg?logo=rust)](https://crates.io/crates/wasm-dbms)
-[![ko-fi](https://img.shields.io/badge/donate-ko--fi-red)](https://ko-fi.com/veeso)
 [![conventional-commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://conventionalcommits.org)
 
 [![ci](https://github.com/veeso/wasm-dbms/actions/workflows/ci.yml/badge.svg)](https://github.com/veeso/wasm-dbms/actions)
