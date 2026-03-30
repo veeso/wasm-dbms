@@ -10,7 +10,7 @@
 
 [![ci](https://github.com/veeso/wasm-dbms/actions/workflows/ci.yml/badge.svg)](https://github.com/veeso/wasm-dbms/actions)
 [![coveralls](https://coveralls.io/repos/github/veeso/wasm-dbms/badge.svg)](https://coveralls.io/github/veeso/wasm-dbms)
-[![docs](https://docs.rs/wasm-dbms-api/badge.svg)](https://docs.rs/wasm-dbms-api)
+[![docs](https://docs.rs/wasm-dbms-api/badge.svg?logo=rust)](https://docs.rs/wasm-dbms-api)
 
 Runtime-agnostic API types and traits for the wasm-dbms DBMS engine.
 

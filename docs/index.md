@@ -14,7 +14,7 @@ nav_order: 1
 
 [![ci](https://github.com/veeso/wasm-dbms/actions/workflows/ci.yml/badge.svg)](https://github.com/veeso/wasm-dbms/actions)
 [![coveralls](https://coveralls.io/repos/github/veeso/wasm-dbms/badge.svg)](https://coveralls.io/github/veeso/wasm-dbms)
-[![docs](https://docs.rs/wasm-dbms/badge.svg)](https://docs.rs/wasm-dbms)
+[![docs](https://docs.rs/wasm-dbms/badge.svg?logo=rust)](https://docs.rs/wasm-dbms)
 
 ---
 
@@ -50,6 +50,12 @@ For deploying wasm-dbms as an Internet Computer canister:
 - [IC Getting Started](./ic/guides/get-started.md) - Deploy a database canister on the IC
 - [Access Control](./ic/guides/access-control.md) - Managing the ACL
 - [Client API](./ic/guides/client-api.md) - Using the IC client library
+
+### WASI Integration
+
+For deploying wasm-dbms on WASI runtimes (Wasmer, Wasmtime, WasmEdge):
+
+- [WASI Memory Provider](./wasi/wasi-memory-provider.md) - File-backed persistent storage for WASI
 
 ### Technical Documentation
 

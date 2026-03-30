@@ -3,7 +3,7 @@
 [![license-mit](https://img.shields.io/crates/l/wasm-dbms.svg?logo=rust)](https://opensource.org/licenses/MIT)
 [![downloads](https://img.shields.io/crates/d/wasm-dbms.svg?logo=rust)](https://crates.io/crates/wasm-dbms)
 [![latest-version](https://img.shields.io/crates/v/wasm-dbms.svg?logo=rust)](https://crates.io/crates/wasm-dbms)
-[![docs](https://docs.rs/wasm-dbms/badge.svg)](https://docs.rs/wasm-dbms)
+[![docs](https://docs.rs/wasm-dbms/badge.svg?logo=rust)](https://docs.rs/wasm-dbms)
 
 A runtime-agnostic DBMS engine for WASM environments. Define your database schema using Rust structs with derive macros
 and get CRUD operations, ACID transactions, foreign key integrity, and validation out of the box.
