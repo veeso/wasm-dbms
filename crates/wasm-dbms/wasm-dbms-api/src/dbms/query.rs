@@ -27,6 +27,10 @@ pub enum QueryError {
     #[error("Primary key conflict: record with the same primary key already exists")]
     PrimaryKeyConflict,
 
+    /// A unique constraint was violated (e.g., UNIQUE index, CHECK constraint, etc.)
+    #[error("Unique constraint violation on field '{field}'")]
+    UniqueConstraintViolation { field: String },
+
     /// A foreign key references a non-existent record in another table.
     #[error("Broken foreign key reference to table '{table}' with key '{key:?}'")]
     BrokenForeignKeyReference { table: String, key: Value },

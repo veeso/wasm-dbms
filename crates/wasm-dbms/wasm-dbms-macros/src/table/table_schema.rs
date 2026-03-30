@@ -95,6 +95,12 @@ fn column_def(metadata: &TableMetadata) -> syn::Result<TokenStream2> {
         } else {
             quote::quote! { false }
         };
+        // set unique to true if either the field is marked as unique or it's a primary key (since primary keys are implicitly unique)
+        let unique = if field.unique || field.primary_key {
+            quote::quote! { true }
+        } else {
+            quote::quote! { false }
+        };
 
         columns.push(quote::quote! {
             ::wasm_dbms_api::prelude::ColumnDef {
@@ -102,6 +108,7 @@ fn column_def(metadata: &TableMetadata) -> syn::Result<TokenStream2> {
                 foreign_key: #foreign_key_def,
                 name: #name,
                 nullable: #nullable,
+                unique: #unique,
                 primary_key: #primary_key,
             }
         })

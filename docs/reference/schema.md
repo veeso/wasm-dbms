@@ -7,6 +7,7 @@
     - [Table Attribute](#table-attribute)
   - [Column Attributes](#column-attributes)
     - [Primary Key](#primary-key)
+    - [Unique](#unique)
     - [Index](#index)
     - [Foreign Key](#foreign-key)
     - [Custom Type](#custom-type)
@@ -117,6 +118,43 @@ pub struct Order {
     pub total: Decimal,
 }
 ```
+
+### Unique
+
+Enforce uniqueness on a column:
+
+```rust
+#[derive(Table, ...)]
+#[table = "users"]
+pub struct User {
+    #[primary_key]
+    pub id: Uint32,
+
+    #[unique]
+    pub email: Text,  // Must be unique across all rows
+
+    pub name: Text,
+}
+```
+
+**Unique constraint rules:**
+
+- Insert and update operations that would create a duplicate value return a `UniqueConstraintViolation` error
+- Multiple fields in the same table can each be marked `#[unique]` independently
+- A `#[unique]` field automatically gets a B+ tree index -- no separate `#[index]` annotation is needed
+- Primary keys are always unique by definition; you don't need `#[unique]` on a `#[primary_key]` field
+
+**Combining with other attributes:**
+
+```rust
+#[unique]
+#[sanitizer(TrimSanitizer)]
+#[sanitizer(LowerCaseSanitizer)]
+#[validate(EmailValidator)]
+pub email: Text,  // Sanitized, validated, then checked for uniqueness
+```
+
+> **Note:** Sanitization and validation run before the uniqueness check, so the sanitized value is what gets compared.
 
 ### Index
 
@@ -468,7 +506,7 @@ pub struct User {
     #[validate(MaxStrlenValidator(100))]
     pub name: Text,
 
-    #[index]
+    #[unique]
     #[sanitizer(TrimSanitizer)]
     #[sanitizer(LowerCaseSanitizer)]
     #[validate(EmailValidator)]

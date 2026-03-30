@@ -692,6 +692,7 @@ where
                     data_type,
                     nullable: false,
                     primary_key: false,
+                    unique: false,
                     foreign_key: Some(ForeignKeyDef {
                         foreign_table: T::table_name(),
                         foreign_column: pk_name,
