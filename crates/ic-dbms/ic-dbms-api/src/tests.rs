@@ -152,6 +152,7 @@ impl UpdateRecord for UserUpdateRequest {
                     data_type: DataTypeKind::Uint32,
                     nullable: false,
                     primary_key: true,
+                    unique: false,
                     foreign_key: None,
                 },
                 Value::Uint32(id),
@@ -164,6 +165,7 @@ impl UpdateRecord for UserUpdateRequest {
                     data_type: DataTypeKind::Text,
                     nullable: false,
                     primary_key: false,
+                    unique: false,
                     foreign_key: None,
                 },
                 Value::Text(name.clone()),
@@ -243,6 +245,7 @@ impl TableSchema for User {
                 data_type: DataTypeKind::Uint32,
                 nullable: false,
                 primary_key: true,
+                unique: false,
                 foreign_key: None,
             },
             ColumnDef {
@@ -250,6 +253,7 @@ impl TableSchema for User {
                 data_type: DataTypeKind::Text,
                 nullable: false,
                 primary_key: false,
+                unique: false,
                 foreign_key: None,
             },
         ]

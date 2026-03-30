@@ -13,6 +13,8 @@ pub struct ColumnDef {
     pub nullable: bool,
     /// Indicates if this column is part of the primary key.
     pub primary_key: bool,
+    /// Indicates if this column has unique values across all records.
+    pub unique: bool,
     /// Foreign key definition, if any.
     pub foreign_key: Option<ForeignKeyDef>,
 }
@@ -155,6 +157,7 @@ mod test {
             data_type: DataTypeKind::Uint32,
             nullable: false,
             primary_key: true,
+            unique: false,
             foreign_key: None,
         };
 
@@ -162,6 +165,7 @@ mod test {
         assert_eq!(column.data_type, DataTypeKind::Uint32);
         assert!(!column.nullable);
         assert!(column.primary_key);
+        assert!(!column.unique);
         assert!(column.foreign_key.is_none());
     }
 
@@ -178,6 +182,7 @@ mod test {
             data_type: DataTypeKind::Uint32,
             nullable: false,
             primary_key: false,
+            unique: false,
             foreign_key: Some(fk),
         };
 
@@ -197,6 +202,7 @@ mod test {
             data_type: DataTypeKind::Text,
             nullable: true,
             primary_key: false,
+            unique: true,
             foreign_key: None,
         };
 
@@ -211,6 +217,7 @@ mod test {
             data_type: DataTypeKind::Uint32,
             nullable: false,
             primary_key: true,
+            unique: false,
             foreign_key: None,
         };
 
@@ -219,6 +226,7 @@ mod test {
             data_type: DataTypeKind::Uint32,
             nullable: false,
             primary_key: true,
+            unique: false,
             foreign_key: None,
         };
 
@@ -227,6 +235,7 @@ mod test {
             data_type: DataTypeKind::Text,
             nullable: true,
             primary_key: false,
+            unique: true,
             foreign_key: None,
         };
 
@@ -304,6 +313,7 @@ mod test {
             data_type: DataTypeKind::Uint32,
             nullable: false,
             primary_key: true,
+            unique: false,
             foreign_key: None,
         };
         let candid_col = CandidColumnDef::from(col);
@@ -332,6 +342,7 @@ mod test {
             data_type: DataTypeKind::Custom("role"),
             nullable: false,
             primary_key: false,
+            unique: false,
             foreign_key: None,
         };
         let candid_col = CandidColumnDef::from(col);

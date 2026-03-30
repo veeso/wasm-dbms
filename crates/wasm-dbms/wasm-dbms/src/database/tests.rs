@@ -29,8 +29,19 @@ pub struct Post {
     pub user_id: Uint32,
 }
 
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "contracts"]
+pub struct Contract {
+    #[primary_key]
+    pub id: Uint32,
+    #[unique]
+    pub code: Text,
+    #[foreign_key(entity = "User", table = "users", column = "id")]
+    pub user_id: Uint32,
+}
+
 #[derive(DatabaseSchema)]
-#[tables(User = "users", Post = "posts")]
+#[tables(User = "users", Post = "posts", Contract = "contracts")]
 pub struct TestSchema;
 
 fn setup() -> DbmsContext<HeapMemoryProvider> {
@@ -46,6 +57,21 @@ fn insert_user(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>, id: u32, name: &st
     ])
     .unwrap();
     db.insert::<User>(insert).unwrap();
+}
+
+fn insert_contract(
+    db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+    id: u32,
+    code: &str,
+    user_id: u32,
+) {
+    let insert = ContractInsertRequest::from_values(&[
+        (Contract::columns()[0], Value::Uint32(Uint32(id))),
+        (Contract::columns()[1], Value::Text(Text(code.to_string()))),
+        (Contract::columns()[2], Value::Uint32(Uint32(user_id))),
+    ])
+    .unwrap();
+    db.insert::<Contract>(insert).unwrap();
 }
 
 fn insert_post(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>, id: u32, title: &str, user_id: u32) {
@@ -1356,4 +1382,205 @@ fn test_update_indexed_column_updates_index() {
             .len(),
         1
     );
+}
+
+#[test]
+fn test_contract_should_have_unique_code() {
+    let columns = Contract::columns();
+    let code_column = columns
+        .iter()
+        .find(|col| col.name == "code")
+        .expect("code column");
+    assert!(
+        code_column.unique,
+        "Contract.code should be marked as unique"
+    );
+    // check primary key
+    let pk_column = columns
+        .iter()
+        .find(|col| col.name == "id")
+        .expect("id column");
+    assert!(
+        pk_column.primary_key,
+        "Contract.id should be marked as primary key"
+    );
+    assert!(pk_column.unique, "Contract.id should be unique");
+    // check user id
+    let user_id_column = columns
+        .iter()
+        .find(|col| col.name == "user_id")
+        .expect("user_id column");
+    assert!(
+        !user_id_column.unique,
+        "Contract.user_id should not be unique"
+    );
+
+    // check indexes
+    let indexes = Contract::indexes();
+    // code column must be indexed
+    indexes
+        .iter()
+        .find(|idx| idx.columns() == ["code"])
+        .expect("index on code column");
+    // pk must be index
+    indexes
+        .iter()
+        .find(|idx| idx.columns() == ["id"])
+        .expect("index on id column");
+}
+
+// -- unique constraint tests --
+
+#[test]
+fn test_insert_contract_with_unique_code_succeeds() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_contract(&db, 1, "CONTRACT-001", 1);
+    insert_contract(&db, 2, "CONTRACT-002", 1);
+
+    let rows = db.select::<Contract>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 2);
+}
+
+#[test]
+fn test_insert_contract_with_duplicate_code_fails() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_contract(&db, 1, "CONTRACT-001", 1);
+
+    let insert = ContractInsertRequest::from_values(&[
+        (Contract::columns()[0], Value::Uint32(Uint32(2))),
+        (
+            Contract::columns()[1],
+            Value::Text(Text("CONTRACT-001".to_string())),
+        ),
+        (Contract::columns()[2], Value::Uint32(Uint32(1))),
+    ])
+    .unwrap();
+    let result = db.insert::<Contract>(insert);
+    assert!(matches!(
+        result,
+        Err(wasm_dbms_api::prelude::DbmsError::Query(
+            wasm_dbms_api::prelude::QueryError::UniqueConstraintViolation { .. }
+        ))
+    ));
+}
+
+#[test]
+fn test_update_contract_code_to_unique_value_succeeds() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_contract(&db, 1, "CONTRACT-001", 1);
+
+    let patch = ContractUpdateRequest::from_values(
+        &[(
+            Contract::columns()[1],
+            Value::Text(Text("CONTRACT-999".to_string())),
+        )],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    db.update::<Contract>(patch).unwrap();
+
+    let rows = db
+        .select::<Contract>(
+            Query::builder()
+                .and_where(Filter::Eq("id".to_string(), Value::Uint32(Uint32(1))))
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(rows[0].code, Some(Text("CONTRACT-999".to_string())));
+}
+
+#[test]
+fn test_update_contract_keeping_same_code_succeeds() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "bob");
+    insert_contract(&db, 1, "CONTRACT-001", 1);
+
+    // Change user_id but keep the same unique code
+    let patch = ContractUpdateRequest::from_values(
+        &[(Contract::columns()[2], Value::Uint32(Uint32(2)))],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    db.update::<Contract>(patch).unwrap();
+}
+
+#[test]
+fn test_update_contract_code_to_existing_value_fails() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_contract(&db, 1, "CONTRACT-001", 1);
+    insert_contract(&db, 2, "CONTRACT-002", 1);
+
+    let patch = ContractUpdateRequest::from_values(
+        &[(
+            Contract::columns()[1],
+            Value::Text(Text("CONTRACT-001".to_string())),
+        )],
+        Some(Filter::eq("id", Value::Uint32(Uint32(2)))),
+    );
+    let result = db.update::<Contract>(patch);
+    assert!(matches!(
+        result,
+        Err(wasm_dbms_api::prelude::DbmsError::Query(
+            wasm_dbms_api::prelude::QueryError::UniqueConstraintViolation { .. }
+        ))
+    ));
+}
+
+#[test]
+fn test_unique_constraint_with_transaction_commit() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_contract(&db, 1, "CONTRACT-001", 1);
+
+    // Insert a second contract within a transaction
+    let owner = vec![1, 2, 3];
+    let tx_id = ctx.begin_transaction(owner);
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    insert_contract(&db, 2, "CONTRACT-002", 1);
+    db.commit().unwrap();
+
+    // After commit, inserting a duplicate should fail
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    let insert = ContractInsertRequest::from_values(&[
+        (Contract::columns()[0], Value::Uint32(Uint32(3))),
+        (
+            Contract::columns()[1],
+            Value::Text(Text("CONTRACT-002".to_string())),
+        ),
+        (Contract::columns()[2], Value::Uint32(Uint32(1))),
+    ])
+    .unwrap();
+    assert!(matches!(
+        db.insert::<Contract>(insert),
+        Err(wasm_dbms_api::prelude::DbmsError::Query(
+            wasm_dbms_api::prelude::QueryError::UniqueConstraintViolation { .. }
+        ))
+    ));
+}
+
+#[test]
+fn test_unique_constraint_after_delete_allows_reuse() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_contract(&db, 1, "CONTRACT-001", 1);
+
+    // Delete the contract
+    db.delete::<Contract>(
+        DeleteBehavior::Restrict,
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    )
+    .unwrap();
+
+    // Now inserting a new contract with the same code should succeed
+    insert_contract(&db, 2, "CONTRACT-001", 1);
 }
