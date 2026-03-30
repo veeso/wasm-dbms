@@ -240,6 +240,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 /// The `Table` derive macro supports the following attributes:
 ///
 /// - `#[alignment = N]`: (optional) Specifies the alignment for the table records. Use only if you know what you are doing.
+/// - `#[autoincrement]`: Marks a field as auto-incrementing. The macro will generate code to automatically fill in values for this field during inserts. Auto-increment fields must be non-nullable and cannot be marked as `#[unique]`.
 /// - `#[candid]`: Marks the table as compatible with Candid serialization.
 /// - `#[custom_type = "TypeName"]`: Specifies a custom data type for the
 /// - `#[foreign_key(entity = "EntityName", table = "table_name", column = "column_name")]`: Defines a foreign key relationship.
@@ -254,6 +255,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
     Table,
     attributes(
         alignment,
+        autoincrement,
         candid,
         custom_type,
         foreign_key,

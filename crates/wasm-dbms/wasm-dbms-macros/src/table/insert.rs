@@ -39,9 +39,15 @@ fn generate_insert_request_struct(metadata: &TableMetadata) -> TokenStream2 {
     for field in &metadata.fields {
         let name = &field.name;
         let value_ty = &field.ty;
-        fields.push(quote::quote! {
-            pub #name: #value_ty,
-        });
+        if field.auto_increment {
+            fields.push(quote::quote! {
+                pub #name: ::wasm_dbms_api::prelude::Autoincrement<#value_ty>,
+            });
+        } else {
+            fields.push(quote::quote! {
+                pub #name: #value_ty,
+            });
+        }
     }
 
     let insert_request_ident = &metadata.insert;
@@ -148,6 +154,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         let name = &field.name;
         let ty = &field.ty;
 
+        // autoincrement fields store the inner type in the intermediate variable
         declare_lets.push(quote::quote! {
             let mut #name: Option<#ty> = None;
         });
@@ -223,7 +230,15 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         let name = &field.name;
         let name_str = name.to_string();
 
-        if field.nullable {
+        if field.auto_increment {
+            // autoincrement: wrap in Autoincrement::Value if present, Autoincrement::Auto if absent
+            struct_fields.push(quote::quote! {
+                #name: match #name {
+                    Some(v) => ::wasm_dbms_api::prelude::Autoincrement::Value(v),
+                    None => ::wasm_dbms_api::prelude::Autoincrement::Auto,
+                },
+            });
+        } else if field.nullable {
             struct_fields.push(quote::quote! {
                 #name: #name.unwrap_or(::wasm_dbms_api::prelude::Nullable::Null),
             })
@@ -276,21 +291,29 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
 /// }
 /// ```
 fn impl_into_values(metadata: &TableMetadata) -> TokenStream2 {
-    let mut fields = vec![];
+    let mut push_stmts = vec![];
     for (index, field) in metadata.fields.iter().enumerate() {
-        let field = &field.name;
-        fields.push(quote::quote! {
-            (Self::Schema::columns()[#index], self.#field.into())
-        })
+        let field_name = &field.name;
+        if field.auto_increment {
+            push_stmts.push(quote::quote! {
+                if let ::wasm_dbms_api::prelude::Autoincrement::Value(v) = self.#field_name {
+                    values.push((Self::Schema::columns()[#index], v.into()));
+                }
+            });
+        } else {
+            push_stmts.push(quote::quote! {
+                values.push((Self::Schema::columns()[#index], self.#field_name.into()));
+            });
+        }
     }
 
     quote::quote! {
         fn into_values(self) -> Vec<(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)> {
             use ::wasm_dbms_api::prelude::TableSchema as _;
 
-            vec![
-                #(#fields),*
-            ]
+            let mut values = Vec::new();
+            #(#push_stmts)*
+            values
         }
     }
 }
@@ -320,9 +343,22 @@ fn impl_into_record(metadata: &TableMetadata) -> TokenStream2 {
     let mut fields = vec![];
     for field in &metadata.fields {
         let name = &field.name;
-        fields.push(quote::quote! {
-            #name: self.#name,
-        });
+        if field.auto_increment {
+            // unwrap Autoincrement::Value -> T; panic on Auto since values must be resolved by now
+            let name_str = name.to_string();
+            fields.push(quote::quote! {
+                #name: match self.#name {
+                    ::wasm_dbms_api::prelude::Autoincrement::Value(v) => v,
+                    ::wasm_dbms_api::prelude::Autoincrement::Auto => panic!(
+                        "autoincrement field '{}' was not resolved before into_record()", #name_str
+                    ),
+                },
+            });
+        } else {
+            fields.push(quote::quote! {
+                #name: self.#name,
+            });
+        }
     }
 
     quote::quote! {

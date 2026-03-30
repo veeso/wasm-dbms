@@ -82,32 +82,21 @@ fn column_def(metadata: &TableMetadata) -> syn::Result<TokenStream2> {
     let mut columns = vec![];
 
     for field in &metadata.fields {
-        let primary_key = if field.primary_key {
-            quote::quote! { true }
-        } else {
-            quote::quote! { false }
-        };
+        let primary_key = quote_bool(field.primary_key);
         let name = &field.name.to_string();
         let foreign_key_def = foreign_key_def(field, metadata)?;
         let data_type_kind = &field.data_type_kind;
-        let nullable = if field.nullable {
-            quote::quote! { true }
-        } else {
-            quote::quote! { false }
-        };
+        let nullable = quote_bool(field.nullable);
         // set unique to true if either the field is marked as unique or it's a primary key (since primary keys are implicitly unique)
-        let unique = if field.unique || field.primary_key {
-            quote::quote! { true }
-        } else {
-            quote::quote! { false }
-        };
+        let unique = quote_bool(field.unique || field.primary_key);
+        let auto_increment = quote_bool(field.auto_increment);
 
         columns.push(quote::quote! {
             ::wasm_dbms_api::prelude::ColumnDef {
                 data_type: #data_type_kind,
                 foreign_key: #foreign_key_def,
                 name: #name,
-                auto_increment: false, // TODO: support auto_increment in the future
+                auto_increment: #auto_increment,
                 nullable: #nullable,
                 unique: #unique,
                 primary_key: #primary_key,
@@ -283,5 +272,13 @@ fn sanitizers(fields: &[Field]) -> TokenStream2 {
         match column_name {
             #(#arms)*
         }
+    }
+}
+
+fn quote_bool(value: bool) -> TokenStream2 {
+    if value {
+        quote::quote! { true }
+    } else {
+        quote::quote! { false }
     }
 }
