@@ -1,0 +1,18 @@
+[package]
+name = "wasi-dbms-memory"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+description = "Memory provider and page management for wasm-dbms using WASI"
+license = { workspace = true }
+repository = { workspace = true }
+readme = "README.md"
+rust-version = { workspace = true }
+documentation = "https://docs.rs/wasi-dbms-memory"
+categories = ["database", "wasm"]
+keywords = ["database", "wasm", "memory", "wasi"]
+include = ["src/**/*", "../../../LICENSE", "README.md", "../../../CHANGELOG.md"]
+
+[dependencies]
+wasm-dbms-api = { path = "../../wasm-dbms/wasm-dbms-api", version = "0.7" }
+wasm-dbms-memory = { path = "../../wasm-dbms/wasm-dbms-memory", version = "0.7" }
