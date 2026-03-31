@@ -1,0 +1,12 @@
+[book]
+title = "wasm-dbms"
+description = "An embeddable relational database engine written in Rust, designed to run inside WASM runtimes."
+authors = ["Christian Visintin"]
+language = "en"
+src = "."
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/veeso/wasm-dbms"
+additional-css = []

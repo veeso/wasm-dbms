@@ -1,8 +1,4 @@
----
-title: "wasm-dbms"
-description: "An embeddable relational database engine written in Rust, designed to run inside WASM runtimes."
-nav_order: 1
----
+# wasm-dbms
 
 ![logo](https://wasm-dbms.cc/logo-128.png)
 
