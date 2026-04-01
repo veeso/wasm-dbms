@@ -3,15 +3,19 @@ use std::fmt;
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use wasm_dbms_api::prelude::{
-    CustomDataType, CustomValue, DEFAULT_ALIGNMENT, DataSize, DataType, DecodeError, Encode, MSize,
-    MemoryError, MemoryResult, PageOffset, Value,
+    DEFAULT_ALIGNMENT, DataSize, DataType, DecodeError, Encode, MSize, MemoryError, MemoryResult,
+    PageOffset,
 };
+use wasm_dbms_macros::CustomDataType;
 
 /// Principal data type for the IC DBMS.
 ///
 /// This is an IC-specific custom data type that wraps [`candid::Principal`].
 /// Use with `#[custom_type]` annotation in table definitions.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, CustomDataType, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[type_tag = "principal"]
 pub struct Principal(pub candid::Principal);
 
 impl Default for Principal {
@@ -81,18 +85,10 @@ impl fmt::Display for Principal {
 
 impl DataType for Principal {}
 
-impl CustomDataType for Principal {
-    const TYPE_TAG: &'static str = "principal";
-}
-
-impl From<Principal> for Value {
-    fn from(val: Principal) -> Value {
-        Value::Custom(CustomValue::new(&val))
-    }
-}
-
 #[cfg(test)]
 mod tests {
+
+    use wasm_dbms_api::prelude::{CustomDataType as _, Value};
 
     use super::*;
 
