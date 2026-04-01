@@ -136,13 +136,13 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             if field.nullable {
                 field_matches.push(quote::quote! {
                     #field_name => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = value {
+                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = __col_value {
                             if let Ok(decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
                                 std::borrow::Cow::Borrowed(&cv.encoded)
                             ) {
                                 #field_ident = Some(::wasm_dbms_api::prelude::Nullable::Value(decoded));
                             }
-                        } else if let ::wasm_dbms_api::prelude::Value::Null = value {
+                        } else if let ::wasm_dbms_api::prelude::Value::Null = __col_value {
                             #field_ident = Some(::wasm_dbms_api::prelude::Nullable::Null);
                         }
                     }
@@ -150,7 +150,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             } else {
                 field_matches.push(quote::quote! {
                     #field_name => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = value {
+                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = __col_value {
                             if let Ok(decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
                                 std::borrow::Cow::Borrowed(&cv.encoded)
                             ) {
@@ -170,9 +170,9 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             if field.nullable {
                 field_matches.push(quote::quote! {
                     #field_name => {
-                        if let #value_type(value) = value {
-                            #field_ident = Some(::wasm_dbms_api::prelude::Nullable::Value(value.clone()));
-                        } else if let ::wasm_dbms_api::prelude::Value::Null = value {
+                        if let #value_type(__inner_value) = __col_value {
+                            #field_ident = Some(::wasm_dbms_api::prelude::Nullable::Value(__inner_value.clone()));
+                        } else if let ::wasm_dbms_api::prelude::Value::Null = __col_value {
                             #field_ident = Some(::wasm_dbms_api::prelude::Nullable::Null);
                         }
                     }
@@ -180,16 +180,16 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             } else if field.is_fk {
                 field_matches.push(quote::quote! {
                     #field_name => {
-                        if let #value_type(value) = value {
-                            #field_ident = Some(Box::new(value.clone()));
+                        if let #value_type(__inner_value) = __col_value {
+                            #field_ident = Some(Box::new(__inner_value.clone()));
                         }
                     }
                 });
             } else {
                 field_matches.push(quote::quote! {
                     #field_name => {
-                        if let #value_type(value) = value {
-                            #field_ident = Some(value.clone());
+                        if let #value_type(__inner_value) = __col_value {
+                            #field_ident = Some(__inner_value.clone());
                         }
                     }
                 });
@@ -243,7 +243,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                 .find(|(table_name, _)| *table_name == ::wasm_dbms_api::prelude::ValuesSource::This)
                 .map(|(_, cols)| cols);
 
-            for (column, value) in this_record_values.unwrap_or(&vec![]) {
+            for (column, __col_value) in this_record_values.unwrap_or(&vec![]) {
                 match column.name {
                     #(#field_matches)*
                     _ => {} // ignore unknown/fk columns

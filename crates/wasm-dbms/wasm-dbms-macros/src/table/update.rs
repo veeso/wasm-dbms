@@ -164,13 +164,13 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             if field.nullable {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = value {
+                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = __col_value {
                             if let Ok(decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
                                 std::borrow::Cow::Borrowed(&cv.encoded)
                             ) {
                                 #field_name = Some(::wasm_dbms_api::prelude::Nullable::Value(decoded));
                             }
-                        } else if let ::wasm_dbms_api::prelude::Value::Null = value {
+                        } else if let ::wasm_dbms_api::prelude::Value::Null = __col_value {
                             #field_name = Some(::wasm_dbms_api::prelude::Nullable::Null);
                         }
                     }
@@ -178,7 +178,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             } else {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = value {
+                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = __col_value {
                             if let Ok(decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
                                 std::borrow::Cow::Borrowed(&cv.encoded)
                             ) {
@@ -197,9 +197,9 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             if field.nullable {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
-                        if let #value_type(v) = value {
-                            #field_name = Some(::wasm_dbms_api::prelude::Nullable::Value(v.clone()));
-                        } else if let ::wasm_dbms_api::prelude::Value::Null = value {
+                        if let #value_type(__inner_value) = __col_value {
+                            #field_name = Some(::wasm_dbms_api::prelude::Nullable::Value(__inner_value.clone()));
+                        } else if let ::wasm_dbms_api::prelude::Value::Null = __col_value {
                             #field_name = Some(::wasm_dbms_api::prelude::Nullable::Null);
                         }
                     }
@@ -207,8 +207,8 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             } else {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
-                        if let #value_type(v) = value {
-                            #field_name = Some(v.clone());
+                        if let #value_type(__inner_value) = __col_value {
+                            #field_name = Some(__inner_value.clone());
                         }
                     }
                 })
@@ -229,7 +229,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         fn from_values(values: &[(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)], where_clause: Option<::wasm_dbms_api::prelude::Filter>) -> Self {
             #(#field_initializers)*
 
-            for (column, value) in values {
+            for (column, __col_value) in values {
                 match column.name {
                     #(#match_arms)*
                     _ => {/* Ignore unknown columns */}
