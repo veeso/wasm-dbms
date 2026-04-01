@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.1
+
+Released on 2026-04-01
+
+### Documentation
+
+- build docs from mdbook
+
+### Fixed
+
+- rename generated loop variables in Table macro to avoid shadowing user field names
+  > Fields named `value` caused compile errors because the generated code
+  > used `value` as both the loop binding and destructure binding, shadowing
+  > the field accumulator variable.
+
+### Miscellaneous
+
+- derive CustomDataType on principal
+
 ## 0.7.0
 
 Released on 2026-03-30
