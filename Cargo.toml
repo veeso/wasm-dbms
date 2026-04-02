@@ -17,10 +17,10 @@ members = [
   "crates/wasm-dbms/example/guest",
   "crates/wasm-dbms/example/host",
 ]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
-version = "0.7.1"
+version = "0.7.2"
 edition = "2024"
 rust-version = "1.91.1"
 authors = ["Christian Visintin <christian.visintin@veeso.dev>"]

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2
+
+Released on 2026-04-02
+
+### Fixed
+
+- export macros in wasm-dbms-api
+  > wasm-dbms-macros were not actually exported as the documentation example were showing
+
 ## 0.7.1
 
 Released on 2026-04-01
