@@ -210,6 +210,48 @@ fn test_select_with_offset_and_limit() {
     assert_eq!(rows.len(), 1);
 }
 
+#[test]
+fn test_select_with_order_by_and_limit() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "charlie");
+    insert_user(&db, 2, "alice");
+    insert_user(&db, 3, "bob");
+
+    // ORDER BY name ASC with LIMIT 2 should return the first 2 sorted rows
+    let rows = db
+        .select::<User>(Query::builder().all().order_by_asc("name").limit(2).build())
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].name, Some(Text("alice".to_string())));
+    assert_eq!(rows[1].name, Some(Text("bob".to_string())));
+}
+
+#[test]
+fn test_select_with_order_by_and_offset_and_limit() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "charlie");
+    insert_user(&db, 2, "alice");
+    insert_user(&db, 3, "bob");
+    insert_user(&db, 4, "dave");
+
+    // ORDER BY name ASC with OFFSET 1 LIMIT 2 should skip "alice" and return "bob", "charlie"
+    let rows = db
+        .select::<User>(
+            Query::builder()
+                .all()
+                .order_by_asc("name")
+                .offset(1)
+                .limit(2)
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].name, Some(Text("bob".to_string())));
+    assert_eq!(rows[1].name, Some(Text("charlie".to_string())));
+}
+
 // -- select with filter --
 
 #[test]

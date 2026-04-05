@@ -607,18 +607,23 @@ where
         };
 
         let mut results = Vec::with_capacity(query.limit.unwrap_or(DEFAULT_SELECT_CAPACITY));
+        // When ORDER BY is present, LIMIT and OFFSET must be applied after sorting
+        // to comply with standard SQL semantics (ORDER BY -> OFFSET -> LIMIT).
+        let has_order_by = !query.order_by.is_empty();
         let mut count = 0;
 
         if let Some(indexed_rows) =
             self.try_index_select::<T>(&query, &table_registry, &table_overlay)?
         {
             for values in indexed_rows {
-                count += 1;
-                if query.offset.is_some_and(|offset| count <= offset) {
-                    continue;
+                if !has_order_by {
+                    count += 1;
+                    if query.offset.is_some_and(|offset| count <= offset) {
+                        continue;
+                    }
                 }
                 results.push(vec![(ValuesSource::This, values)]);
-                if query.limit.is_some_and(|limit| results.len() >= limit) {
+                if !has_order_by && query.limit.is_some_and(|limit| results.len() >= limit) {
                     break;
                 }
             }
@@ -633,12 +638,14 @@ where
                 {
                     continue;
                 }
-                count += 1;
-                if query.offset.is_some_and(|offset| count <= offset) {
-                    continue;
+                if !has_order_by {
+                    count += 1;
+                    if query.offset.is_some_and(|offset| count <= offset) {
+                        continue;
+                    }
                 }
                 results.push(vec![(ValuesSource::This, values)]);
-                if query.limit.is_some_and(|limit| results.len() >= limit) {
+                if !has_order_by && query.limit.is_some_and(|limit| results.len() >= limit) {
                     break;
                 }
             }
@@ -649,6 +656,21 @@ where
 
         for (column, direction) in query.order_by.into_iter().rev() {
             self.sort_query_results(&mut results, &column, direction);
+        }
+
+        // Apply OFFSET and LIMIT after sorting when ORDER BY was present
+        if has_order_by {
+            let offset = query.offset.unwrap_or_default();
+            if offset > 0 {
+                if offset >= results.len() {
+                    results.clear();
+                } else {
+                    results.drain(..offset);
+                }
+            }
+            if let Some(limit) = query.limit {
+                results.truncate(limit);
+            }
         }
 
         Ok(results)
