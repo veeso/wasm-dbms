@@ -1,6 +1,7 @@
 use crate::error::DbmsResult;
 use crate::prelude::{
-    ColumnDef, DeleteBehavior, Filter, InsertRecord, Query, TableSchema, UpdateRecord, Value,
+    ColumnDef, DeleteBehavior, Filter, InsertRecord, JoinColumnDef, Query, TableSchema,
+    UpdateRecord, Value,
 };
 
 /// This module defines the Database trait and related database functionalities.
@@ -23,6 +24,17 @@ pub trait Database {
     /// Unlike [`Database::select`], this method does not require a concrete
     /// table type. It takes a table name and dispatches internally.
     fn select_raw(&self, table: &str, query: Query) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>>;
+
+    /// Executes a join query, returning results with column definitions
+    /// that include source table names.
+    ///
+    /// Use `table.column` syntax in field selection, filters, and ordering
+    /// to disambiguate columns that share the same name across joined tables.
+    fn select_join(
+        &self,
+        table: &str,
+        query: Query,
+    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>>;
 
     /// Executes an INSERT query.
     ///

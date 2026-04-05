@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use wasm_dbms_api::prelude::{
-    CandidColumnDef, ColumnDef, DbmsResult, JoinType, OrderDirection, Query, Value,
+    ColumnDef, DbmsResult, JoinColumnDef, JoinType, OrderDirection, Query, Value,
 };
 use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
 
@@ -53,7 +53,7 @@ where
         dbms: &WasmDbmsDatabase<'_, M, A>,
         from_table: &str,
         query: Query,
-    ) -> DbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
+    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
         let from_rows = self
             .schema
             .select(dbms, from_table, Query::builder().all().build())?;
@@ -309,12 +309,12 @@ where
         &self,
         row: JoinedRow,
         query: &Query,
-    ) -> DbmsResult<Vec<(CandidColumnDef, Value)>> {
+    ) -> DbmsResult<Vec<(JoinColumnDef, Value)>> {
         let mut result = Vec::new();
 
         for (table_name, cols) in row {
             for (col, val) in cols {
-                let mut candid_col = CandidColumnDef::from(col);
+                let mut candid_col = JoinColumnDef::from(col);
                 candid_col.table = Some(table_name.clone());
 
                 if !query.all_selected() {

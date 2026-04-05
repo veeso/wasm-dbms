@@ -102,7 +102,7 @@ impl From<DataTypeKind> for CandidDataTypeKind {
 /// of `&'static str`, making it suitable for serialization across API boundaries.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
-pub struct CandidColumnDef {
+pub struct JoinColumnDef {
     /// The source table name. `Some` for join results, `None` for single-table queries.
     pub table: Option<String>,
     /// The name of the column.
@@ -132,7 +132,7 @@ pub struct CandidForeignKeyDef {
     pub foreign_column: String,
 }
 
-impl From<ColumnDef> for CandidColumnDef {
+impl From<ColumnDef> for JoinColumnDef {
     fn from(def: ColumnDef) -> Self {
         Self {
             table: None,
@@ -313,7 +313,7 @@ mod test {
 
     #[test]
     fn test_should_create_candid_column_def_with_table() {
-        let col = CandidColumnDef {
+        let col = JoinColumnDef {
             table: Some("users".to_string()),
             name: "id".to_string(),
             data_type: CandidDataTypeKind::Uint32,
@@ -335,7 +335,7 @@ mod test {
             unique: false,
             foreign_key: None,
         };
-        let candid_col = CandidColumnDef::from(col);
+        let candid_col = JoinColumnDef::from(col);
         assert_eq!(candid_col.table, None);
         assert_eq!(candid_col.name, "id");
     }
@@ -365,7 +365,7 @@ mod test {
             unique: false,
             foreign_key: None,
         };
-        let candid_col = CandidColumnDef::from(col);
+        let candid_col = JoinColumnDef::from(col);
         assert_eq!(
             candid_col.data_type,
             CandidDataTypeKind::Custom("role".to_string())

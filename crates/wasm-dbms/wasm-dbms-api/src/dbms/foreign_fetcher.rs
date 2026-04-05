@@ -141,6 +141,14 @@ mod tests {
             unimplemented!()
         }
 
+        fn select_join(
+            &self,
+            _table: &str,
+            _query: crate::prelude::Query,
+        ) -> DbmsResult<Vec<Vec<(crate::prelude::JoinColumnDef, crate::prelude::Value)>>> {
+            unimplemented!()
+        }
+
         fn delete<T>(
             &self,
             _behaviour: crate::prelude::DeleteBehavior,

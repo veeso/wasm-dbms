@@ -9,7 +9,7 @@ mod types;
 
 use candid::{CandidType, Principal};
 use ic_dbms_api::prelude::{
-    CandidColumnDef, DeleteBehavior, Filter, IcDbmsResult, InsertRecord, Query, TableSchema,
+    DeleteBehavior, Filter, IcDbmsResult, InsertRecord, JoinColumnDef, Query, TableSchema,
     TransactionId, UpdateRecord, Value,
 };
 
@@ -22,7 +22,7 @@ pub use self::ic::IcDbmsCanisterClient;
 pub use self::pocket_ic::IcDbmsPocketIcClient;
 use crate::prelude::IcDbmsCanisterClientResult;
 
-type RawRecords = Vec<Vec<(CandidColumnDef, Value)>>;
+type RawRecords = Vec<Vec<(JoinColumnDef, Value)>>;
 
 /// Trait for implementing a ic-dbms-client.
 ///

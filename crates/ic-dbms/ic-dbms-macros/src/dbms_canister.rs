@@ -128,7 +128,7 @@ fn impl_select_raw_api(struct_ident: &syn::Ident) -> TokenStream2 {
             table: String,
             query: ::ic_dbms_api::prelude::Query,
             transaction_id: Option<::ic_dbms_api::prelude::TransactionId>,
-        ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(::ic_dbms_api::prelude::CandidColumnDef, ::ic_dbms_api::prelude::Value)>>> {
+        ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(::ic_dbms_api::prelude::JoinColumnDef, ::ic_dbms_api::prelude::Value)>>> {
             if query.has_joins() {
                 ::ic_dbms_canister::api::select_join(&table, query, transaction_id, #struct_ident)
             } else {
@@ -137,7 +137,7 @@ fn impl_select_raw_api(struct_ident: &syn::Ident) -> TokenStream2 {
                         rows.into_iter()
                             .map(|row| {
                                 row.into_iter()
-                                    .map(|(col, val)| (::ic_dbms_api::prelude::CandidColumnDef::from(col), val))
+                                    .map(|(col, val)| (::ic_dbms_api::prelude::JoinColumnDef::from(col), val))
                                     .collect()
                             })
                             .collect()

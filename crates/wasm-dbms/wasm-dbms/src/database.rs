@@ -10,8 +10,8 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use wasm_dbms_api::prelude::{
-    CandidColumnDef, ColumnDef, DataTypeKind, Database, DbmsError, DbmsResult, DeleteBehavior,
-    Filter, ForeignFetcher, ForeignKeyDef, InsertRecord, OrderDirection, Query, QueryError,
+    ColumnDef, DataTypeKind, Database, DbmsError, DbmsResult, DeleteBehavior, Filter,
+    ForeignFetcher, ForeignKeyDef, InsertRecord, JoinColumnDef, OrderDirection, Query, QueryError,
     TableColumns, TableError, TableRecord, TableSchema, TransactionError, TransactionId,
     UpdateRecord, Value, ValuesSource,
 };
@@ -655,12 +655,11 @@ where
     }
 
     /// Executes a join query.
-    #[doc(hidden)]
-    pub fn select_join(
+    fn select_join_inner(
         &self,
         table: &str,
         query: Query,
-    ) -> DbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
+    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
         self.schema.select_join(self, table, query)
     }
 
@@ -954,6 +953,14 @@ where
 
     fn select_raw(&self, table: &str, query: Query) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
         self.schema.select(self, table, query)
+    }
+
+    fn select_join(
+        &self,
+        table: &str,
+        query: Query,
+    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
+        self.select_join_inner(table, query)
     }
 
     fn insert<T>(&self, record: T::Insert) -> DbmsResult<()>

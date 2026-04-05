@@ -21,7 +21,7 @@
 //! ## Feature flags
 //!
 //! - `candid`: Enables `CandidType` derives on all public types and exposes
-//!   Candid-specific API boundary types (`CandidColumnDef`, `CandidDataTypeKind`).
+//!   Candid-specific API boundary types (`JoinColumnDef`, `CandidDataTypeKind`).
 
 #![doc(html_playground_url = "https://play.rust-lang.org")]
 

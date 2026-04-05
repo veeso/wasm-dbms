@@ -84,7 +84,7 @@ The `join()` method processes a query through these steps:
 4. **Order**: Order-by clauses are applied in reverse (stable sort), so the primary sort key ends up correctly ordered.
 5. **Offset**: Rows are skipped according to the offset value.
 6. **Limit**: The result is truncated to the limit.
-7. **Flatten**: Each joined row is converted from the internal `JoinedRow` representation to the output `Vec<(CandidColumnDef, Value)>` format, applying column selection.
+7. **Flatten**: Each joined row is converted from the internal `JoinedRow` representation to the output `Vec<(JoinColumnDef, Value)>` format, applying column selection.
 
 ---
 
@@ -152,10 +152,10 @@ For filters and ordering on joined results, the same qualified/unqualified patte
 
 ## Output Format
 
-Join results use `CandidColumnDef` instead of `ColumnDef`:
+Join results use `JoinColumnDef` instead of `ColumnDef`:
 
 ```rust
-pub struct CandidColumnDef {
+pub struct JoinColumnDef {
     pub table: Option<String>,  // Source table name
     pub name: String,
     pub data_type: DataTypeKind,
@@ -170,7 +170,7 @@ At the API layer, the generated `select` endpoint checks `query.has_joins()`:
 - **With joins**: Routes to `select_join`, which uses `JoinEngine`.
 - **Without joins**: Routes to `select_raw`, the standard single-table path.
 
-Both paths return `Vec<Vec<(CandidColumnDef, Value)>>`, but for non-join queries the `table` field is `None`.
+Both paths return `Vec<Vec<(JoinColumnDef, Value)>>`, but for non-join queries the `table` field is `None`.
 
 ---
 

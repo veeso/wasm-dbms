@@ -2,7 +2,7 @@
 // X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 use wasm_dbms_api::prelude::{
-    CandidColumnDef, ColumnDef, DbmsResult, DeleteBehavior, Filter, Query, Value,
+    ColumnDef, DbmsResult, DeleteBehavior, Filter, JoinColumnDef, Query, Value,
 };
 use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
 
@@ -36,7 +36,7 @@ where
         dbms: &WasmDbmsDatabase<'_, M, A>,
         from_table: &str,
         query: Query,
-    ) -> DbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> {
+    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
         crate::join::JoinEngine::new(self).join(dbms, from_table, query)
     }
 

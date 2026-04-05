@@ -7,7 +7,7 @@ mod inspect;
 
 use candid::Principal;
 use ic_dbms_api::prelude::{
-    CandidColumnDef, ColumnDef, Database as _, DeleteBehavior, Filter, IcDbmsResult, InsertRecord,
+    ColumnDef, Database as _, DeleteBehavior, Filter, IcDbmsResult, InsertRecord, JoinColumnDef,
     Query, TableSchema, TransactionId, UpdateRecord, Value,
 };
 use wasm_dbms::prelude::{DatabaseSchema, WasmDbmsDatabase};
@@ -105,13 +105,13 @@ where
 
 /// Executes a join query through the raw/untyped select path.
 ///
-/// Returns rows with [`CandidColumnDef`] that include the source table name.
+/// Returns rows with [`JoinColumnDef`] that include the source table name.
 pub fn select_join<S>(
     table: &str,
     query: Query,
     transaction_id: Option<TransactionId>,
     database_schema: S,
-) -> IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>>
+) -> IcDbmsResult<Vec<Vec<(JoinColumnDef, Value)>>>
 where
     S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
 {

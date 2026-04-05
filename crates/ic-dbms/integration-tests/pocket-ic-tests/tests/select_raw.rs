@@ -1,6 +1,6 @@
 use candid::Encode;
 use ic_dbms_api::prelude::{
-    CandidColumnDef, Filter, IcDbmsResult, Query, TableSchema, Uint32, Value,
+    Filter, IcDbmsResult, JoinColumnDef, Query, TableSchema, Uint32, Value,
 };
 use ic_dbms_client::prelude::{Client as _, IcDbmsPocketIcClient};
 use pocket_ic_tests::TestEnv;
@@ -75,7 +75,7 @@ async fn test_should_select_raw_specific_columns(env: PocketIcTestEnv) {
     let payload =
         Encode!(&"users".to_string(), &query, &None::<u64>).expect("failed to encode payload");
 
-    let result: IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> = env
+    let result: IcDbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> = env
         .query(env.dbms_canister(), env.admin(), "select", payload)
         .await
         .expect("failed to call canister");
@@ -119,7 +119,7 @@ async fn test_should_select_raw_with_limit_and_offset(env: PocketIcTestEnv) {
     let payload =
         Encode!(&"users".to_string(), &query, &None::<u64>).expect("failed to encode payload");
 
-    let result: IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> = env
+    let result: IcDbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> = env
         .query(env.dbms_canister(), env.admin(), "select", payload)
         .await
         .expect("failed to call canister");
@@ -142,7 +142,7 @@ async fn test_should_fail_select_raw_unknown_table(env: PocketIcTestEnv) {
     let payload = Encode!(&"nonexistent".to_string(), &query, &None::<u64>)
         .expect("failed to encode payload");
 
-    let result: IcDbmsResult<Vec<Vec<(CandidColumnDef, Value)>>> = env
+    let result: IcDbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> = env
         .query(env.dbms_canister(), env.admin(), "select", payload)
         .await
         .expect("failed to call canister");

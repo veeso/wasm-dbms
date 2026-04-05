@@ -410,7 +410,7 @@ See the [Relationships Guide](./relationships.md) for more on eager loading.
 
 Joins combine rows from two or more tables based on a related column, producing a single result set with columns from all joined tables. Use joins when you need to correlate data across tables in a single flat result -- for example, listing posts alongside their author names.
 
-> **Note:** Joins only work through the untyped `select_raw` path. Typed `select::<T>` rejects queries that contain joins with a `JoinInsideTypedSelect` error.
+> **Note:** Joins require the `select_join` method, which returns rows with [`JoinColumnDef`] that include the source table name. Typed `select::<T>` rejects queries that contain joins with a `JoinInsideTypedSelect` error.
 
 ### Join Types
 
@@ -434,8 +434,8 @@ let query = Query::builder()
     .inner_join("posts", "id", "user_id")
     .build();
 
-// Use select_raw since joins return untyped rows
-let rows = database.select_raw("users", query)?;
+// Use select_join since joins return rows with table provenance
+let rows = database.select_join("users", query)?;
 
 // Each row contains columns from both "users" and "posts"
 for row in &rows {
@@ -482,7 +482,7 @@ let query = Query::builder()
     .left_join("comments", "posts.id", "post_id")
     .build();
 
-let rows = database.select_raw("users", query)?;
+let rows = database.select_join("users", query)?;
 ```
 
 Joins are processed left-to-right. The second join operates on the result of the first.
@@ -509,15 +509,15 @@ Qualified names (`table.column`) work in:
 - Ordering (`.order_by_asc()`, `.order_by_desc()`)
 - Join ON conditions
 
-Unqualified names default to the FROM table (the table passed to `select_raw`).
+Unqualified names default to the FROM table (the table passed to `select_join`).
 
 ### Joins vs Eager Loading
 
 | | Eager Loading | Joins |
 |--|--------------|-------|
-| **Result type** | Typed (`Vec<T>`) | Untyped (`Vec<Vec<(ColumnDef, Value)>>`) |
+| **Result type** | Typed (`Vec<T>`) | Untyped (`Vec<Vec<(JoinColumnDef, Value)>>`) |
 | **Result format** | Separate related records | Flat combined rows |
-| **API method** | `select::<T>` | `select_raw` |
+| **API method** | `select::<T>` | `select_join` |
 | **Column disambiguation** | Not needed | Use `table.column` syntax |
 | **Use case** | Load parent with children | Correlate columns across tables |
 

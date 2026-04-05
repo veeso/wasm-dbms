@@ -191,7 +191,7 @@ update_users(UserUpdateRequest, Option<TxId>) -> Result<u64>
 delete_users(DeleteBehavior, Option<Filter>, Option<TxId>) -> Result<u64>
 
 // Untyped select (supports joins):
-select(table: String, Query, Option<TxId>) -> Result<Vec<Vec<(CandidColumnDef, Value)>>>
+select(table: String, Query, Option<TxId>) -> Result<Vec<Vec<(JoinColumnDef, Value)>>>
 
 // Global operations:
 begin_transaction() -> TxId
@@ -419,9 +419,9 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
    c. Apply filter on combined rows
    d. Apply ordering
    e. Apply offset/limit
-   f. Flatten to output with CandidColumnDef
+   f. Flatten to output with JoinColumnDef
               │
-5. Return Result<Vec<Vec<(CandidColumnDef, Value)>>>
+5. Return Result<Vec<Vec<(JoinColumnDef, Value)>>>
 ```
 
 See [Join Engine](./join-engine.md) for implementation details.
