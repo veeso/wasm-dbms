@@ -129,13 +129,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-          target: wasm32-unknown-unknown
-
-      - name: Install Rust (wasm32-wasip2 target)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          target: wasm32-wasip2
+          targets: wasm32-unknown-unknown, wasm32-wasip2
 
       - name: Build all
         run: just build_all
@@ -145,6 +139,7 @@ jobs:
         with:
           name: wasm-artifacts
           path: .artifact/
+          if-no-files-found: error
           retention-days: 1
 
       - name: Upload host binary
@@ -152,6 +147,7 @@ jobs:
         with:
           name: wasm-example-host
           path: target/release/wasm-dbms-example-host
+          if-no-files-found: error
           retention-days: 1
 
   integration-test:
