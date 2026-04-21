@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.2
+
+Released on 2026-04-21
+
+### Changed
+
+- derive `Default` on generated `*UpdateRequest` structs
+  > All fields on update requests are `Option<T>`, so `Default` is always
+  > derivable. This enables the `..Default::default()` struct-update pattern
+  > when constructing partial updates, removing the need to write `None`
+  > for every untouched field.
+
 ## 0.8.1
 
 Released on 2026-04-05

@@ -48,11 +48,11 @@ fn generate_update_request_struct(metadata: &TableMetadata) -> TokenStream2 {
 
     let derives = if metadata.candid {
         quote::quote! {
-            #[derive(Clone, candid::CandidType, serde::Serialize, serde::Deserialize)]
+            #[derive(Clone, Default, candid::CandidType, serde::Serialize, serde::Deserialize)]
         }
     } else {
         quote::quote! {
-            #[derive(Clone)]
+            #[derive(Clone, Default)]
         }
     };
 

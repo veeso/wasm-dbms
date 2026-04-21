@@ -323,6 +323,34 @@ fn test_update_no_matching_records() {
     assert_eq!(count, 0);
 }
 
+#[test]
+fn test_update_request_default_all_none() {
+    let patch = UserUpdateRequest::default();
+    assert!(patch.id.is_none());
+    assert!(patch.name.is_none());
+    assert!(patch.where_clause.is_none());
+    assert!(patch.update_values().is_empty());
+    assert!(patch.where_clause().is_none());
+}
+
+#[test]
+fn test_update_request_default_with_struct_update() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    let patch = UserUpdateRequest {
+        name: Some(Text("alicia".to_string())),
+        where_clause: Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        ..Default::default()
+    };
+    let count = db.update::<User>(patch).unwrap();
+    assert_eq!(count, 1);
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows[0].name, Some(Text("alicia".to_string())));
+}
+
 // -- delete operations --
 
 #[test]

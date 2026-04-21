@@ -42,4 +42,14 @@ mod tests {
         let fingerprint = User::fingerprint();
         assert_ne!(fingerprint, 0);
     }
+
+    #[test]
+    fn test_update_request_default_all_none() {
+        let patch = super::UserUpdateRequest::default();
+        assert!(patch.id.is_none());
+        assert!(patch.name.is_none());
+        assert!(patch.email.is_none());
+        assert!(patch.age.is_none());
+        assert!(patch.where_clause.is_none());
+    }
 }
