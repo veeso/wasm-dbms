@@ -14,7 +14,7 @@ keywords = ["database", "wasm", "memory"]
 include = ["src/**/*", "../../../LICENSE", "README.md", "../../../CHANGELOG.md"]
 
 [dependencies]
-wasm-dbms-api = { path = "../wasm-dbms-api", version = "0.8" }
+wasm-dbms-api = { workspace = true }
 
 [dev-dependencies]
 candid = { workspace = true }

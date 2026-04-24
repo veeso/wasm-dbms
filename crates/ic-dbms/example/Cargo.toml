@@ -15,9 +15,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
-ic-dbms-api = { version = "0.8", path = "../ic-dbms-api" }
-ic-dbms-canister = { version = "0.8", path = "../ic-dbms-canister" }
+ic-dbms-api = { workspace = true }
+ic-dbms-canister = { workspace = true }
 serde = { workspace = true }
-wasm-dbms = { version = "0.8", path = "../../wasm-dbms/wasm-dbms" }
-wasm-dbms-api = { version = "0.8", path = "../../wasm-dbms/wasm-dbms-api" }
-wasm-dbms-memory = { version = "0.8", path = "../../wasm-dbms/wasm-dbms-memory" }
+wasm-dbms = { workspace = true }
+wasm-dbms-api = { workspace = true }
+wasm-dbms-memory = { workspace = true }

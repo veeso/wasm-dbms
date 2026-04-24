@@ -14,5 +14,5 @@ name = "wasm-dbms-example"
 path = "src/main.rs"
 
 [dependencies]
-wasmtime = { version = "42", features = ["component-model"] }
-wasmtime-wasi = "42"
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
