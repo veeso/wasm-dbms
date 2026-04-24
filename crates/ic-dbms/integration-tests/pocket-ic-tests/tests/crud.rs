@@ -1,11 +1,12 @@
 use ic_dbms_api::prelude::{DeleteBehavior, Filter, Query, TableSchema, Text, Uint32, Value};
 use ic_dbms_client::prelude::{Client as _, IcDbmsPocketIcClient};
-use pocket_ic_tests::TestEnv;
+use pocket_ic_harness::PocketIcTestEnv;
 use pocket_ic_tests::table::{User, UserInsertRequest, UserUpdateRequest};
+use pocket_ic_tests::{TestCanisterSetup, TestEnvExt as _, admin, alice};
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_insert_and_query_data(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_insert_and_query_data(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     let insert_request = UserInsertRequest {
         id: Uint32::from(1),
@@ -39,9 +40,9 @@ async fn test_should_insert_and_query_data(env: PocketIcTestEnv) {
     );
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_delete_a_user(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_delete_a_user(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     let insert_request = UserInsertRequest {
         id: Uint32::from(2),
@@ -67,9 +68,9 @@ async fn test_should_delete_a_user(env: PocketIcTestEnv) {
         .expect("failed to delete user");
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_update_a_user(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_update_a_user(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     let insert_request = UserInsertRequest {
         id: Uint32::from(3),
@@ -116,9 +117,9 @@ async fn test_should_update_a_user(env: PocketIcTestEnv) {
     );
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_not_allow_unauthorized_call(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.alice(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_not_allow_unauthorized_call(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), alice(), &env.pic);
 
     let insert_request = UserInsertRequest {
         id: Uint32::from(4),

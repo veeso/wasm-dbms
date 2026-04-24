@@ -1,11 +1,12 @@
 use ic_dbms_api::prelude::{Filter, Query, TableSchema, Text, Uint32, Value};
 use ic_dbms_client::prelude::{Client as _, IcDbmsPocketIcClient};
-use pocket_ic_tests::TestEnv;
+use pocket_ic_harness::PocketIcTestEnv;
 use pocket_ic_tests::table::{Post, PostInsertRequest, User, UserInsertRequest};
+use pocket_ic_tests::{TestCanisterSetup, TestEnvExt as _, admin};
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_operate_on_a_transaction(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_operate_on_a_transaction(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     let transaction_id = client
         .begin_transaction()
@@ -82,9 +83,9 @@ async fn test_should_operate_on_a_transaction(env: PocketIcTestEnv) {
     assert_eq!(post.title.as_ref().unwrap(), &Text::from("Hello World"));
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_rollback_transaction(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_rollback_transaction(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     let transaction_id = client
         .begin_transaction()
@@ -155,9 +156,9 @@ async fn test_should_rollback_transaction(env: PocketIcTestEnv) {
     assert!(posts.is_empty());
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_not_perform_transaction_not_owned(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_not_perform_transaction_not_owned(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     let transaction_id = Some(1111u64);
 

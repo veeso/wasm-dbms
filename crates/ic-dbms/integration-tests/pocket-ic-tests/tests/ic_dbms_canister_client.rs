@@ -2,22 +2,19 @@ use candid::{Encode, Principal};
 use ic_dbms_api::prelude::{
     DeleteBehavior, Filter, IcDbmsResult, JoinColumnDef, Query, TransactionId, Value,
 };
+use pocket_ic_harness::PocketIcTestEnv;
 use pocket_ic_tests::table::{UserInsertRequest, UserRecord, UserUpdateRequest};
-use pocket_ic_tests::{PocketIcClient, TestEnv};
+use pocket_ic_tests::{PocketIcClient, TestCanisterSetup, TestEnvExt as _, admin, bob};
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv) {
-    let client = PocketIcClient::new(
-        env.dbms_canister_client_integration(),
-        env.admin(),
-        &env.pic,
-    );
+#[pocket_ic_harness::test]
+async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = PocketIcClient::new(env.dbms_canister_client_integration(), admin(), &env.pic);
 
     // Add principal
     let res: Result<IcDbmsResult<()>, String> = client
         .update(
             "acl_add_principal",
-            Encode!(&env.bob()).expect("Failed to encode"),
+            Encode!(&bob()).expect("Failed to encode"),
         )
         .await
         .expect("Can't update");
@@ -35,13 +32,13 @@ async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv) {
         .expect("Can't query");
 
     let principals = principals.expect("Client error");
-    assert!(principals.contains(&env.bob()));
+    assert!(principals.contains(&bob()));
 
     // Remove principal
     let res: Result<IcDbmsResult<()>, String> = client
         .update(
             "acl_remove_principal",
-            Encode!(&env.bob()).expect("Failed to encode"),
+            Encode!(&bob()).expect("Failed to encode"),
         )
         .await
         .expect("Can't update");
@@ -59,16 +56,12 @@ async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv) {
         .expect("Can't query");
 
     let principals = principals.expect("Client error");
-    assert!(!principals.contains(&env.bob()));
+    assert!(!principals.contains(&bob()));
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_begin_commit_transaction(env: PocketIcTestEnv) {
-    let client = PocketIcClient::new(
-        env.dbms_canister_client_integration(),
-        env.admin(),
-        &env.pic,
-    );
+#[pocket_ic_harness::test]
+async fn test_should_begin_commit_transaction(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = PocketIcClient::new(env.dbms_canister_client_integration(), admin(), &env.pic);
 
     // Begin transaction
     let res: Result<TransactionId, String> = client
@@ -91,13 +84,9 @@ async fn test_should_begin_commit_transaction(env: PocketIcTestEnv) {
         .expect("Failed to commit transaction");
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_begin_rollback_transaction(env: PocketIcTestEnv) {
-    let client = PocketIcClient::new(
-        env.dbms_canister_client_integration(),
-        env.admin(),
-        &env.pic,
-    );
+#[pocket_ic_harness::test]
+async fn test_should_begin_rollback_transaction(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = PocketIcClient::new(env.dbms_canister_client_integration(), admin(), &env.pic);
 
     // Begin transaction
     let res: Result<TransactionId, String> = client
@@ -120,13 +109,9 @@ async fn test_should_begin_rollback_transaction(env: PocketIcTestEnv) {
         .expect("Failed to rollback transaction");
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_insert_select_update_delete(env: PocketIcTestEnv) {
-    let client = PocketIcClient::new(
-        env.dbms_canister_client_integration(),
-        env.admin(),
-        &env.pic,
-    );
+#[pocket_ic_harness::test]
+async fn test_should_insert_select_update_delete(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = PocketIcClient::new(env.dbms_canister_client_integration(), admin(), &env.pic);
 
     // Insert a record
     let insert_request = UserInsertRequest {
