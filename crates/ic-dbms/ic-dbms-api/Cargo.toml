@@ -23,5 +23,5 @@ readme = "README.md"
 candid = { workspace = true }
 ic-cdk = { workspace = true }
 serde = { workspace = true }
-wasm-dbms-api = { version = "0.8", path = "../../wasm-dbms/wasm-dbms-api", features = ["candid"] }
-wasm-dbms-macros = { version = "0.8", path = "../../wasm-dbms/wasm-dbms-macros" }
+wasm-dbms-api = { workspace = true, features = ["candid"] }
+wasm-dbms-macros = { workspace = true }

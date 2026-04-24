@@ -28,7 +28,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
-wasm-dbms-macros = { version = "0.8", path = "../wasm-dbms-macros" }
+wasm-dbms-macros = { workspace = true }
 
 [features]
 default = []

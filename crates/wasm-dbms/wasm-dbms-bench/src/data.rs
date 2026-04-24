@@ -1,5 +1,5 @@
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 /// Deterministic test-data generator for reproducible benchmarks.
 pub struct DataGenerator {

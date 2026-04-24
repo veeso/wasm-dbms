@@ -22,13 +22,13 @@ readme = "README.md"
 [dependencies]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
-ic-dbms-api = { version = "0.8", path = "../ic-dbms-api" }
-ic-dbms-macros = { version = "0.8", path = "../ic-dbms-macros" }
+ic-dbms-api = { workspace = true }
+ic-dbms-macros = { workspace = true }
 serde = { workspace = true }
-wasm-dbms = { version = "0.8", path = "../../wasm-dbms/wasm-dbms" }
-wasm-dbms-api = { version = "0.8", path = "../../wasm-dbms/wasm-dbms-api" }
-wasm-dbms-macros = { version = "0.8", path = "../../wasm-dbms/wasm-dbms-macros" }
-wasm-dbms-memory = { version = "0.8", path = "../../wasm-dbms/wasm-dbms-memory" }
+wasm-dbms = { workspace = true }
+wasm-dbms-api = { workspace = true }
+wasm-dbms-macros = { workspace = true }
+wasm-dbms-memory = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

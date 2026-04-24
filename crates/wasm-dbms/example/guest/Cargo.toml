@@ -13,12 +13,9 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-dbms-api = { version = "0.8", path = "../../wasm-dbms-api" }
-wasm-dbms-memory = { version = "0.8", path = "../../wasm-dbms-memory" }
-wasm-dbms = { version = "0.8", path = "../../wasm-dbms" }
-wit-bindgen = { version = "0.53", default-features = false, features = [
-  "macros",
-  "realloc",
-] }
-serde_json = { workspace = true }
 rust_decimal = { workspace = true }
+serde_json = { workspace = true }
+wasm-dbms = { workspace = true }
+wasm-dbms-api = { workspace = true }
+wasm-dbms-memory = { workspace = true }
+wit-bindgen = { workspace = true }
