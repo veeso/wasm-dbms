@@ -1,13 +1,14 @@
 use ic_dbms_client::prelude::{Client as _, IcDbmsPocketIcClient};
-use pocket_ic_tests::TestEnv;
+use pocket_ic_harness::PocketIcTestEnv;
+use pocket_ic_tests::{TestCanisterSetup, TestEnvExt as _, admin, bob};
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     // add alice to ACL
     client
-        .acl_add_principal(env.bob())
+        .acl_add_principal(bob())
         .await
         .expect("failed to call canister")
         .expect("failed to add principal to ACL");
@@ -17,12 +18,12 @@ async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv) {
         .acl_allowed_principals()
         .await
         .expect("failed to call canister");
-    assert!(acl.contains(&env.bob()));
-    assert!(acl.contains(&env.admin()));
+    assert!(acl.contains(&bob()));
+    assert!(acl.contains(&admin()));
 
     // remove alice from ACL
     client
-        .acl_remove_principal(env.bob())
+        .acl_remove_principal(bob())
         .await
         .expect("failed to call canister")
         .expect("failed to remove principal from ACL");
@@ -32,6 +33,6 @@ async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv) {
         .acl_allowed_principals()
         .await
         .expect("failed to call canister");
-    assert!(!acl.contains(&env.bob()));
-    assert!(acl.contains(&env.admin()));
+    assert!(!acl.contains(&bob()));
+    assert!(acl.contains(&admin()));
 }

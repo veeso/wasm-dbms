@@ -3,12 +3,13 @@ use ic_dbms_api::prelude::{
     Filter, IcDbmsResult, JoinColumnDef, Query, TableSchema, Uint32, Value,
 };
 use ic_dbms_client::prelude::{Client as _, IcDbmsPocketIcClient};
-use pocket_ic_tests::TestEnv;
+use pocket_ic_harness::PocketIcTestEnv;
 use pocket_ic_tests::table::{User, UserInsertRequest};
+use pocket_ic_tests::{TestCanisterSetup, TestEnvExt as _, admin};
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_select_raw_all_columns(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_select_raw_all_columns(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     let insert_request = UserInsertRequest {
         id: Uint32::from(100),
@@ -51,9 +52,9 @@ async fn test_should_select_raw_all_columns(env: PocketIcTestEnv) {
     );
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_select_raw_specific_columns(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_select_raw_specific_columns(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     let insert_request = UserInsertRequest {
         id: Uint32::from(101),
@@ -76,7 +77,7 @@ async fn test_should_select_raw_specific_columns(env: PocketIcTestEnv) {
         Encode!(&"users".to_string(), &query, &None::<u64>).expect("failed to encode payload");
 
     let result: IcDbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> = env
-        .query(env.dbms_canister(), env.admin(), "select", payload)
+        .query(env.dbms_canister(), admin(), "select", payload)
         .await
         .expect("failed to call canister");
 
@@ -89,9 +90,9 @@ async fn test_should_select_raw_specific_columns(env: PocketIcTestEnv) {
     assert_eq!(row[0].1, Value::Text("RawBob".to_string().into()));
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_select_raw_with_limit_and_offset(env: PocketIcTestEnv) {
-    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), env.admin(), &env.pic);
+#[pocket_ic_harness::test]
+async fn test_should_select_raw_with_limit_and_offset(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let client = IcDbmsPocketIcClient::new(env.dbms_canister(), admin(), &env.pic);
 
     // Insert 3 users
     for (i, name) in [(102, "LimitA"), (103, "LimitB"), (104, "LimitC")] {
@@ -120,7 +121,7 @@ async fn test_should_select_raw_with_limit_and_offset(env: PocketIcTestEnv) {
         Encode!(&"users".to_string(), &query, &None::<u64>).expect("failed to encode payload");
 
     let result: IcDbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> = env
-        .query(env.dbms_canister(), env.admin(), "select", payload)
+        .query(env.dbms_canister(), admin(), "select", payload)
         .await
         .expect("failed to call canister");
 
@@ -135,15 +136,15 @@ async fn test_should_select_raw_with_limit_and_offset(env: PocketIcTestEnv) {
     assert_eq!(name1.1, Value::Text("LimitC".to_string().into()));
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_should_fail_select_raw_unknown_table(env: PocketIcTestEnv) {
+#[pocket_ic_harness::test]
+async fn test_should_fail_select_raw_unknown_table(env: PocketIcTestEnv<TestCanisterSetup>) {
     let query = Query::builder().all().build();
 
     let payload = Encode!(&"nonexistent".to_string(), &query, &None::<u64>)
         .expect("failed to encode payload");
 
     let result: IcDbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> = env
-        .query(env.dbms_canister(), env.admin(), "select", payload)
+        .query(env.dbms_canister(), admin(), "select", payload)
         .await
         .expect("failed to call canister");
 

@@ -16,11 +16,9 @@ ic-agent = { workspace = true }
 ic-dbms-api = { workspace = true }
 ic-dbms-client = { workspace = true, features = ["ic-agent", "pocket-ic"] }
 pocket-ic = { workspace = true }
+pocket-ic-harness = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
 wasm-dbms-api = { workspace = true }
-
-[dev-dependencies]
-pocket-ic-tests-macro = { workspace = true }

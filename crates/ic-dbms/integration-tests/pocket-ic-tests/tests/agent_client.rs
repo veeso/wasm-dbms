@@ -1,11 +1,12 @@
 use ic_dbms_api::prelude::{DeleteBehavior, Filter, Query, TableSchema, Text, Uint32, Value};
 use ic_dbms_client::prelude::{Client as _, IcDbmsAgentClient};
+use pocket_ic_harness::PocketIcTestEnv;
 use pocket_ic_tests::table::{Post, PostInsertRequest, User, UserInsertRequest, UserUpdateRequest};
-use pocket_ic_tests::{PocketIcTestEnv, TestEnv as _, init_new_agent};
+use pocket_ic_tests::{TestCanisterSetup, TestEnvExt as _, admin, bob, init_new_agent};
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_return_principal(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_return_principal(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
@@ -14,24 +15,24 @@ async fn test_agent_client_should_return_principal(env: PocketIcTestEnv) {
     assert_eq!(client.principal(), e.dbms_canister());
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_add_to_acl(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_add_to_acl(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
     let client = IcDbmsAgentClient::new(&agent, e.dbms_canister());
 
     client
-        .acl_add_principal(e.bob())
+        .acl_add_principal(bob())
         .await
         .expect("failed to call canister")
         .expect("failed to add principal to ACL");
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_remove_from_acl(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_remove_from_acl(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
@@ -39,14 +40,14 @@ async fn test_agent_client_should_remove_from_acl(env: PocketIcTestEnv) {
 
     // Add bob to ACL first
     client
-        .acl_add_principal(e.bob())
+        .acl_add_principal(bob())
         .await
         .expect("failed to call canister")
         .expect("failed to add principal to ACL");
 
     // Remove bob from ACL
     client
-        .acl_remove_principal(e.bob())
+        .acl_remove_principal(bob())
         .await
         .expect("failed to call canister")
         .expect("failed to remove principal from ACL");
@@ -56,12 +57,12 @@ async fn test_agent_client_should_remove_from_acl(env: PocketIcTestEnv) {
         .acl_allowed_principals()
         .await
         .expect("failed to call canister");
-    assert!(!acl.contains(&e.bob()));
+    assert!(!acl.contains(&bob()));
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_list_allowed_principals(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_list_allowed_principals(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
@@ -73,12 +74,12 @@ async fn test_agent_client_should_list_allowed_principals(env: PocketIcTestEnv) 
         .expect("failed to call canister");
 
     // Should contain at least the admin and the agent's principal
-    assert!(acl.contains(&e.admin()));
+    assert!(acl.contains(&admin()));
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_insert_and_select(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_insert_and_select(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
@@ -116,9 +117,9 @@ async fn test_agent_client_should_insert_and_select(env: PocketIcTestEnv) {
     );
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_update(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_update(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
@@ -164,9 +165,9 @@ async fn test_agent_client_should_update(env: PocketIcTestEnv) {
     assert_eq!(users[0].name.as_ref().unwrap(), &Text::from("AgentRobert"));
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_delete(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_delete(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
@@ -210,9 +211,11 @@ async fn test_agent_client_should_delete(env: PocketIcTestEnv) {
     assert!(users.is_empty());
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_begin_transaction_and_commit(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_begin_transaction_and_commit(
+    env: PocketIcTestEnv<TestCanisterSetup>,
+) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
@@ -293,9 +296,9 @@ async fn test_agent_client_should_begin_transaction_and_commit(env: PocketIcTest
     assert_eq!(posts[0].title.as_ref().unwrap(), &Text::from("Agent Post"));
 }
 
-#[pocket_ic_tests_macro::test]
-async fn test_agent_client_should_rollback_transaction(env: PocketIcTestEnv) {
-    let e: &mut PocketIcTestEnv = &mut env;
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_rollback_transaction(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;

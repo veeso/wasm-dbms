@@ -7,7 +7,6 @@ members = [
   "crates/ic-dbms/ic-dbms-macros",
   "crates/ic-dbms/integration-tests/dbms-canister-client-integration",
   "crates/ic-dbms/integration-tests/pocket-ic-tests",
-  "crates/ic-dbms/integration-tests/pocket-ic-tests-macro",
   "crates/wasi-dbms/wasi-dbms-memory",
   "crates/wasm-dbms/wasm-dbms-api",
   "crates/wasm-dbms/wasm-dbms-memory",
@@ -46,7 +45,7 @@ ic-dbms-macros = { version = "0.8", path = "crates/ic-dbms/ic-dbms-macros" }
 lazy-regex = "3"
 percent-encoding = "2"
 pocket-ic = "13"
-pocket-ic-tests-macro = { path = "crates/ic-dbms/integration-tests/pocket-ic-tests-macro" }
+pocket-ic-harness = "0.2"
 proc-macro2 = "1"
 quote = "1"
 rand = "0.10"
