@@ -153,11 +153,11 @@ impl candid::CandidType for Query {
         // The order is determined empirically by the Candid hash of each field name.
         let mut record_serializer = serializer.serialize_struct()?;
         record_serializer.serialize_element(&self.eager_relations)?;
+        record_serializer.serialize_element(&self.distinct_by)?;
         record_serializer.serialize_element(&self.joins)?;
         record_serializer.serialize_element(&self.offset)?;
         record_serializer.serialize_element(&self.limit)?;
         record_serializer.serialize_element(&self.filter)?;
-        record_serializer.serialize_element(&self.distinct_by)?;
         record_serializer.serialize_element(&self.order_by)?;
         record_serializer.serialize_element(&self.columns)?;
 
