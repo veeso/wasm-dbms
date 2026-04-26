@@ -14,6 +14,7 @@ keywords = ["database", "wasm", "dbms"]
 include = ["src/**/*", "../../../LICENSE", "README.md", "../../../CHANGELOG.md"]
 
 [dependencies]
+rust_decimal = { workspace = true }
 wasm-dbms-api = { workspace = true }
 wasm-dbms-memory = { workspace = true }
 
@@ -21,3 +22,4 @@ wasm-dbms-memory = { workspace = true }
 candid = { workspace = true }
 serde = { workspace = true }
 wasm-dbms-macros = { workspace = true }
+wasm-dbms-memory = { workspace = true }

@@ -323,6 +323,41 @@ match result {
 - Invalid JSON paths (trailing dots, unclosed brackets)
 - Applying JSON filter to non-JSON column
 - Type mismatches in comparisons
+- Aggregate-specific:
+  - `SUM` or `AVG` on non-numeric column
+    (`"aggregate requires numeric column: '<col>'"`)
+  - `HAVING` references unknown column or `agg{N}`
+    (`"HAVING references unknown column or aggregate: '<col>'"`)
+  - `ORDER BY` references unknown `agg{N}`
+    (`"ORDER BY references unknown aggregate output: '<col>'"`)
+  - `LIKE` or JSON filter inside `HAVING`
+  - Joins or eager relations on `Database::aggregate`
+
+### JoinInsideTypedSelect
+
+**Cause:** A typed `Database::select::<T>` was called with a query that
+contains joins. Joins must go through `select_join`.
+
+### AggregateClauseInSelect
+
+**Cause:** `group_by` or `having` was set on a non-aggregate select path
+(`select`, `select_raw`, or `select_join`). Use
+[`Database::aggregate`](./query.md#aggregate-types) instead — those clauses
+have no meaning outside aggregation and are rejected to prevent silent data
+loss.
+
+```rust
+let result = database.select::<User>(
+    Query::builder().group_by(&["role"]).build(),
+);
+
+match result {
+    Err(DbmsError::Query(QueryError::AggregateClauseInSelect)) => {
+        // call database.aggregate::<User>(query, &aggregates) instead
+    }
+    _ => {}
+}
+```
 
 ---
 

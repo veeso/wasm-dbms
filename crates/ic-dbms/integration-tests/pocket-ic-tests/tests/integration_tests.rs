@@ -1,6 +1,7 @@
 mod acid;
 mod acl;
 mod agent_client;
+mod aggregate;
 mod crud;
 mod custom_types;
 mod ic_dbms_canister_client;

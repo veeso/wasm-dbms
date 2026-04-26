@@ -1,5 +1,6 @@
 //! This module exposes all the types related to queries that can be performed on the DBMS.
 
+mod aggregate;
 mod builder;
 mod delete;
 mod filter;
@@ -8,6 +9,7 @@ mod join;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use self::aggregate::{AggregateFunction, AggregatedRow, AggregatedValue};
 pub use self::builder::QueryBuilder;
 pub use self::delete::DeleteBehavior;
 pub use self::filter::{Filter, JsonCmp, JsonFilter};
@@ -62,6 +64,11 @@ pub enum QueryError {
     #[error("Join cannot be used on type select")]
     JoinInsideTypedSelect,
 
+    /// `GROUP BY` or `HAVING` was set on a non-aggregate query.
+    /// Use `Database::aggregate` instead.
+    #[error("GROUP BY / HAVING require aggregate(); use Database::aggregate")]
+    AggregateClauseInSelect,
+
     /// Generic constraint violation (e.g., UNIQUE, CHECK, etc.)
     #[error("Constraint violation: {0}")]
     ConstraintViolation(String),
@@ -109,20 +116,24 @@ pub enum OrderDirection {
 pub struct Query {
     /// Fields to select in the query.
     columns: Select,
-    /// Relations to eagerly load with the main records.
-    pub eager_relations: Vec<String>,
-    /// Join operations
-    pub joins: Vec<Join>,
-    /// [`Filter`] to apply to the query.
-    pub filter: Option<Filter>,
     /// Distinct records by the specified fields.
     pub distinct_by: Vec<String>,
-    /// Order by clauses for sorting the results.
-    pub order_by: Vec<(String, OrderDirection)>,
+    /// Relations to eagerly load with the main records.
+    pub eager_relations: Vec<String>,
+    /// [`Filter`] to apply to the query.
+    pub filter: Option<Filter>,
+    /// Group by fields for aggregate queries.
+    pub group_by: Vec<String>,
+    /// Having [`Filter`] for aggregate queries.
+    pub having: Option<Filter>,
+    /// Join operations
+    pub joins: Vec<Join>,
     /// Limit on the number of records to return.
     pub limit: Option<usize>,
     /// Offset for pagination.
     pub offset: Option<usize>,
+    /// Order by clauses for sorting the results.
+    pub order_by: Vec<(String, OrderDirection)>,
 }
 
 #[cfg(feature = "candid")]
@@ -131,13 +142,15 @@ impl candid::CandidType for Query {
         use candid::types::TypeInner;
         let mut fields = vec![
             candid::field! { columns: Select::_ty() },
-            candid::field! { eager_relations: <Vec<String>>::_ty() },
-            candid::field! { joins: <Vec<Join>>::_ty() },
-            candid::field! { filter: <Option<Filter>>::_ty() },
             candid::field! { distinct_by: <Vec<String>>::_ty() },
-            candid::field! { order_by: <Vec<(String, OrderDirection)>>::_ty() },
+            candid::field! { eager_relations: <Vec<String>>::_ty() },
+            candid::field! { filter: <Option<Filter>>::_ty() },
+            candid::field! { group_by: <Vec<String>>::_ty() },
+            candid::field! { having: <Option<Filter>>::_ty() },
+            candid::field! { joins: <Vec<Join>>::_ty() },
             candid::field! { limit: <Option<usize>>::_ty() },
             candid::field! { offset: <Option<usize>>::_ty() },
+            candid::field! { order_by: <Vec<(String, OrderDirection)>>::_ty() },
         ];
 
         fields.sort_by_key(|f| f.id.clone());
@@ -149,8 +162,8 @@ impl candid::CandidType for Query {
         S: candid::types::Serializer,
     {
         use candid::types::Compound;
-        // Fields must be serialized in Candid field hash order.
-        // The order is determined empirically by the Candid hash of each field name.
+        // Fields must be serialized in Candid field hash order. The order
+        // below matches the ascending hash of each field name (idl_hash).
         let mut record_serializer = serializer.serialize_struct()?;
         record_serializer.serialize_element(&self.eager_relations)?;
         record_serializer.serialize_element(&self.distinct_by)?;
@@ -158,6 +171,8 @@ impl candid::CandidType for Query {
         record_serializer.serialize_element(&self.offset)?;
         record_serializer.serialize_element(&self.limit)?;
         record_serializer.serialize_element(&self.filter)?;
+        record_serializer.serialize_element(&self.group_by)?;
+        record_serializer.serialize_element(&self.having)?;
         record_serializer.serialize_element(&self.order_by)?;
         record_serializer.serialize_element(&self.columns)?;
 

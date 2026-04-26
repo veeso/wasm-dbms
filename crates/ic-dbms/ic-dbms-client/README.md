@@ -154,6 +154,9 @@ use ic_dbms_client::prelude::*;
 
 ### Query
 
+- [`AggregateFunction`](https://docs.rs/ic-dbms-client/latest/ic_dbms_client/prelude/enum.AggregateFunction.html)
+- [`AggregatedRow`](https://docs.rs/ic-dbms-client/latest/ic_dbms_client/prelude/struct.AggregatedRow.html)
+- [`AggregatedValue`](https://docs.rs/ic-dbms-client/latest/ic_dbms_client/prelude/enum.AggregatedValue.html)
 - [`DeleteBehavior`](https://docs.rs/ic-dbms-client/latest/ic_dbms_client/prelude/struct.DeleteBehavior.html)
 - [`Filter`](https://docs.rs/ic-dbms-client/latest/ic_dbms_client/prelude/struct.Filter.html)
 - [`JsonCmp`](https://docs.rs/ic-dbms-client/latest/ic_dbms_client/prelude/enum.JsonCmp.html)

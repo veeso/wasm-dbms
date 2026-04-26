@@ -100,19 +100,21 @@ ic_cdk::export_candid!();
 
 ### Generated Candid API
 
-For each table, the macro generates four CRUD endpoints plus shared transaction and ACL endpoints:
+For each table, the macro generates five CRUD/aggregate endpoints plus shared transaction and ACL endpoints:
 
 ```candid
 service : (IcDbmsCanisterArgs) -> {
   // Per-table CRUD (example for "users" table)
   insert_users : (UserInsertRequest, opt nat) -> (Result);
   select_users : (Query, opt nat) -> (Result_Vec_UserRecord) query;
+  aggregate_users : (Query, vec AggregateFunction, opt nat) -> (Result_Vec_AggregatedRow) query;
   update_users : (UserUpdateRequest, opt nat) -> (Result_u64);
   delete_users : (DeleteBehavior, opt Filter, opt nat) -> (Result_u64);
 
   // Per-table CRUD (example for "posts" table)
   insert_posts : (PostInsertRequest, opt nat) -> (Result);
   select_posts : (Query, opt nat) -> (Result_Vec_PostRecord) query;
+  aggregate_posts : (Query, vec AggregateFunction, opt nat) -> (Result_Vec_AggregatedRow) query;
   update_posts : (PostUpdateRequest, opt nat) -> (Result_u64);
   delete_posts : (DeleteBehavior, opt Filter, opt nat) -> (Result_u64);
 
@@ -128,12 +130,19 @@ service : (IcDbmsCanisterArgs) -> {
 }
 ```
 
-**Method naming convention:** `{operation}_{table_name}` (e.g., `insert_users`, `select_posts`, `delete_comments`)
+**Method naming convention:** `{operation}_{table_name}` (e.g., `insert_users`, `select_posts`, `aggregate_users`, `delete_comments`)
 
 **Parameter patterns:**
 - `opt nat` is the optional transaction ID
-- `select` methods are `query` calls (no state changes, no cycles consumed)
+- `select` and `aggregate` methods are `query` calls (no state changes, no cycles consumed)
 - All other methods are `update` calls
+
+**Aggregate endpoint:** `aggregate_<table>` runs `Database::aggregate` for that
+table. The `vec AggregateFunction` parameter lists `COUNT(*)` / `COUNT(col)` /
+`SUM` / `AVG` / `MIN` / `MAX` to compute per group; the `Query` carries
+`group_by`, `having`, `order_by`, `limit`, and `offset`. See the
+[generic Query API reference](../../reference/query.md#aggregate-types) for
+type definitions and the [aggregate pipeline](../../reference/query.md#execution-order).
 
 **Init arguments:**
 

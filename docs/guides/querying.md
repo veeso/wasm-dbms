@@ -28,6 +28,10 @@
     - [Distinct by Multiple Columns](#distinct-by-multiple-columns)
     - [Distinct with Ordering and Pagination](#distinct-with-ordering-and-pagination)
     - [Distinct Semantics](#distinct-semantics)
+  - [Aggregations](#aggregations)
+    - [Defining Aggregates](#defining-aggregates)
+    - [Group By and Having](#group-by-and-having)
+    - [Aggregate Result Types](#aggregate-result-types)
   - [Joins](#joins)
     - [Join Types](#join-types)
     - [Basic Join](#basic-join)
@@ -474,6 +478,90 @@ Without `DISTINCT`, `LIMIT 10` could yield ten copies of the same name. With
 
 > **Tip:** `distinct(&[pk_column])` returns at most one row per primary key,
 > which can be useful when joining sources that fan out the parent rows.
+
+---
+
+## Aggregations
+
+Aggregations summarise groups of rows using `COUNT`, `SUM`, `AVG`, `MIN`, and
+`MAX`. Group rows with `.group_by(...)`, filter the resulting groups with
+`.having(...)`, and describe the aggregates to compute via the
+`AggregateFunction` enum.
+
+### Defining Aggregates
+
+Each aggregate is one variant of [`AggregateFunction`]:
+
+```rust
+use wasm_dbms_api::prelude::AggregateFunction;
+
+let aggregates = vec![
+    AggregateFunction::Count(None),               // COUNT(*)
+    AggregateFunction::Count(Some("email".into())), // COUNT(email)
+    AggregateFunction::Sum("amount".into()),
+    AggregateFunction::Avg("amount".into()),
+    AggregateFunction::Min("created_at".into()),
+    AggregateFunction::Max("created_at".into()),
+];
+```
+
+`Count(None)` counts every row in the group; `Count(Some(col))` counts only
+rows where `col` is non-null. The other variants take a column name and operate
+over its values.
+
+### Group By and Having
+
+Use `.group_by(&[...])` to define grouping keys and `.having(filter)` to filter
+the aggregated groups:
+
+```rust
+let query = Query::builder()
+    .all()
+    .group_by(&["category"])
+    .having(Filter::gt("count", Value::Uint64(10u64.into())))
+    .order_by_desc("category")
+    .build();
+```
+
+`HAVING` is evaluated after aggregation, against grouping keys and aggregate
+results. `WHERE` (set with `.and_where()` / `.or_where()`) still applies first
+to the raw rows.
+
+### Aggregate Result Types
+
+Aggregated queries return [`AggregatedRow`] values:
+
+```rust
+pub struct AggregatedRow {
+    pub group_keys: Vec<Value>,
+    pub values: Vec<AggregatedValue>,
+}
+```
+
+`group_keys` carries the grouping tuple (one [`Value`] per `group_by` column).
+`values` holds one [`AggregatedValue`] per requested aggregate, in the same
+order as the `AggregateFunction` list.
+
+```rust
+pub enum AggregatedValue {
+    Count(u64),
+    Sum(Value),
+    Avg(Value),
+    Min(Value),
+    Max(Value),
+}
+```
+
+`Count` is always `u64`; the other variants wrap a [`Value`] whose concrete
+variant matches the source column's data type.
+
+See the [Query API Reference](../reference/query.md#aggregate-types) for the
+full type definitions and pipeline ordering.
+
+[`AggregateFunction`]: ../reference/query.md#aggregatefunction
+[`AggregatedRow`]: ../reference/query.md#aggregatedrow
+[`AggregatedValue`]: ../reference/query.md#aggregatedvalue
+[`Value`]: ../reference/data-types.md
 
 ---
 

@@ -7,8 +7,8 @@ mod inspect;
 
 use candid::Principal;
 use ic_dbms_api::prelude::{
-    ColumnDef, Database as _, DeleteBehavior, Filter, IcDbmsResult, InsertRecord, JoinColumnDef,
-    Query, TableSchema, TransactionId, UpdateRecord, Value,
+    AggregateFunction, AggregatedRow, ColumnDef, Database, DeleteBehavior, Filter, IcDbmsResult,
+    InsertRecord, JoinColumnDef, Query, TableSchema, TransactionId, UpdateRecord, Value,
 };
 use wasm_dbms::prelude::{DatabaseSchema, WasmDbmsDatabase};
 
@@ -119,6 +119,29 @@ where
     assert_caller_owns_transaction(transaction_id.as_ref());
     with_database(transaction_id, database_schema, |db| {
         db.select_join(table, query)
+    })
+}
+
+/// Executes an aggregate query against the database schema, optionally within
+/// a transaction.
+///
+/// See [`Database::aggregate`] for the pipeline (`WHERE` -> `DISTINCT` ->
+/// `GROUP BY` -> aggregate computation -> `HAVING` -> `ORDER BY` ->
+/// `OFFSET`/`LIMIT`).
+pub fn aggregate<T, S>(
+    query: Query,
+    aggregates: Vec<AggregateFunction>,
+    transaction_id: Option<TransactionId>,
+    database_schema: S,
+) -> IcDbmsResult<Vec<AggregatedRow>>
+where
+    T: TableSchema,
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+{
+    assert_caller_is_allowed();
+    assert_caller_owns_transaction(transaction_id.as_ref());
+    with_database(transaction_id, database_schema, |db| {
+        db.aggregate::<T>(query, &aggregates)
     })
 }
 
