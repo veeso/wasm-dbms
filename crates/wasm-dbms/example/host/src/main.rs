@@ -23,7 +23,9 @@ wasmtime::component::bindgen!({
     path: "../../../../wit/dbms.wit",
 });
 
-use crate::wasm_dbms::dbms::types::{ColumnValue, DbmsError, OrderDirection, Query, Value};
+use crate::wasm_dbms::dbms::types::{
+    ColumnValue, DbmsError, OrderDirection, OrderKey, Query, Value,
+};
 
 /// Default path to the pre-built guest component.
 const DEFAULT_GUEST_PATH: &str = ".artifact/wasm-dbms-example-guest.wasm";
@@ -58,14 +60,29 @@ fn col(name: &str, value: Value) -> ColumnValue {
     }
 }
 
+/// Builds an empty [`Query`] with no clauses set.
+fn empty_query() -> Query {
+    Query {
+        filter: None,
+        distinct_by: vec![],
+        eager_relations: vec![],
+        joins: vec![],
+        group_by: vec![],
+        having: None,
+        order_by: vec![],
+        limit: None,
+        offset: None,
+    }
+}
+
 /// Builds a [`Query`] that returns all rows ordered by `column` ascending.
 fn select_all_asc(column: &str) -> Query {
     Query {
-        filter: None,
-        order_by: Some(column.to_string()),
-        order_dir: Some(OrderDirection::Asc),
-        limit: None,
-        offset: None,
+        order_by: vec![OrderKey {
+            column: column.to_string(),
+            direction: OrderDirection::Asc,
+        }],
+        ..empty_query()
     }
 }
 
@@ -74,10 +91,7 @@ fn select_eq(column: &str, value: &str) -> Query {
     let filter = format!(r#"{{"Eq":["{column}",{value}]}}"#);
     Query {
         filter: Some(filter),
-        order_by: None,
-        order_dir: None,
-        limit: None,
-        offset: None,
+        ..empty_query()
     }
 }
 
@@ -101,10 +115,14 @@ fn format_column_value(cv: &ColumnValue) -> String {
         Value::I16Val(n) => n.to_string(),
         Value::I32Val(n) => n.to_string(),
         Value::I64Val(n) => n.to_string(),
-        Value::F32Val(f) => f.to_string(),
-        Value::F64Val(f) => f.to_string(),
         Value::TextVal(s) => format!("\"{s}\""),
         Value::BlobVal(b) => format!("<blob {} bytes>", b.len()),
+        Value::DecimalVal(s) => s.clone(),
+        Value::DateVal(s) => s.clone(),
+        Value::DatetimeVal(s) => s.clone(),
+        Value::JsonVal(s) => s.clone(),
+        Value::UuidVal(s) => s.clone(),
+        Value::CustomVal(c) => format!("<custom {}: {}>", c.type_tag, c.display),
         Value::NullVal => "NULL".to_string(),
     };
     format!("{}: {val}", cv.name)
@@ -112,14 +130,7 @@ fn format_column_value(cv: &ColumnValue) -> String {
 
 /// Formats a [`DbmsError`] for display.
 fn format_error(e: &DbmsError) -> String {
-    match e {
-        DbmsError::TableNotFound(t) => format!("TableNotFound({t})"),
-        DbmsError::ValidationError(v) => format!("ValidationError({v})"),
-        DbmsError::IntegrityError(i) => format!("IntegrityError({i})"),
-        DbmsError::TransactionError(t) => format!("TransactionError({t})"),
-        DbmsError::MemoryError(m) => format!("MemoryError({m})"),
-        DbmsError::IoError(io) => format!("IoError({io})"),
-    }
+    format!("{e:?}")
 }
 
 /// Converts a guest [`DbmsError`] into a [`wasmtime::Error`].

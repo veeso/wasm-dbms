@@ -30,6 +30,7 @@ pub fn database_schema(input: DeriveInput) -> syn::Result<TokenStream2> {
 /// seven required trait methods.
 fn impl_database_schema(struct_ident: &syn::Ident, tables: &[TableEntry]) -> TokenStream2 {
     let select_fn = impl_select(tables);
+    let aggregate_fn = impl_aggregate(tables);
     let referenced_tables_fn = impl_referenced_tables(tables);
     let insert_fn = impl_insert(tables);
     let delete_fn = impl_delete(tables);
@@ -44,6 +45,7 @@ fn impl_database_schema(struct_ident: &syn::Ident, tables: &[TableEntry]) -> Tok
             A: ::wasm_dbms_memory::prelude::AccessControl,
         {
             #select_fn
+            #aggregate_fn
             #referenced_tables_fn
             #insert_fn
             #delete_fn
@@ -100,6 +102,40 @@ fn impl_select(tables: &[TableEntry]) -> TokenStream2 {
             query: ::wasm_dbms_api::prelude::Query,
         ) -> ::wasm_dbms_api::prelude::DbmsResult<Vec<Vec<(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)>>> {
             use ::wasm_dbms_api::prelude::TableSchema as _;
+
+            match table_name {
+                #(#match_arms)*
+                _ => Err(::wasm_dbms_api::prelude::DbmsError::Query(
+                    ::wasm_dbms_api::prelude::QueryError::TableNotFound(table_name.to_string()),
+                )),
+            }
+        }
+    }
+}
+
+fn impl_aggregate(tables: &[TableEntry]) -> TokenStream2 {
+    let match_arms: Vec<_> = tables
+        .iter()
+        .map(|t| {
+            let entity = &t.table;
+            quote::quote! {
+                name if name == #entity::table_name() => {
+                    dbms.aggregate::<#entity>(query, aggregates)
+                }
+            }
+        })
+        .collect();
+
+    quote::quote! {
+        fn aggregate(
+            &self,
+            dbms: &::wasm_dbms::prelude::WasmDbmsDatabase<'_, M, A>,
+            table_name: &str,
+            query: ::wasm_dbms_api::prelude::Query,
+            aggregates: &[::wasm_dbms_api::prelude::AggregateFunction],
+        ) -> ::wasm_dbms_api::prelude::DbmsResult<Vec<::wasm_dbms_api::prelude::AggregatedRow>> {
+            use ::wasm_dbms_api::prelude::TableSchema as _;
+            use ::wasm_dbms_api::prelude::Database as _;
 
             match table_name {
                 #(#match_arms)*
