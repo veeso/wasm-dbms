@@ -115,6 +115,8 @@ pub struct Query {
     pub joins: Vec<Join>,
     /// [`Filter`] to apply to the query.
     pub filter: Option<Filter>,
+    /// Distinct records by the specified fields.
+    pub distinct_by: Vec<String>,
     /// Order by clauses for sorting the results.
     pub order_by: Vec<(String, OrderDirection)>,
     /// Limit on the number of records to return.
@@ -132,6 +134,7 @@ impl candid::CandidType for Query {
             candid::field! { eager_relations: <Vec<String>>::_ty() },
             candid::field! { joins: <Vec<Join>>::_ty() },
             candid::field! { filter: <Option<Filter>>::_ty() },
+            candid::field! { distinct_by: <Vec<String>>::_ty() },
             candid::field! { order_by: <Vec<(String, OrderDirection)>>::_ty() },
             candid::field! { limit: <Option<usize>>::_ty() },
             candid::field! { offset: <Option<usize>>::_ty() },
@@ -154,6 +157,7 @@ impl candid::CandidType for Query {
         record_serializer.serialize_element(&self.offset)?;
         record_serializer.serialize_element(&self.limit)?;
         record_serializer.serialize_element(&self.filter)?;
+        record_serializer.serialize_element(&self.distinct_by)?;
         record_serializer.serialize_element(&self.order_by)?;
         record_serializer.serialize_element(&self.columns)?;
 

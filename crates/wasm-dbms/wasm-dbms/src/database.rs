@@ -218,6 +218,34 @@ where
         filter.matches(record_values).map_err(DbmsError::from)
     }
 
+    /// Removes duplicate records based on the values of the given columns.
+    ///
+    /// Keeps the first record encountered for each distinct combination of the
+    /// values of the specified columns. Columns missing from a record are
+    /// treated as [`Value::Null`]. When `distinct_by` is empty, no records are
+    /// removed.
+    fn apply_distinct(&self, results: &mut Vec<TableColumns>, distinct_by: &[String]) {
+        if distinct_by.is_empty() {
+            return;
+        }
+        let mut seen: HashSet<Vec<Value>> = HashSet::new();
+        results.retain(|record| {
+            let key: Vec<Value> = distinct_by
+                .iter()
+                .map(|col| {
+                    Self::this_columns(record)
+                        .and_then(|cols| {
+                            cols.iter()
+                                .find(|(cd, _)| cd.name == col.as_str())
+                                .map(|(_, v)| v.clone())
+                        })
+                        .unwrap_or(Value::Null)
+                })
+                .collect();
+            seen.insert(key)
+        });
+    }
+
     /// Filters record columns down to only the selected fields.
     fn apply_column_selection<T>(&self, results: &mut [TableColumns], query: &Query)
     where
@@ -607,23 +635,26 @@ where
         };
 
         let mut results = Vec::with_capacity(query.limit.unwrap_or(DEFAULT_SELECT_CAPACITY));
-        // When ORDER BY is present, LIMIT and OFFSET must be applied after sorting
-        // to comply with standard SQL semantics (ORDER BY -> OFFSET -> LIMIT).
+        // When ORDER BY or DISTINCT is present, LIMIT and OFFSET must be applied after
+        // sorting and deduplication to comply with standard SQL semantics
+        // (WHERE -> DISTINCT -> ORDER BY -> OFFSET -> LIMIT).
         let has_order_by = !query.order_by.is_empty();
+        let has_distinct = !query.distinct_by.is_empty();
+        let defer_pagination = has_order_by || has_distinct;
         let mut count = 0;
 
         if let Some(indexed_rows) =
             self.try_index_select::<T>(&query, &table_registry, &table_overlay)?
         {
             for values in indexed_rows {
-                if !has_order_by {
+                if !defer_pagination {
                     count += 1;
                     if query.offset.is_some_and(|offset| count <= offset) {
                         continue;
                     }
                 }
                 results.push(vec![(ValuesSource::This, values)]);
-                if !has_order_by && query.limit.is_some_and(|limit| results.len() >= limit) {
+                if !defer_pagination && query.limit.is_some_and(|limit| results.len() >= limit) {
                     break;
                 }
             }
@@ -638,19 +669,20 @@ where
                 {
                     continue;
                 }
-                if !has_order_by {
+                if !defer_pagination {
                     count += 1;
                     if query.offset.is_some_and(|offset| count <= offset) {
                         continue;
                     }
                 }
                 results.push(vec![(ValuesSource::This, values)]);
-                if !has_order_by && query.limit.is_some_and(|limit| results.len() >= limit) {
+                if !defer_pagination && query.limit.is_some_and(|limit| results.len() >= limit) {
                     break;
                 }
             }
         }
 
+        self.apply_distinct(&mut results, &query.distinct_by);
         self.batch_load_eager_relations::<T>(&mut results, &query)?;
         self.apply_column_selection::<T>(&mut results, &query);
 
@@ -658,8 +690,8 @@ where
             self.sort_query_results(&mut results, &column, direction);
         }
 
-        // Apply OFFSET and LIMIT after sorting when ORDER BY was present
-        if has_order_by {
+        // Apply OFFSET and LIMIT after sorting/deduplication when deferred
+        if defer_pagination {
             let offset = query.offset.unwrap_or_default();
             if offset > 0 {
                 if offset >= results.len() {

@@ -74,6 +74,12 @@ impl QueryBuilder {
         self.join(JoinType::Full, table, left_col, right_col)
     }
 
+    /// Adds a DISTINCT clause to the query for the specified fields.
+    pub fn distinct<S: ToString>(mut self, fields: &[S]) -> Self {
+        self.query.distinct_by = fields.iter().map(|s| s.to_string()).collect();
+        self
+    }
+
     /// Adds an ascending order by clause for the specified field.
     pub fn order_by_asc(mut self, field: &str) -> Self {
         self.query
@@ -207,6 +213,16 @@ mod tests {
                 ("name".to_string(), OrderDirection::Ascending),
                 ("created_at".to_string(), OrderDirection::Descending)
             ]
+        );
+    }
+
+    #[test]
+    fn test_should_distinct_by_fields() {
+        let query_builder = QueryBuilder::default().distinct(&["name", "email"]);
+        let query = query_builder.build();
+        assert_eq!(
+            query.distinct_by,
+            vec!["name".to_string(), "email".to_string()]
         );
     }
 

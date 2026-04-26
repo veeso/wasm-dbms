@@ -23,6 +23,11 @@
     - [Select All Fields](#select-all-fields)
     - [Select Specific Fields](#select-specific-fields)
   - [Eager Loading](#eager-loading)
+  - [Distinct](#distinct)
+    - [Basic Distinct](#basic-distinct)
+    - [Distinct by Multiple Columns](#distinct-by-multiple-columns)
+    - [Distinct with Ordering and Pagination](#distinct-with-ordering-and-pagination)
+    - [Distinct Semantics](#distinct-semantics)
   - [Joins](#joins)
     - [Join Types](#join-types)
     - [Basic Join](#basic-join)
@@ -30,11 +35,11 @@
     - [Chaining Multiple Joins](#chaining-multiple-joins)
     - [Qualified Column Names](#qualified-column-names)
     - [Joins vs Eager Loading](#joins-vs-eager-loading)
-- [Index-Accelerated Queries](#index-accelerated-queries)
-  - [How Indexes Improve Queries](#how-indexes-improve-queries)
-  - [Which Filters Use Indexes](#which-filters-use-indexes)
-  - [Residual Filters](#residual-filters)
-  - [Transaction-Aware Lookups](#transaction-aware-lookups)
+  - [Index-Accelerated Queries](#index-accelerated-queries)
+    - [How Indexes Improve Queries](#how-indexes-improve-queries)
+    - [Which Filters Use Indexes](#which-filters-use-indexes)
+    - [Residual Filters](#residual-filters)
+    - [Transaction-Aware Lookups](#transaction-aware-lookups)
 
 ---
 
@@ -406,6 +411,72 @@ See the [Relationships Guide](./relationships.md) for more on eager loading.
 
 ---
 
+## Distinct
+
+Use `.distinct(&[...])` to remove duplicate rows from the result set based on
+one or more columns. Rows are deduplicated by the tuple of values across the
+listed columns; the first row encountered for each distinct tuple is kept.
+
+### Basic Distinct
+
+```rust
+// Get the unique set of names from the users table
+let query = Query::builder()
+    .all()
+    .distinct(&["name"])
+    .build();
+
+let users = database.select::<User>(query)?;
+```
+
+### Distinct by Multiple Columns
+
+```rust
+// Unique (category, vendor) pairs from products
+let query = Query::builder()
+    .all()
+    .distinct(&["category", "vendor"])
+    .build();
+
+let products = database.select::<Product>(query)?;
+```
+
+### Distinct with Ordering and Pagination
+
+`DISTINCT` runs before `ORDER BY`, `OFFSET`, and `LIMIT`, so paging through
+distinct values works as expected:
+
+```rust
+// Page 2 (size 10) of unique names, alphabetical
+let query = Query::builder()
+    .all()
+    .distinct(&["name"])
+    .order_by_asc("name")
+    .offset(10)
+    .limit(10)
+    .build();
+```
+
+Without `DISTINCT`, `LIMIT 10` could yield ten copies of the same name. With
+`DISTINCT`, the limit applies to the deduplicated stream.
+
+### Distinct Semantics
+
+- Lookup is performed against the source row's columns. The columns named in
+  `.distinct(...)` do **not** need to be in the field selection.
+- A column not present on the row is treated as `Value::Null`. Listing an
+  unknown column collapses every row into a single result.
+- Calling `.distinct(&[])` (or omitting it) is a no-op.
+- Pipeline order: `WHERE` -> `DISTINCT` -> eager loading -> column selection
+  -> `ORDER BY` -> `OFFSET` / `LIMIT`. See the
+  [Query API Reference](../reference/query.md#execution-order) for the full
+  pipeline.
+
+> **Tip:** `distinct(&[pk_column])` returns at most one row per primary key,
+> which can be useful when joining sources that fan out the parent rows.
+
+---
+
 ## Joins
 
 Joins combine rows from two or more tables based on a related column, producing a single result set with columns from all joined tables. Use joins when you need to correlate data across tables in a single flat result -- for example, listing posts alongside their author names.
@@ -504,6 +575,7 @@ let query = Query::builder()
 ```
 
 Qualified names (`table.column`) work in:
+
 - Field selection (`.field()`)
 - Filters (`.and_where()`, `.or_where()`)
 - Ordering (`.order_by_asc()`, `.order_by_desc()`)

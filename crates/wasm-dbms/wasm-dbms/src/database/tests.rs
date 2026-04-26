@@ -552,6 +552,227 @@ fn test_select_raw() {
     assert_eq!(rows[0][0].1, Value::Uint32(Uint32(1)));
 }
 
+// -- select with distinct --
+
+#[test]
+fn test_select_distinct_by_single_column() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "bob");
+    insert_user(&db, 3, "alice");
+    insert_user(&db, 4, "charlie");
+    insert_user(&db, 5, "bob");
+
+    let rows = db
+        .select::<User>(
+            Query::builder()
+                .all()
+                .distinct(&["name"])
+                .order_by_asc("name")
+                .build(),
+        )
+        .unwrap();
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].name, Some(Text("alice".to_string())));
+    assert_eq!(rows[1].name, Some(Text("bob".to_string())));
+    assert_eq!(rows[2].name, Some(Text("charlie".to_string())));
+}
+
+#[test]
+fn test_select_distinct_keeps_first_encountered() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "alice");
+    insert_user(&db, 3, "alice");
+
+    let rows = db
+        .select::<User>(Query::builder().all().distinct(&["name"]).build())
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+}
+
+#[test]
+fn test_select_distinct_by_multiple_columns() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "bob");
+    // Posts where (title, user_id) pairs deliberately duplicate.
+    insert_post(&db, 10, "hello", 1);
+    insert_post(&db, 11, "world", 1);
+    insert_post(&db, 12, "hello", 2);
+    insert_post(&db, 13, "hello", 1);
+
+    let rows = db
+        .select::<Post>(
+            Query::builder()
+                .all()
+                .distinct(&["user_id"])
+                .order_by_asc("id")
+                .build(),
+        )
+        .unwrap();
+    // Distinct by user_id alone => 2 rows (one per user).
+    assert_eq!(rows.len(), 2);
+
+    let rows = db
+        .select::<Post>(
+            Query::builder()
+                .all()
+                .distinct(&["title", "user_id"])
+                .order_by_asc("id")
+                .build(),
+        )
+        .unwrap();
+    // Distinct by (title, user_id) => 3 unique pairs:
+    // ("hello",1), ("world",1), ("hello",2). The fourth row dupes ("hello",1).
+    assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn test_select_distinct_with_no_duplicates() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "bob");
+    insert_user(&db, 3, "charlie");
+
+    let rows = db
+        .select::<User>(Query::builder().all().distinct(&["name"]).build())
+        .unwrap();
+    assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn test_select_distinct_empty_distinct_by_is_noop() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "alice");
+    insert_user(&db, 3, "bob");
+
+    let empty: &[&str] = &[];
+    let rows = db
+        .select::<User>(Query::builder().all().distinct(empty).build())
+        .unwrap();
+    assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn test_select_distinct_with_filter() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "alice");
+    insert_user(&db, 3, "bob");
+    insert_user(&db, 4, "charlie");
+
+    let rows = db
+        .select::<User>(
+            Query::builder()
+                .all()
+                .and_where(Filter::ne("name", Value::Text(Text("charlie".to_string()))))
+                .distinct(&["name"])
+                .build(),
+        )
+        .unwrap();
+
+    assert_eq!(rows.len(), 2);
+    let names: Vec<_> = rows.iter().filter_map(|r| r.name.clone()).collect();
+    assert!(names.contains(&Text("alice".to_string())));
+    assert!(names.contains(&Text("bob".to_string())));
+}
+
+#[test]
+fn test_select_distinct_with_limit_and_offset() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "alice");
+    insert_user(&db, 3, "bob");
+    insert_user(&db, 4, "charlie");
+    insert_user(&db, 5, "dave");
+
+    // 4 distinct names -> alice, bob, charlie, dave; offset 1, limit 2 -> bob, charlie
+    let rows = db
+        .select::<User>(
+            Query::builder()
+                .all()
+                .distinct(&["name"])
+                .order_by_asc("name")
+                .offset(1)
+                .limit(2)
+                .build(),
+        )
+        .unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].name, Some(Text("bob".to_string())));
+    assert_eq!(rows[1].name, Some(Text("charlie".to_string())));
+}
+
+#[test]
+fn test_select_distinct_pagination_applies_after_dedup() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    // Many duplicates; without distinct LIMIT 2 would yield duplicates.
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "alice");
+    insert_user(&db, 3, "alice");
+    insert_user(&db, 4, "bob");
+    insert_user(&db, 5, "bob");
+
+    let rows = db
+        .select::<User>(
+            Query::builder()
+                .all()
+                .distinct(&["name"])
+                .order_by_asc("name")
+                .limit(2)
+                .build(),
+        )
+        .unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].name, Some(Text("alice".to_string())));
+    assert_eq!(rows[1].name, Some(Text("bob".to_string())));
+}
+
+#[test]
+fn test_select_distinct_on_unknown_column_collapses_to_one() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "bob");
+    insert_user(&db, 3, "charlie");
+
+    // Unknown column -> all keys are Null -> every row hashes to the same key
+    let rows = db
+        .select::<User>(Query::builder().all().distinct(&["nonexistent"]).build())
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn test_select_distinct_via_select_raw() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+    insert_user(&db, 2, "alice");
+    insert_user(&db, 3, "bob");
+
+    let rows = db
+        .select_raw("users", Query::builder().all().distinct(&["name"]).build())
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+}
+
 // -- select with join returns error on typed select --
 
 #[test]
