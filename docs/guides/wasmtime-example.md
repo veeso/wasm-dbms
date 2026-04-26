@@ -169,15 +169,15 @@ To add your own tables to the example:
 
 ## Key Concepts
 
-| Concept | Description |
-|---------|-------------|
-| **WIT** | WebAssembly Interface Types — a language for defining typed component interfaces |
-| **Component Model** | The standard for composing WASM modules with defined imports/exports |
-| **`wasm32-wasip2`** | Rust compilation target that produces WASM components with WASI Preview 2 support |
-| **`wit-bindgen`** | Guest-side code generator that creates Rust types from WIT definitions |
-| **`wasmtime::component::bindgen!`** | Host-side macro that generates Rust types for calling WIT interfaces |
-| **`DatabaseSchema`** | wasm-dbms trait that dispatches generic operations to concrete table types |
-| **`FileMemoryProvider`** | File-backed `MemoryProvider` implementation for persistent storage |
+| Concept                             | Description                                                                       |
+| ----------------------------------- | --------------------------------------------------------------------------------- |
+| **WIT**                             | WebAssembly Interface Types — a language for defining typed component interfaces  |
+| **Component Model**                 | The standard for composing WASM modules with defined imports/exports              |
+| **`wasm32-wasip2`**                 | Rust compilation target that produces WASM components with WASI Preview 2 support |
+| **`wit-bindgen`**                   | Guest-side code generator that creates Rust types from WIT definitions            |
+| **`wasmtime::component::bindgen!`** | Host-side macro that generates Rust types for calling WIT interfaces              |
+| **`DatabaseSchema`**                | wasm-dbms trait that dispatches generic operations to concrete table types        |
+| **`FileMemoryProvider`**            | File-backed `MemoryProvider` implementation for persistent storage                |
 
 ---
 

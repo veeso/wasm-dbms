@@ -93,7 +93,7 @@ The `join()` method processes a query through these steps:
 All four join types are handled by a single `nested_loop_join` method using two boolean flags:
 
 | Join Type | `keep_unmatched_left` | `keep_unmatched_right` |
-|-----------|-----------------------|------------------------|
+| --------- | --------------------- | ---------------------- |
 | INNER     | `false`               | `false`                |
 | LEFT      | `true`                | `false`                |
 | RIGHT     | `false`               | `true`                 |

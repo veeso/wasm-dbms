@@ -218,9 +218,9 @@ match process_order(&database) {
 
 ### Transaction Errors
 
-| Error | Cause |
-|-------|-------|
-| `TransactionNotFound` | Invalid transaction ID or transaction already completed |
+| Error                 | Cause                                                       |
+| --------------------- | ----------------------------------------------------------- |
+| `TransactionNotFound` | Invalid transaction ID or transaction already completed     |
 | `NoActiveTransaction` | Attempting to commit/rollback without an active transaction |
 
 ```rust

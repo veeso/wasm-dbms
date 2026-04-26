@@ -82,16 +82,16 @@ This design provides:
 
 **Key components:**
 
-| Component | Purpose |
-|-----------|---------|
-| `MemoryProvider` | Abstract interface for raw memory I/O |
-| `MemoryAccess` | Trait for page-level read/write operations (implemented by `MemoryManager`, interceptable by DBMS layer) |
-| `MemoryManager` | Allocates and manages pages, implements `MemoryAccess` |
-| `Encode` trait | Binary serialization for all stored types |
-| `PageLedger` | Tracks which pages belong to which table |
-| `FreeSegmentsLedger` | Tracks free space for reuse |
-| `IndexLedger` | Manages B+ tree indexes for a table |
-| `AutoincrementLedger` | Tracks autoincrement counters per column |
+| Component             | Purpose                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `MemoryProvider`      | Abstract interface for raw memory I/O                                                                    |
+| `MemoryAccess`        | Trait for page-level read/write operations (implemented by `MemoryManager`, interceptable by DBMS layer) |
+| `MemoryManager`       | Allocates and manages pages, implements `MemoryAccess`                                                   |
+| `Encode` trait        | Binary serialization for all stored types                                                                |
+| `PageLedger`          | Tracks which pages belong to which table                                                                 |
+| `FreeSegmentsLedger`  | Tracks free space for reuse                                                                              |
+| `IndexLedger`         | Manages B+ tree indexes for a table                                                                      |
+| `AutoincrementLedger` | Tracks autoincrement counters per column                                                                 |
 
 **Memory layout:**
 
@@ -117,19 +117,19 @@ See [Memory Documentation](./memory.md) for detailed technical information.
 
 **Key components:**
 
-| Component | Purpose |
-|-----------|---------|
-| `DbmsContext<M>` | Owns all DBMS state (memory, schema, ACL, transactions, journal) |
-| `WasmDbmsDatabase` | Session-scoped DBMS operations |
-| `TableRegistry` | Manages records for a single table |
-| `TransactionSession` | Handles transaction lifecycle |
-| `Transaction` | Overlay for uncommitted changes |
-| `IndexOverlay` | Tracks uncommitted index changes within a transaction |
-| `Journal` | Write-ahead journal recording original bytes for rollback |
-| `JournaledWriter` | Wraps `MemoryManager` + `Journal`, implements `MemoryAccess` to intercept writes |
-| `FilterAnalyzer` | Extracts index plans from query filters |
-| `IndexReader` | Unified view over base index and transaction overlay |
-| `JoinEngine` | Executes cross-table join queries |
+| Component            | Purpose                                                                          |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `DbmsContext<M>`     | Owns all DBMS state (memory, schema, ACL, transactions, journal)                 |
+| `WasmDbmsDatabase`   | Session-scoped DBMS operations                                                   |
+| `TableRegistry`      | Manages records for a single table                                               |
+| `TransactionSession` | Handles transaction lifecycle                                                    |
+| `Transaction`        | Overlay for uncommitted changes                                                  |
+| `IndexOverlay`       | Tracks uncommitted index changes within a transaction                            |
+| `Journal`            | Write-ahead journal recording original bytes for rollback                        |
+| `JournaledWriter`    | Wraps `MemoryManager` + `Journal`, implements `MemoryAccess` to intercept writes |
+| `FilterAnalyzer`     | Extracts index plans from query filters                                          |
+| `IndexReader`        | Unified view over base index and transaction overlay                             |
+| `JoinEngine`         | Executes cross-table join queries                                                |
 
 **Transaction model:**
 
@@ -174,12 +174,12 @@ Transactions use an overlay pattern:
 
 **Key components:**
 
-| Component | Purpose |
-|-----------|---------|
-| `DbmsCanister` macro | Generates canister API from schema |
-| ACL guard | Checks caller authorization |
-| Request types | `InsertRequest`, `UpdateRequest`, `Query` |
-| Response types | `Record`, error handling |
+| Component            | Purpose                                   |
+| -------------------- | ----------------------------------------- |
+| `DbmsCanister` macro | Generates canister API from schema        |
+| ACL guard            | Checks caller authorization               |
+| Request types        | `InsertRequest`, `UpdateRequest`, `Query` |
+| Response types       | `Record`, error handling                  |
 
 **Generated API structure:**
 

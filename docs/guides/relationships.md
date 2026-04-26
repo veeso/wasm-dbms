@@ -56,11 +56,11 @@ pub struct Post {
 
 **Attribute parameters:**
 
-| Parameter | Description |
-|-----------|-------------|
-| `entity` | The Rust struct name of the referenced table |
-| `table` | The table name (as specified in `#[table = "..."]`) |
-| `column` | The column in the referenced table (usually the primary key) |
+| Parameter | Description                                                  |
+| --------- | ------------------------------------------------------------ |
+| `entity`  | The Rust struct name of the referenced table                 |
+| `table`   | The table name (as specified in `#[table = "..."]`)          |
+| `column`  | The column in the referenced table (usually the primary key) |
 
 ### Foreign Key Constraints
 
@@ -201,13 +201,13 @@ database.delete::<User>(
 
 ### Choosing a Delete Behavior
 
-| Scenario | Recommended Behavior |
-|----------|---------------------|
-| User account deletion (remove everything) | `Cascade` |
-| Prevent accidental deletion | `Restrict` |
-| Soft delete pattern | Don't delete; use status field |
-| Comments on posts | `Cascade` (comments meaningless without post) |
-| Products in orders | `Restrict` (orders are historical records) |
+| Scenario                                  | Recommended Behavior                          |
+| ----------------------------------------- | --------------------------------------------- |
+| User account deletion (remove everything) | `Cascade`                                     |
+| Prevent accidental deletion               | `Restrict`                                    |
+| Soft delete pattern                       | Don't delete; use status field                |
+| Comments on posts                         | `Cascade` (comments meaningless without post) |
+| Products in orders                        | `Restrict` (orders are historical records)    |
 
 ---
 

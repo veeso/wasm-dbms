@@ -88,7 +88,7 @@ let query = Query::builder()
 A query consists of these optional components:
 
 | Component     | Method                   | Description               |
-|---------------|--------------------------|---------------------------|
+| ------------- | ------------------------ | ------------------------- |
 | Filter        | `.filter()`              | Which records to return   |
 | Select        | `.all()` or `.columns()` | Which columns to return   |
 | Order         | `.order_by()`            | Sort order                |
@@ -106,7 +106,7 @@ Filters determine which records match your query. All filters are created using 
 ### Comparison Filters
 
 | Filter         | Description           | Example                                               |
-|----------------|-----------------------|-------------------------------------------------------|
+| -------------- | --------------------- | ----------------------------------------------------- |
 | `Filter::eq()` | Equal to              | `Filter::eq("status", Value::Text("active".into()))`  |
 | `Filter::ne()` | Not equal to          | `Filter::ne("status", Value::Text("deleted".into()))` |
 | `Filter::gt()` | Greater than          | `Filter::gt("age", Value::Int32(18.into()))`          |
@@ -152,7 +152,7 @@ let filter = Filter::in_list("category_id", vec![
 Use `like` for pattern matching with wildcards:
 
 | Pattern | Matches                    |
-|---------|----------------------------|
+| ------- | -------------------------- |
 | `%`     | Any sequence of characters |
 | `_`     | Any single character       |
 | `%%`    | Literal `%` character      |
@@ -485,12 +485,12 @@ Joins combine rows from two or more tables based on a related column, producing 
 
 ### Join Types
 
-| Type | Builder Method | Description |
-|------|---------------|-------------|
-| INNER | `.inner_join()` | Returns only rows where both sides match |
-| LEFT | `.left_join()` | Returns all left rows; unmatched right columns are NULL |
-| RIGHT | `.right_join()` | Returns all right rows; unmatched left columns are NULL |
-| FULL | `.full_join()` | Returns all rows from both sides; unmatched columns are NULL |
+| Type  | Builder Method  | Description                                                  |
+| ----- | --------------- | ------------------------------------------------------------ |
+| INNER | `.inner_join()` | Returns only rows where both sides match                     |
+| LEFT  | `.left_join()`  | Returns all left rows; unmatched right columns are NULL      |
+| RIGHT | `.right_join()` | Returns all right rows; unmatched left columns are NULL      |
+| FULL  | `.full_join()`  | Returns all rows from both sides; unmatched columns are NULL |
 
 ### Basic Join
 
@@ -585,13 +585,13 @@ Unqualified names default to the FROM table (the table passed to `select_join`).
 
 ### Joins vs Eager Loading
 
-| | Eager Loading | Joins |
-|--|--------------|-------|
-| **Result type** | Typed (`Vec<T>`) | Untyped (`Vec<Vec<(JoinColumnDef, Value)>>`) |
-| **Result format** | Separate related records | Flat combined rows |
-| **API method** | `select::<T>` | `select_join` |
-| **Column disambiguation** | Not needed | Use `table.column` syntax |
-| **Use case** | Load parent with children | Correlate columns across tables |
+|                           | Eager Loading             | Joins                                        |
+| ------------------------- | ------------------------- | -------------------------------------------- |
+| **Result type**           | Typed (`Vec<T>`)          | Untyped (`Vec<Vec<(JoinColumnDef, Value)>>`) |
+| **Result format**         | Separate related records  | Flat combined rows                           |
+| **API method**            | `select::<T>`             | `select_join`                                |
+| **Column disambiguation** | Not needed                | Use `table.column` syntax                    |
+| **Use case**              | Load parent with children | Correlate columns across tables              |
 
 Use **eager loading** when you want typed results with related records attached. Use **joins** when you need a flat, cross-table result set -- for example, for reporting, search, or when you need columns from multiple tables in a single row.
 
@@ -633,15 +633,15 @@ let users = database.select::<User>(query)?;
 The filter analyzer extracts an index plan from the leftmost AND-chain of conditions on
 indexed columns:
 
-| Filter | Index plan | Notes |
-|--------|-----------|-------|
-| `Filter::eq("col", val)` | Exact match | Best case — direct B-tree lookup |
-| `Filter::ge("col", val)` | Range scan (start bound) | Uses linked-leaf traversal |
-| `Filter::le("col", val)` | Range scan (end bound) | Uses linked-leaf traversal |
-| `Filter::gt("col", val)` | Range scan + residual | Range is inclusive, so GT is rechecked |
-| `Filter::lt("col", val)` | Range scan + residual | Range is inclusive, so LT is rechecked |
-| `Filter::in_list("col", vals)` | Multi-lookup | One exact match per value |
-| AND of range filters on same column | Merged range | e.g., `age >= 18 AND age <= 65` |
+| Filter                              | Index plan               | Notes                                  |
+| ----------------------------------- | ------------------------ | -------------------------------------- |
+| `Filter::eq("col", val)`            | Exact match              | Best case — direct B-tree lookup       |
+| `Filter::ge("col", val)`            | Range scan (start bound) | Uses linked-leaf traversal             |
+| `Filter::le("col", val)`            | Range scan (end bound)   | Uses linked-leaf traversal             |
+| `Filter::gt("col", val)`            | Range scan + residual    | Range is inclusive, so GT is rechecked |
+| `Filter::lt("col", val)`            | Range scan + residual    | Range is inclusive, so LT is rechecked |
+| `Filter::in_list("col", vals)`      | Multi-lookup             | One exact match per value              |
+| AND of range filters on same column | Merged range             | e.g., `age >= 18 AND age <= 65`        |
 
 **Filters that fall back to full scan:**
 

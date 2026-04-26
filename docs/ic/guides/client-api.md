@@ -45,7 +45,7 @@ constructing Candid calls, you use a high-level API that handles serialization a
 ic-dbms provides three client implementations for different use cases:
 
 | Client                 | Use Case                                       | Feature Flag |
-|------------------------|------------------------------------------------|--------------|
+| ---------------------- | ---------------------------------------------- | ------------ |
 | `IcDbmsCanisterClient` | Inter-canister calls (inside IC canisters)     | Default      |
 | `IcDbmsAgentClient`    | External applications (frontend, backend, CLI) | `ic-agent`   |
 | `IcDbmsPocketIcClient` | Integration tests with PocketIC                | `pocket-ic`  |

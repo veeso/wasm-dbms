@@ -115,26 +115,26 @@ pub struct Task {
 
 When ic-dbms generates the Candid interface (`.did` file) for your canister, each wasm-dbms type maps to a specific Candid type. This mapping is important for frontend integration, inter-canister calls, and using the Candid UI.
 
-| ic-dbms Type | Rust Type | Candid Type | Notes |
-|--------------|-----------|-------------|-------|
-| `Uint8` | `u8` | `nat8` | |
-| `Uint16` | `u16` | `nat16` | |
-| `Uint32` | `u32` | `nat32` | |
-| `Uint64` | `u64` | `nat64` | |
-| `Int8` | `i8` | `int8` | |
-| `Int16` | `i16` | `int16` | |
-| `Int32` | `i32` | `int32` | |
-| `Int64` | `i64` | `int64` | |
-| `Decimal` | `rust_decimal::Decimal` | `text` | Serialized as string for precision |
-| `Text` | `String` | `text` | |
-| `Boolean` | `bool` | `bool` | |
-| `Date` | `chrono::NaiveDate` | `record { year; month; day }` | Structured record |
-| `DateTime` | `chrono::DateTime<Utc>` | `int64` | Unix timestamp |
-| `Blob` | `Vec<u8>` | `blob` | |
-| `Principal` | `candid::Principal` | `principal` | IC-specific |
-| `Uuid` | `uuid::Uuid` | `text` | String representation |
-| `Json` | `serde_json::Value` | `text` | Serialized JSON string |
-| `Nullable<T>` | `Option<T>` | `opt T` | Candid optional |
+| ic-dbms Type  | Rust Type               | Candid Type                   | Notes                              |
+| ------------- | ----------------------- | ----------------------------- | ---------------------------------- |
+| `Uint8`       | `u8`                    | `nat8`                        |                                    |
+| `Uint16`      | `u16`                   | `nat16`                       |                                    |
+| `Uint32`      | `u32`                   | `nat32`                       |                                    |
+| `Uint64`      | `u64`                   | `nat64`                       |                                    |
+| `Int8`        | `i8`                    | `int8`                        |                                    |
+| `Int16`       | `i16`                   | `int16`                       |                                    |
+| `Int32`       | `i32`                   | `int32`                       |                                    |
+| `Int64`       | `i64`                   | `int64`                       |                                    |
+| `Decimal`     | `rust_decimal::Decimal` | `text`                        | Serialized as string for precision |
+| `Text`        | `String`                | `text`                        |                                    |
+| `Boolean`     | `bool`                  | `bool`                        |                                    |
+| `Date`        | `chrono::NaiveDate`     | `record { year; month; day }` | Structured record                  |
+| `DateTime`    | `chrono::DateTime<Utc>` | `int64`                       | Unix timestamp                     |
+| `Blob`        | `Vec<u8>`               | `blob`                        |                                    |
+| `Principal`   | `candid::Principal`     | `principal`                   | IC-specific                        |
+| `Uuid`        | `uuid::Uuid`            | `text`                        | String representation              |
+| `Json`        | `serde_json::Value`     | `text`                        | Serialized JSON string             |
+| `Nullable<T>` | `Option<T>`             | `opt T`                       | Candid optional                    |
 
 **Frontend integration example (JavaScript/TypeScript):**
 

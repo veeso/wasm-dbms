@@ -30,11 +30,11 @@
 
 wasm-dbms provides four fundamental database operations through the `Database` trait:
 
-| Operation | Description | Returns |
-|-----------|-------------|---------|
-| **Insert** | Add a new record to a table | `Result<()>` |
-| **Select** | Query records from a table | `Result<Vec<Record>>` |
-| **Update** | Modify existing records | `Result<u64>` (affected rows) |
+| Operation  | Description                 | Returns                       |
+| ---------- | --------------------------- | ----------------------------- |
+| **Insert** | Add a new record to a table | `Result<()>`                  |
+| **Select** | Query records from a table  | `Result<Vec<Record>>`         |
+| **Update** | Modify existing records     | `Result<u64>` (affected rows) |
 | **Delete** | Remove records from a table | `Result<u64>` (affected rows) |
 
 All operations:
@@ -272,10 +272,10 @@ println!("Deleted {} record(s)", deleted);
 
 When deleting records that are referenced by foreign keys, you must specify a behavior:
 
-| Behavior | Description |
-|----------|-------------|
+| Behavior   | Description                                    |
+| ---------- | ---------------------------------------------- |
 | `Restrict` | Fail if any foreign keys reference this record |
-| `Cascade` | Delete all records that reference this record |
+| `Cascade`  | Delete all records that reference this record  |
 
 **Restrict Example:**
 
@@ -353,16 +353,16 @@ See the [Transactions Guide](./transactions.md) for comprehensive transaction do
 
 CRUD operations can fail for various reasons. Here are common errors:
 
-| Error | Cause | Operation |
-|-------|-------|-----------|
-| `PrimaryKeyConflict` | Record with same primary key exists | Insert |
+| Error                           | Cause                                                 | Operation              |
+| ------------------------------- | ----------------------------------------------------- | ---------------------- |
+| `PrimaryKeyConflict`            | Record with same primary key exists                   | Insert                 |
 | `ForeignKeyConstraintViolation` | Referenced record doesn't exist, or delete restricted | Insert, Update, Delete |
-| `BrokenForeignKeyReference` | Foreign key points to non-existent record | Insert, Update |
-| `UnknownColumn` | Invalid column name in filter or select | Select, Update, Delete |
-| `MissingNonNullableField` | Required field not provided | Insert, Update |
-| `RecordNotFound` | No record matches the criteria | Update, Delete |
-| `TransactionNotFound` | Invalid transaction ID | All |
-| `InvalidQuery` | Malformed query (e.g., invalid JSON path) | Select |
+| `BrokenForeignKeyReference`     | Foreign key points to non-existent record             | Insert, Update         |
+| `UnknownColumn`                 | Invalid column name in filter or select               | Select, Update, Delete |
+| `MissingNonNullableField`       | Required field not provided                           | Insert, Update         |
+| `RecordNotFound`                | No record matches the criteria                        | Update, Delete         |
+| `TransactionNotFound`           | Invalid transaction ID                                | All                    |
+| `InvalidQuery`                  | Malformed query (e.g., invalid JSON path)             | Select                 |
 
 **Example error handling:**
 

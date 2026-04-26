@@ -117,9 +117,9 @@ page layout, and vice versa. This enables workflows such as:
 All operations return `MemoryResult<T>` (an alias for `Result<T, MemoryError>`).
 The possible errors are:
 
-| Error | Cause |
-|-------|-------|
-| `MemoryError::OutOfBounds` | Read or write beyond allocated memory |
+| Error                                | Cause                                           |
+| ------------------------------------ | ----------------------------------------------- |
+| `MemoryError::OutOfBounds`           | Read or write beyond allocated memory           |
 | `MemoryError::ProviderError(String)` | File I/O failure, or file size not page-aligned |
 
 ---
@@ -135,10 +135,10 @@ across runtimes.
 
 ## Comparison with Other Providers
 
-| Provider | Use case | Backing storage |
-|----------|----------|-----------------|
+| Provider             | Use case        | Backing storage                |
+| -------------------- | --------------- | ------------------------------ |
 | `WasiMemoryProvider` | WASI production | Single flat file on filesystem |
-| `IcMemoryProvider` | IC production | IC stable memory APIs |
-| `HeapMemoryProvider` | Testing | In-process `Vec<u8>` |
+| `IcMemoryProvider`   | IC production   | IC stable memory APIs          |
+| `HeapMemoryProvider` | Testing         | In-process `Vec<u8>`           |
 
 All three share the same page layout, so data is portable across implementations.

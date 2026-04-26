@@ -40,15 +40,15 @@ pub struct User {
 }
 ```
 
-| Derive / Attribute | Required for IC | Purpose |
-|--------------------|-----------------|---------|
-| `Table` | Yes | Generates table schema and related types |
-| `CandidType` | Yes (IC-specific) | Enables Candid serialization for the table struct |
-| `Deserialize` | Yes (IC-specific) | Enables deserialization from Candid wire format |
-| `#[candid]` | Yes (IC-specific) | Adds Candid/Serde derives to generated `Record`, `InsertRequest`, `UpdateRequest` types |
-| `Clone` | Yes | Required by the macro system |
-| `Debug` | Recommended | Useful for debugging |
-| `PartialEq`, `Eq` | Recommended | Useful for comparisons in tests |
+| Derive / Attribute | Required for IC   | Purpose                                                                                 |
+| ------------------ | ----------------- | --------------------------------------------------------------------------------------- |
+| `Table`            | Yes               | Generates table schema and related types                                                |
+| `CandidType`       | Yes (IC-specific) | Enables Candid serialization for the table struct                                       |
+| `Deserialize`      | Yes (IC-specific) | Enables deserialization from Candid wire format                                         |
+| `#[candid]`        | Yes (IC-specific) | Adds Candid/Serde derives to generated `Record`, `InsertRequest`, `UpdateRequest` types |
+| `Clone`            | Yes               | Required by the macro system                                                            |
+| `Debug`            | Recommended       | Useful for debugging                                                                    |
+| `PartialEq`, `Eq`  | Recommended       | Useful for comparisons in tests                                                         |
 
 Without `CandidType`, `Deserialize`, and `#[candid]`, the generated canister API will not compile because Candid is the serialization format used for all IC inter-canister calls.
 

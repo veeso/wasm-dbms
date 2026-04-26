@@ -129,11 +129,11 @@ pub trait MemoryProvider {
 
 **Implementations:**
 
-| Implementation | Use Case |
-|----------------|----------|
-| `IcMemoryProvider` | IC production (uses `ic_cdk::stable::*`) |
+| Implementation       | Use Case                                        |
+| -------------------- | ----------------------------------------------- |
+| `IcMemoryProvider`   | IC production (uses `ic_cdk::stable::*`)        |
 | `WasiMemoryProvider` | WASI production (file-backed, single flat file) |
-| `HeapMemoryProvider` | Testing (uses `Vec<u8>`) |
+| `HeapMemoryProvider` | Testing (uses `Vec<u8>`)                        |
 
 ```rust
 // Production: Uses IC stable memory APIs
@@ -259,13 +259,13 @@ pub enum DataSize {
 
 **Examples:**
 
-| Type | SIZE | ALIGNMENT |
-|------|------|-----------|
-| `Uint32` | `Fixed(4)` | 4 |
-| `Int64` | `Fixed(8)` | 8 |
-| `Text` | `Dynamic` | 32 (default) |
-| `Blob` | `Dynamic` | 32 (default) |
-| User-defined record | `Dynamic` | Configurable (default 32) |
+| Type                | SIZE       | ALIGNMENT                 |
+| ------------------- | ---------- | ------------------------- |
+| `Uint32`            | `Fixed(4)` | 4                         |
+| `Int64`             | `Fixed(8)` | 8                         |
+| `Text`              | `Dynamic`  | 32 (default)              |
+| `Blob`              | `Dynamic`  | 32 (default)              |
+| User-defined record | `Dynamic`  | Configurable (default 32) |
 
 ---
 
@@ -450,16 +450,16 @@ Offset   Size    Field
 
 **Supported types:**
 
-| Type | Range |
-|------|-------|
-| `Int8` | -128 to 127 |
-| `Int16` | -32,768 to 32,767 |
-| `Int32` | -2,147,483,648 to 2,147,483,647 |
-| `Int64` | -9.2 × 10¹⁸ to 9.2 × 10¹⁸ |
-| `Uint8` | 0 to 255 |
-| `Uint16` | 0 to 65,535 |
-| `Uint32` | 0 to 4,294,967,295 |
-| `Uint64` | 0 to 18.4 × 10¹⁸ |
+| Type     | Range                           |
+| -------- | ------------------------------- |
+| `Int8`   | -128 to 127                     |
+| `Int16`  | -32,768 to 32,767               |
+| `Int32`  | -2,147,483,648 to 2,147,483,647 |
+| `Int64`  | -9.2 × 10¹⁸ to 9.2 × 10¹⁸       |
+| `Uint8`  | 0 to 255                        |
+| `Uint16` | 0 to 65,535                     |
+| `Uint32` | 0 to 4,294,967,295              |
+| `Uint64` | 0 to 18.4 × 10¹⁸                |
 
 ---
 

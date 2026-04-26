@@ -93,11 +93,11 @@ struct JournalEntry {
 
 ### What is Journaled
 
-| Operation        | Journaled? | Why                                                              |
-|------------------|------------|------------------------------------------------------------------|
-| `write_at`       | Yes        | Modifies existing data that must be restorable                   |
-| `zero`           | Yes        | Modifies existing data (writes zeros)                            |
-| `allocate_page`  | No         | Newly allocated pages are unreferenced after rollback; their content is irrelevant |
+| Operation       | Journaled? | Why                                                                                |
+| --------------- | ---------- | ---------------------------------------------------------------------------------- |
+| `write_at`      | Yes        | Modifies existing data that must be restorable                                     |
+| `zero`          | Yes        | Modifies existing data (writes zeros)                                              |
+| `allocate_page` | No         | Newly allocated pages are unreferenced after rollback; their content is irrelevant |
 
 ---
 

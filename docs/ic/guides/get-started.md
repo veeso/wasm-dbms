@@ -145,7 +145,7 @@ pub struct Post {
 The `Table` macro generates additional types for each table:
 
 | Generated Type       | Purpose                                |
-|----------------------|----------------------------------------|
+| -------------------- | -------------------------------------- |
 | `UserRecord`         | Full record returned from queries      |
 | `UserInsertRequest`  | Request type for inserting records     |
 | `UserUpdateRequest`  | Request type for updating records      |

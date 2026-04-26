@@ -76,17 +76,17 @@ pub struct Address {
 
 **Required traits:**
 
-| Trait | Purpose |
-|-------|---------|
-| `Clone` | Cloning values |
-| `Debug` | Debug formatting |
-| `PartialEq`, `Eq` | Equality comparison |
-| `PartialOrd`, `Ord` | Ordering (for sorting and range filters) |
-| `Hash` | Hashing (for hash-based lookups) |
-| `Default` | Default value construction |
-| `Serialize`, `Deserialize` | Serde serialization |
-| `Display` | Human-readable display (see Step 2) |
-| `Encode` | Binary encoding for storage (see Step 3) |
+| Trait                      | Purpose                                  |
+| -------------------------- | ---------------------------------------- |
+| `Clone`                    | Cloning values                           |
+| `Debug`                    | Debug formatting                         |
+| `PartialEq`, `Eq`          | Equality comparison                      |
+| `PartialOrd`, `Ord`        | Ordering (for sorting and range filters) |
+| `Hash`                     | Hashing (for hash-based lookups)         |
+| `Default`                  | Default value construction               |
+| `Serialize`, `Deserialize` | Serde serialization                      |
+| `Display`                  | Human-readable display (see Step 2)      |
+| `Encode`                   | Binary encoding for storage (see Step 3) |
 
 > **Note:** For IC canister usage, also derive `CandidType` and `Deserialize` from the `candid` crate.
 
@@ -176,11 +176,11 @@ pub struct Address {
 
 **Key `Encode` concepts:**
 
-| Constant | Description |
-|----------|-------------|
+| Constant             | Description                              |
+| -------------------- | ---------------------------------------- |
 | `DataSize::Fixed(n)` | Type always encodes to exactly `n` bytes |
-| `DataSize::Dynamic` | Encoded size varies per value |
-| `DEFAULT_ALIGNMENT` | Default memory page alignment (32 bytes) |
+| `DataSize::Dynamic`  | Encoded size varies per value            |
+| `DEFAULT_ALIGNMENT`  | Default memory page alignment (32 bytes) |
 
 ### Step 4: Implement DataType and Derive CustomDataType
 
