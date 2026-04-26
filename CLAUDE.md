@@ -205,3 +205,47 @@ docs/
 - Output artifacts go to `.artifact/` (`.wasm`, `.did`, `.wasm.gz`)
 - Always update the CHANGELOG.md with significant changes
 - Design docs and plans go in `.claude/plans/`, never in `docs/plans/`
+
+## Database API Surface (keep in sync)
+
+When changing the `Database` trait (`crates/wasm-dbms/wasm-dbms-api/src/dbms/database.rs`)
+or the `DatabaseSchema` dispatch trait (`crates/wasm-dbms/wasm-dbms/src/schema.rs`) —
+adding/removing/renaming methods, changing signatures, adding new error
+variants, or extending `Query` / `Filter` / `Value` — the change must be
+propagated to **every** consumer below in the same PR. Each surface has
+silently drifted in the past; treat them as a checklist:
+
+- `wit/dbms.wit` — WIT interface for the WASI guest. Update the matching
+  `interface types` records/variants and the `database` interface methods,
+  then rebuild `wasm-dbms-example-guest` and `wasm-dbms-example-host` and
+  run the host demo to verify end-to-end.
+- `crates/ic-dbms/ic-dbms-canister/src/api.rs` — generic per-operation
+  helpers consumed by the macro-generated canister endpoints.
+- `crates/ic-dbms/ic-dbms-macros/src/dbms_canister.rs` — the
+  `#[derive(DbmsCanister)]` macro: per-table endpoint generation
+  (`select_<table>`, `aggregate_<table>`, `insert_<table>`, ...) plus the
+  shared `select` / transaction / ACL endpoints.
+- `crates/ic-dbms/ic-dbms-client/src/client.rs` — the `Client` trait
+  surface, plus all three implementations:
+  - `client/ic.rs` (canister-to-canister via `ic-cdk`)
+  - `client/agent.rs` (external via `ic-agent`, behind `ic-agent` feature)
+  - `client/pocket_ic.rs` (integration tests, behind `pocket-ic` feature)
+- `crates/ic-dbms/integration-tests/dbms-canister-client-integration/src/lib.rs`
+  — the wrapper canister exposing the new client method end-to-end.
+- `crates/ic-dbms/integration-tests/pocket-ic-tests/tests/` — add coverage
+  for the new operation through both the direct client and the wrapper
+  canister; remember to register the new test file in
+  `tests/integration_tests.rs`.
+
+Documentation that must follow the same change:
+
+- `docs/reference/query.md` and `docs/reference/errors.md` for new
+  builder methods or error variants.
+- `docs/ic/reference/schema.md` for new generated Candid endpoints.
+- `docs/ic/guides/client-api.md` for new `Client` trait methods.
+- `docs/guides/querying.md` and `docs/guides/crud-operations.md` for
+  caller-facing behaviour changes.
+
+When in doubt, grep for the old method name across the workspace before
+finishing the change — every match either needs an update or an explicit
+deletion.
