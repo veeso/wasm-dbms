@@ -7,8 +7,8 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Decode, Principal};
 use ic_agent::Agent;
 use ic_dbms_api::prelude::{
-    DeleteBehavior, Filter, IcDbmsResult, InsertRecord, Query, TableSchema, TransactionId,
-    UpdateRecord,
+    AggregateFunction, AggregatedRow, DeleteBehavior, Filter, IcDbmsResult, InsertRecord, Query,
+    TableSchema, TransactionId, UpdateRecord,
 };
 
 use crate::client::{Client, RawRecords};
@@ -141,6 +141,23 @@ impl Client for IcDbmsAgentClient<'_> {
         transaction_id: Option<TransactionId>,
     ) -> IcDbmsCanisterClientResult<IcDbmsResult<RawRecords>> {
         self.query("select", (table, query, transaction_id)).await
+    }
+
+    async fn aggregate<T>(
+        &self,
+        table: &str,
+        query: Query,
+        aggregates: Vec<AggregateFunction>,
+        transaction_id: Option<TransactionId>,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<AggregatedRow>>>
+    where
+        T: TableSchema,
+    {
+        self.query(
+            &crate::utils::table_method(table, "aggregate"),
+            (query, aggregates, transaction_id),
+        )
+        .await
     }
 
     async fn insert<T>(

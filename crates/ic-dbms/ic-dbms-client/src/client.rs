@@ -9,8 +9,8 @@ mod types;
 
 use candid::{CandidType, Principal};
 use ic_dbms_api::prelude::{
-    DeleteBehavior, Filter, IcDbmsResult, InsertRecord, JoinColumnDef, Query, TableSchema,
-    TransactionId, UpdateRecord, Value,
+    AggregateFunction, AggregatedRow, DeleteBehavior, Filter, IcDbmsResult, InsertRecord,
+    JoinColumnDef, Query, TableSchema, TransactionId, UpdateRecord, Value,
 };
 
 #[cfg(feature = "ic-agent")]
@@ -75,6 +75,21 @@ pub trait Client {
     where
         T: TableSchema,
         T::Record: CandidType + for<'de> candid::Deserialize<'de>;
+
+    /// Executes an aggregate query on the IC DBMS Canister.
+    ///
+    /// The `query` carries `WHERE`, `DISTINCT`, `GROUP BY`, `HAVING`,
+    /// `ORDER BY`, `OFFSET`, and `LIMIT` clauses; `aggregates` lists the
+    /// [`AggregateFunction`]s to compute per group.
+    fn aggregate<T>(
+        &self,
+        table: &str,
+        query: Query,
+        aggregates: Vec<AggregateFunction>,
+        transaction_id: Option<TransactionId>,
+    ) -> impl Future<Output = IcDbmsCanisterClientResult<IcDbmsResult<Vec<AggregatedRow>>>>
+    where
+        T: TableSchema;
 
     /// Executes a `SELECT` query on the IC DBMS Canister and returns raw records (without deserialization).
     fn select_raw(

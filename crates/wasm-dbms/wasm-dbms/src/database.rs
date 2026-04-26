@@ -1,8 +1,6 @@
-// Rust guideline compliant 2026-03-01
-// X-WHERE-CLAUSE, M-CANONICAL-DOCS, M-PANIC-ON-BUG
-
 //! Core DBMS database struct providing CRUD and transaction operations.
 
+mod aggregate;
 mod filter_analyzer;
 mod index_reader;
 
@@ -10,10 +8,10 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use wasm_dbms_api::prelude::{
-    ColumnDef, DataTypeKind, Database, DbmsError, DbmsResult, DeleteBehavior, Filter,
-    ForeignFetcher, ForeignKeyDef, InsertRecord, JoinColumnDef, OrderDirection, Query, QueryError,
-    TableColumns, TableError, TableRecord, TableSchema, TransactionError, TransactionId,
-    UpdateRecord, Value, ValuesSource,
+    AggregateFunction, AggregatedRow, ColumnDef, DataTypeKind, Database, DbmsError, DbmsResult,
+    DeleteBehavior, Filter, ForeignFetcher, ForeignKeyDef, InsertRecord, JoinColumnDef,
+    OrderDirection, Query, QueryError, TableColumns, TableError, TableRecord, TableSchema,
+    TransactionError, TransactionId, UpdateRecord, Value, ValuesSource,
 };
 use wasm_dbms_memory::RecordAddress;
 use wasm_dbms_memory::prelude::{
@@ -627,6 +625,7 @@ where
     where
         T: TableSchema,
     {
+        reject_aggregate_clauses(&query)?;
         let table_registry = self.load_table_registry::<T>()?;
         let mut table_overlay = if self.transaction.is_some() {
             self.overlay()?
@@ -714,6 +713,7 @@ where
         table: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
+        reject_aggregate_clauses(&query)?;
         self.schema.select_join(self, table, query)
     }
 
@@ -947,6 +947,20 @@ where
     }
 }
 
+/// Rejects queries that carry `GROUP BY` or `HAVING` on a non-aggregate path.
+///
+/// `GROUP BY` and `HAVING` only have meaning under
+/// [`Database::aggregate`](wasm_dbms_api::prelude::Database::aggregate). When
+/// they appear on a regular `select`, `select_raw`, or `select_join`, returning
+/// rows would silently drop the user's grouping intent — better to fail loudly
+/// and steer the caller to the right method.
+fn reject_aggregate_clauses(query: &Query) -> DbmsResult<()> {
+    if !query.group_by.is_empty() || query.having.is_some() {
+        return Err(DbmsError::Query(QueryError::AggregateClauseInSelect));
+    }
+    Ok(())
+}
+
 /// Provides ordering for two optional values by direction.
 pub fn sort_values_with_direction(
     a: Option<&Value>,
@@ -1015,6 +1029,17 @@ where
         query: Query,
     ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
         self.select_join_inner(table, query)
+    }
+
+    fn aggregate<T>(
+        &self,
+        query: Query,
+        aggregates: &[AggregateFunction],
+    ) -> DbmsResult<Vec<AggregatedRow>>
+    where
+        T: TableSchema,
+    {
+        aggregate::run_aggregate::<T, _, _>(self, query, aggregates)
     }
 
     fn insert<T>(&self, record: T::Insert) -> DbmsResult<()>

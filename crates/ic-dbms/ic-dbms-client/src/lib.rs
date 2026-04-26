@@ -27,6 +27,9 @@
 //!
 //! ### Query
 //!
+//! - [`AggregateFunction`](crate::prelude::AggregateFunction)
+//! - [`AggregatedRow`](crate::prelude::AggregatedRow)
+//! - [`AggregatedValue`](crate::prelude::AggregatedValue)
 //! - [`DeleteBehavior`](crate::prelude::DeleteBehavior)
 //! - [`Filter`](crate::prelude::Filter)
 //! - [`JsonCmp`](crate::prelude::JsonCmp)

@@ -80,8 +80,20 @@ impl QueryBuilder {
         self
     }
 
+    /// Adds a GROUP BY clause to the query for the specified fields.
+    pub fn group_by<S: ToString>(mut self, fields: &[S]) -> Self {
+        self.query.group_by = fields.iter().map(|s| s.to_string()).collect();
+        self
+    }
+
+    /// Adds a HAVING clause to the query with the specified filter.
+    pub fn having(mut self, filter: Filter) -> Self {
+        self.query.having = Some(filter);
+        self
+    }
+
     /// Adds an ascending order by clause for the specified field.
-    pub fn order_by_asc(mut self, field: &str) -> Self {
+    pub fn order_by_asc<S: ToString>(mut self, field: S) -> Self {
         self.query
             .order_by
             .push((field.to_string(), OrderDirection::Ascending));
@@ -89,7 +101,7 @@ impl QueryBuilder {
     }
 
     /// Adds a descending order by clause for the specified field.
-    pub fn order_by_desc(mut self, field: &str) -> Self {
+    pub fn order_by_desc<S: ToString>(mut self, field: S) -> Self {
         self.query
             .order_by
             .push((field.to_string(), OrderDirection::Descending));
@@ -224,6 +236,24 @@ mod tests {
             query.distinct_by,
             vec!["name".to_string(), "email".to_string()]
         );
+    }
+
+    #[test]
+    fn test_should_set_group_by_fields() {
+        let query_builder = QueryBuilder::default().group_by(&["category", "status"]);
+        let query = query_builder.build();
+        assert_eq!(
+            query.group_by,
+            vec!["category".to_string(), "status".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_should_set_having_filter() {
+        let filter = Filter::gt("count", Value::Uint32(10u32.into()));
+        let query_builder = QueryBuilder::default().having(filter.clone());
+        let query = query_builder.build();
+        assert_eq!(query.having, Some(filter));
     }
 
     #[test]

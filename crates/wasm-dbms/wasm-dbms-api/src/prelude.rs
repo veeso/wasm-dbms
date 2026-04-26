@@ -8,8 +8,8 @@ pub use crate::dbms::custom_value::CustomValue;
 pub use crate::dbms::database::Database;
 pub use crate::dbms::foreign_fetcher::{ForeignFetcher, NoForeignFetcher};
 pub use crate::dbms::query::{
-    DeleteBehavior, Filter, Join, JoinType, JsonCmp, JsonFilter, OrderDirection, Query,
-    QueryBuilder, QueryError, QueryResult, Select,
+    AggregateFunction, AggregatedRow, AggregatedValue, DeleteBehavior, Filter, Join, JoinType,
+    JsonCmp, JsonFilter, OrderDirection, Query, QueryBuilder, QueryError, QueryResult, Select,
 };
 pub use crate::dbms::sanitize::*;
 pub use crate::dbms::table::*;

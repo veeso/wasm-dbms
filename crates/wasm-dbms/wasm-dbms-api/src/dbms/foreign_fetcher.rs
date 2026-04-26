@@ -133,6 +133,17 @@ mod tests {
             unimplemented!()
         }
 
+        fn aggregate<T>(
+            &self,
+            _query: crate::prelude::Query,
+            _aggregates: &[crate::prelude::AggregateFunction],
+        ) -> DbmsResult<Vec<crate::prelude::AggregatedRow>>
+        where
+            T: crate::prelude::TableSchema,
+        {
+            todo!();
+        }
+
         fn select_raw(
             &self,
             _table: &str,

@@ -6,8 +6,8 @@ use std::cell::RefCell;
 
 use candid::{CandidType, Deserialize, Principal};
 use ic_dbms_api::prelude::{
-    DeleteBehavior, Filter, IcDbmsResult, JoinColumnDef, Query, Table, Text, TransactionId, Uint32,
-    Value,
+    AggregateFunction, AggregatedRow, DeleteBehavior, Filter, IcDbmsResult, JoinColumnDef, Query,
+    Table, Text, TransactionId, Uint32, Value,
 };
 use ic_dbms_client::prelude::{Client as _, IcDbmsCanisterClient};
 
@@ -108,6 +108,19 @@ pub async fn select_raw(
     let client = new_client();
     client
         .select_raw("users", query, transaction_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[ic_cdk::update]
+pub async fn aggregate(
+    query: Query,
+    aggregates: Vec<AggregateFunction>,
+    transaction_id: Option<TransactionId>,
+) -> Result<IcDbmsResult<Vec<AggregatedRow>>, String> {
+    let client = new_client();
+    client
+        .aggregate::<User>("users", query, aggregates, transaction_id)
         .await
         .map_err(|e| e.to_string())
 }

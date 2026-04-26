@@ -123,6 +123,23 @@ impl Client for IcDbmsCanisterClient {
         self.call("select", &(table, query, transaction_id)).await
     }
 
+    async fn aggregate<T>(
+        &self,
+        table: &str,
+        query: ic_dbms_api::prelude::Query,
+        aggregates: Vec<ic_dbms_api::prelude::AggregateFunction>,
+        transaction_id: Option<ic_dbms_api::prelude::TransactionId>,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<ic_dbms_api::prelude::AggregatedRow>>>
+    where
+        T: ic_dbms_api::prelude::TableSchema,
+    {
+        self.call(
+            &crate::utils::table_method(table, "aggregate"),
+            &(query, aggregates, transaction_id),
+        )
+        .await
+    }
+
     async fn insert<T>(
         &self,
         table: &str,

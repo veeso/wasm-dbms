@@ -37,6 +37,9 @@ use wasm_dbms_api::prelude::*;
 
 #### Query
 
+- [`AggregateFunction`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/enum.AggregateFunction.html)
+- [`AggregatedRow`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/struct.AggregatedRow.html)
+- [`AggregatedValue`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/enum.AggregatedValue.html)
 - [`DeleteBehavior`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/enum.DeleteBehavior.html)
 - [`Filter`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/struct.Filter.html)
 - [`Join`](https://docs.rs/wasm-dbms-api/latest/wasm_dbms_api/prelude/struct.Join.html)

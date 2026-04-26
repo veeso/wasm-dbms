@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use wasm_dbms_api::prelude::{
-    Database as _, DeleteBehavior, Filter, InsertRecord as _, OrderDirection, Query,
+    Database as _, DeleteBehavior, Filter, InsertRecord as _, Nullable, OrderDirection, Query,
     TableSchema as _, Text, Uint32, UpdateRecord as _, Value,
 };
 use wasm_dbms_macros::{DatabaseSchema, Table};
@@ -42,8 +42,18 @@ pub struct Contract {
     pub user_id: Uint32,
 }
 
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "sales"]
+pub struct Sale {
+    #[primary_key]
+    pub id: Uint32,
+    pub category: Text,
+    pub price: Uint32,
+    pub bonus: Nullable<Uint32>,
+}
+
 #[derive(DatabaseSchema)]
-#[tables(User = "users", Post = "posts", Contract = "contracts")]
+#[tables(User = "users", Post = "posts", Contract = "contracts", Sale = "sales")]
 pub struct TestSchema;
 
 fn setup() -> DbmsContext<HeapMemoryProvider> {
@@ -2109,4 +2119,614 @@ fn test_autoincrement_select_filter_on_autoincrement_column() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, Some(Uint32(2)));
     assert_eq!(rows[0].order, Some(Uint32(2)));
+}
+
+// -- aggregate tests --
+
+mod aggregate_tests {
+    use rust_decimal::Decimal as RustDecimal;
+    use wasm_dbms_api::prelude::{
+        AggregateFunction, AggregatedValue, Database as _, Decimal, Filter, OrderDirection, Query,
+        Text, Uint32, Uint64, Value,
+    };
+
+    use super::{Post, TestSchema, User, insert_post, insert_user, setup};
+    use crate::prelude::WasmDbmsDatabase;
+
+    fn seed(db: &WasmDbmsDatabase<'_, wasm_dbms_memory::prelude::HeapMemoryProvider>) {
+        insert_user(db, 1, "alice");
+        insert_user(db, 2, "bob");
+        insert_user(db, 3, "carol");
+        // Posts: alice has 3, bob has 1, carol has 0.
+        insert_post(db, 10, "p1", 1);
+        insert_post(db, 20, "p2", 1);
+        insert_post(db, 30, "p3", 1);
+        insert_post(db, 40, "p4", 2);
+    }
+
+    fn dec(s: &str) -> Value {
+        Value::Decimal(Decimal(RustDecimal::from_str_exact(s).unwrap()))
+    }
+
+    #[test]
+    fn aggregate_count_all_no_group_by() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let result = db
+            .aggregate::<Post>(Query::default(), &[AggregateFunction::Count(None)])
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].group_keys.is_empty());
+        assert_eq!(result[0].values, vec![AggregatedValue::Count(4)]);
+    }
+
+    #[test]
+    fn aggregate_count_column_skips_nulls() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        // user_id is non-null on every Post, so COUNT(user_id) == COUNT(*).
+        let result = db
+            .aggregate::<Post>(
+                Query::default(),
+                &[AggregateFunction::Count(Some("user_id".into()))],
+            )
+            .unwrap();
+
+        assert_eq!(result[0].values, vec![AggregatedValue::Count(4)]);
+    }
+
+    #[test]
+    fn aggregate_sum_avg_min_max_no_group_by() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let aggs = vec![
+            AggregateFunction::Sum("user_id".into()),
+            AggregateFunction::Avg("user_id".into()),
+            AggregateFunction::Min("user_id".into()),
+            AggregateFunction::Max("user_id".into()),
+        ];
+
+        let result = db.aggregate::<Post>(Query::default(), &aggs).unwrap();
+        assert_eq!(result.len(), 1);
+        let v = &result[0].values;
+        // sum(1+1+1+2) = 5, avg = 5/4 = 1.25
+        assert_eq!(v[0], AggregatedValue::Sum(dec("5")));
+        assert_eq!(v[1], AggregatedValue::Avg(dec("1.25")));
+        assert_eq!(v[2], AggregatedValue::Min(Value::Uint32(Uint32(1))));
+        assert_eq!(v[3], AggregatedValue::Max(Value::Uint32(Uint32(2))));
+    }
+
+    #[test]
+    fn aggregate_group_by_single_column() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let query = Query::builder().group_by(&["user_id"]).build();
+        let aggs = vec![AggregateFunction::Count(None)];
+
+        let mut result = db.aggregate::<Post>(query, &aggs).unwrap();
+        // Sort by group key for deterministic assertion.
+        result.sort_by(|a, b| a.group_keys[0].cmp(&b.group_keys[0]));
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].group_keys, vec![Value::Uint32(Uint32(1))]);
+        assert_eq!(result[0].values, vec![AggregatedValue::Count(3)]);
+        assert_eq!(result[1].group_keys, vec![Value::Uint32(Uint32(2))]);
+        assert_eq!(result[1].values, vec![AggregatedValue::Count(1)]);
+    }
+
+    #[test]
+    fn aggregate_having_filters_groups() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        // GROUP BY user_id, HAVING agg0 > 1 — keep only alice's group.
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .having(Filter::gt("agg0", Value::Uint64(Uint64(1))))
+            .build();
+        let aggs = vec![AggregateFunction::Count(None)];
+
+        let result = db.aggregate::<Post>(query, &aggs).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].group_keys, vec![Value::Uint32(Uint32(1))]);
+        assert_eq!(result[0].values, vec![AggregatedValue::Count(3)]);
+    }
+
+    #[test]
+    fn aggregate_having_on_group_key_column() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .having(Filter::eq("user_id", Value::Uint32(Uint32(2))))
+            .build();
+        let aggs = vec![AggregateFunction::Count(None)];
+
+        let result = db.aggregate::<Post>(query, &aggs).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].group_keys, vec![Value::Uint32(Uint32(2))]);
+    }
+
+    #[test]
+    fn aggregate_order_by_aggregate_output_then_limit() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .order_by_desc("agg0")
+            .limit(1)
+            .build();
+        let aggs = vec![AggregateFunction::Count(None)];
+
+        let result = db.aggregate::<Post>(query, &aggs).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].group_keys, vec![Value::Uint32(Uint32(1))]);
+        assert_eq!(result[0].values, vec![AggregatedValue::Count(3)]);
+    }
+
+    #[test]
+    fn aggregate_offset_skips_rows() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .order_by_asc("user_id")
+            .offset(1)
+            .build();
+        let aggs = vec![AggregateFunction::Count(None)];
+
+        let result = db.aggregate::<Post>(query, &aggs).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].group_keys, vec![Value::Uint32(Uint32(2))]);
+    }
+
+    #[test]
+    fn aggregate_with_where_pre_filters_rows() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let query = Query::builder()
+            .and_where(Filter::eq("user_id", Value::Uint32(Uint32(1))))
+            .build();
+        let aggs = vec![AggregateFunction::Count(None)];
+
+        let result = db.aggregate::<Post>(query, &aggs).unwrap();
+        assert_eq!(result[0].values, vec![AggregatedValue::Count(3)]);
+    }
+
+    #[test]
+    fn aggregate_empty_table_no_group_by() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        // No inserts.
+
+        let aggs = vec![
+            AggregateFunction::Count(None),
+            AggregateFunction::Sum("user_id".into()),
+            AggregateFunction::Avg("user_id".into()),
+            AggregateFunction::Min("user_id".into()),
+            AggregateFunction::Max("user_id".into()),
+        ];
+
+        let result = db.aggregate::<Post>(Query::default(), &aggs).unwrap();
+        assert_eq!(result.len(), 1);
+        let v = &result[0].values;
+        assert_eq!(v[0], AggregatedValue::Count(0));
+        assert_eq!(v[1], AggregatedValue::Sum(Value::Null));
+        assert_eq!(v[2], AggregatedValue::Avg(Value::Null));
+        assert_eq!(v[3], AggregatedValue::Min(Value::Null));
+        assert_eq!(v[4], AggregatedValue::Max(Value::Null));
+    }
+
+    #[test]
+    fn aggregate_empty_table_group_by_returns_no_rows() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let query = Query::builder().group_by(&["user_id"]).build();
+        let aggs = vec![AggregateFunction::Count(None)];
+
+        let result = db.aggregate::<Post>(query, &aggs).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn aggregate_sum_on_non_numeric_column_errors() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let aggs = vec![AggregateFunction::Sum("name".into())];
+        let err = db
+            .aggregate::<User>(Query::default(), &aggs)
+            .expect_err("SUM on Text must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("numeric"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn aggregate_avg_on_non_numeric_column_errors() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let aggs = vec![AggregateFunction::Avg("name".into())];
+        let err = db
+            .aggregate::<User>(Query::default(), &aggs)
+            .expect_err("AVG on Text must be rejected");
+        assert!(err.to_string().contains("numeric"));
+    }
+
+    #[test]
+    fn aggregate_unknown_column_errors() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let aggs = vec![AggregateFunction::Sum("not_a_column".into())];
+        let err = db
+            .aggregate::<User>(Query::default(), &aggs)
+            .expect_err("unknown column must be rejected");
+        assert!(err.to_string().contains("not_a_column"));
+    }
+
+    #[test]
+    fn aggregate_group_by_unknown_column_errors() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let query = Query::builder().group_by(&["nope"]).build();
+        let err = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .expect_err("unknown group_by column must be rejected");
+        assert!(err.to_string().contains("nope"));
+    }
+
+    #[test]
+    fn aggregate_having_unknown_aggregate_errors() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        // Only one aggregate (agg0); reference agg1.
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .having(Filter::gt("agg1", Value::Uint64(Uint64(0))))
+            .build();
+        let err = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .expect_err("HAVING on unknown agg must be rejected");
+        assert!(err.to_string().contains("agg1"));
+    }
+
+    #[test]
+    fn aggregate_having_unknown_column_errors() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .having(Filter::eq("foo", Value::Uint32(Uint32(0))))
+            .build();
+        let err = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .expect_err("HAVING on unknown column must be rejected");
+        assert!(err.to_string().contains("foo"));
+    }
+
+    #[test]
+    fn aggregate_order_by_unknown_aggregate_errors() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .order_by_asc("agg7")
+            .build();
+        let err = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .expect_err("ORDER BY on unknown agg must be rejected");
+        assert!(err.to_string().contains("agg7"));
+    }
+
+    #[test]
+    fn aggregate_having_like_rejected() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        seed(&db);
+
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .having(Filter::like("user_id", "%"))
+            .build();
+        let err = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .expect_err("LIKE in HAVING must be rejected");
+        assert!(err.to_string().contains("LIKE"));
+    }
+
+    #[test]
+    fn aggregate_avg_decimal_division_precision() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        // Insert posts so SUM(user_id) / 3 = 7/3 = 2.333...
+        insert_user(&db, 1, "a");
+        insert_user(&db, 2, "b");
+        insert_user(&db, 4, "c");
+        insert_post(&db, 1, "p", 1);
+        insert_post(&db, 2, "p", 2);
+        insert_post(&db, 3, "p", 4);
+
+        let aggs = vec![AggregateFunction::Avg("user_id".into())];
+        let result = db.aggregate::<Post>(Query::default(), &aggs).unwrap();
+        let AggregatedValue::Avg(Value::Decimal(d)) = &result[0].values[0] else {
+            panic!("expected Decimal avg");
+        };
+        // 7 / 3 truncated to RustDecimal precision should round-trip via string.
+        assert!(d.0.to_string().starts_with("2.33"));
+    }
+
+    #[test]
+    fn aggregate_join_query_rejected() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let query = Query::builder()
+            .inner_join("users", "user_id", "id")
+            .build();
+        let err = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .expect_err("joins must be rejected");
+        assert!(err.to_string().contains("join"));
+    }
+
+    #[test]
+    fn aggregate_eager_relations_rejected() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let query = Query::builder().with("users").build();
+        let err = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .expect_err("eager relations must be rejected");
+        assert!(err.to_string().contains("eager"));
+    }
+
+    #[test]
+    fn aggregate_orders_by_descending() {
+        let _ = OrderDirection::Descending; // silence unused import warning if any
+    }
+
+    // -- extra coverage: multi-col group_by, NULLs, Decimal AVG, transactions,
+    //    combined order, JSON-in-HAVING rejection --
+
+    use wasm_dbms_api::prelude::{InsertRecord as _, JsonFilter, Nullable, TableSchema as _};
+
+    use super::{Sale, SaleInsertRequest};
+
+    fn insert_sale(
+        db: &WasmDbmsDatabase<'_, wasm_dbms_memory::prelude::HeapMemoryProvider>,
+        id: u32,
+        category: &str,
+        price: u32,
+        bonus: Option<u32>,
+    ) {
+        let bonus: Nullable<Uint32> = bonus.map(Uint32).into();
+        let req = SaleInsertRequest::from_values(&[
+            (Sale::columns()[0], Value::Uint32(Uint32(id))),
+            (Sale::columns()[1], Value::Text(Text(category.to_string()))),
+            (Sale::columns()[2], Value::Uint32(Uint32(price))),
+            (Sale::columns()[3], bonus.into()),
+        ])
+        .unwrap();
+        db.insert::<Sale>(req).unwrap();
+    }
+
+    #[test]
+    fn aggregate_multi_column_group_by() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_sale(&db, 1, "books", 10, None);
+        insert_sale(&db, 2, "books", 20, None);
+        insert_sale(&db, 3, "toys", 5, None);
+        insert_sale(&db, 4, "toys", 5, None);
+        insert_sale(&db, 5, "books", 10, None);
+
+        let query = Query::builder()
+            .group_by(&["category", "price"])
+            .order_by_asc("category")
+            .order_by_asc("price")
+            .build();
+        let result = db
+            .aggregate::<Sale>(query, &[AggregateFunction::Count(None)])
+            .unwrap();
+
+        // Groups: (books, 10) x2, (books, 20) x1, (toys, 5) x2
+        assert_eq!(result.len(), 3);
+        assert_eq!(
+            result[0].group_keys,
+            vec![Value::Text(Text("books".into())), Value::Uint32(Uint32(10))]
+        );
+        assert_eq!(result[0].values, vec![AggregatedValue::Count(2)]);
+        assert_eq!(result[1].values, vec![AggregatedValue::Count(1)]);
+        assert_eq!(result[2].values, vec![AggregatedValue::Count(2)]);
+    }
+
+    #[test]
+    fn aggregate_count_column_with_actual_nulls() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_sale(&db, 1, "a", 1, Some(10));
+        insert_sale(&db, 2, "a", 1, None);
+        insert_sale(&db, 3, "a", 1, Some(20));
+
+        let result = db
+            .aggregate::<Sale>(
+                Query::default(),
+                &[
+                    AggregateFunction::Count(None),
+                    AggregateFunction::Count(Some("bonus".into())),
+                ],
+            )
+            .unwrap();
+        let v = &result[0].values;
+        assert_eq!(v[0], AggregatedValue::Count(3));
+        assert_eq!(v[1], AggregatedValue::Count(2));
+    }
+
+    #[test]
+    fn aggregate_sum_avg_skips_nulls_decimal_output() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        // Use the nullable `bonus` column so SUM/AVG must skip nulls.
+        insert_sale(&db, 1, "x", 1, Some(10));
+        insert_sale(&db, 2, "x", 1, None);
+        insert_sale(&db, 3, "x", 1, Some(20));
+
+        let result = db
+            .aggregate::<Sale>(
+                Query::default(),
+                &[
+                    AggregateFunction::Sum("bonus".into()),
+                    AggregateFunction::Avg("bonus".into()),
+                ],
+            )
+            .unwrap();
+        assert_eq!(result[0].values[0], AggregatedValue::Sum(dec("30")));
+        // avg = 30 / 2 = 15
+        assert_eq!(result[0].values[1], AggregatedValue::Avg(dec("15")));
+    }
+
+    #[test]
+    fn aggregate_inside_transaction_sees_writes() {
+        let ctx = setup();
+        let tx_id = ctx.begin_transaction(b"tester".to_vec());
+        let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+        // Inside the transaction, insert rows then aggregate.
+        insert_user(&db, 1, "a");
+        insert_user(&db, 2, "b");
+        insert_post(&db, 10, "p", 1);
+        insert_post(&db, 11, "p", 1);
+        insert_post(&db, 12, "p", 2);
+
+        let result = db
+            .aggregate::<Post>(
+                Query::builder().group_by(&["user_id"]).build(),
+                &[AggregateFunction::Count(None)],
+            )
+            .unwrap();
+        // 2 distinct user_ids in the overlay
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn aggregate_order_by_combines_group_key_and_aggregate() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_user(&db, 1, "a");
+        insert_user(&db, 2, "b");
+        insert_user(&db, 3, "c");
+        insert_post(&db, 10, "p", 1);
+        insert_post(&db, 20, "p", 2);
+        insert_post(&db, 21, "p", 2);
+        insert_post(&db, 30, "p", 3);
+
+        // Order by COUNT desc then user_id asc.
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .order_by_desc("agg0")
+            .order_by_asc("user_id")
+            .build();
+        let result = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .unwrap();
+
+        assert_eq!(result.len(), 3);
+        // user 2 has 2 posts (highest); users 1 and 3 each have 1, tie broken by user_id asc.
+        assert_eq!(result[0].group_keys, vec![Value::Uint32(Uint32(2))]);
+        assert_eq!(result[1].group_keys, vec![Value::Uint32(Uint32(1))]);
+        assert_eq!(result[2].group_keys, vec![Value::Uint32(Uint32(3))]);
+    }
+
+    #[test]
+    fn aggregate_having_json_filter_rejected() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let json_filter = JsonFilter::extract_eq("$.foo", Value::Text(Text("bar".into())));
+        let query = Query::builder()
+            .group_by(&["user_id"])
+            .having(Filter::json("user_id", json_filter))
+            .build();
+        let err = db
+            .aggregate::<Post>(query, &[AggregateFunction::Count(None)])
+            .expect_err("JSON in HAVING must be rejected");
+        assert!(err.to_string().contains("JSON"));
+    }
+}
+
+#[test]
+fn select_with_group_by_is_rejected() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    let query = Query::builder().group_by(&["id"]).build();
+    let err = db
+        .select::<User>(query)
+        .expect_err("GROUP BY must be rejected on select");
+    assert!(err.to_string().contains("GROUP BY"));
+}
+
+#[test]
+fn select_with_having_is_rejected() {
+    use wasm_dbms_api::prelude::Filter as F;
+
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+    let query = Query::builder()
+        .having(F::gt("agg0", Value::Uint32(Uint32(0))))
+        .build();
+    let err = db
+        .select::<User>(query)
+        .expect_err("HAVING must be rejected on select");
+    assert!(err.to_string().contains("GROUP BY"));
+}
+
+#[test]
+fn select_join_with_group_by_is_rejected() {
+    use wasm_dbms_api::prelude::Database as _;
+
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+    let query = Query::builder()
+        .inner_join("posts", "id", "user_id")
+        .group_by(&["id"])
+        .build();
+    let err = db
+        .select_join("users", query)
+        .expect_err("GROUP BY must be rejected on select_join");
+    assert!(err.to_string().contains("GROUP BY"));
 }

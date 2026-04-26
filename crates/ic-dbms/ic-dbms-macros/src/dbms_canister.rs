@@ -154,6 +154,7 @@ fn impl_table_api(table: &TableMetadata, struct_ident: &syn::Ident) -> TokenStre
     let insert = &table.insert;
     let update = &table.update;
     let select_fn_name = format_ident!("select_{}", table_name);
+    let aggregate_fn_name = format_ident!("aggregate_{}", table_name);
     let insert_fn_name = format_ident!("insert_{}", table_name);
     let update_fn_name = format_ident!("update_{}", table_name);
     let delete_fn_name = format_ident!("delete_{}", table_name);
@@ -162,6 +163,15 @@ fn impl_table_api(table: &TableMetadata, struct_ident: &syn::Ident) -> TokenStre
         #[::ic_cdk::query]
         fn #select_fn_name(query: ::ic_dbms_api::prelude::Query, transaction_id: Option<::ic_dbms_api::prelude::TransactionId>) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<#record>> {
             ::ic_dbms_canister::api::select::<#entity, #struct_ident>(query, transaction_id, #struct_ident)
+        }
+
+        #[::ic_cdk::query]
+        fn #aggregate_fn_name(
+            query: ::ic_dbms_api::prelude::Query,
+            aggregates: Vec<::ic_dbms_api::prelude::AggregateFunction>,
+            transaction_id: Option<::ic_dbms_api::prelude::TransactionId>,
+        ) -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<::ic_dbms_api::prelude::AggregatedRow>> {
+            ::ic_dbms_canister::api::aggregate::<#entity, #struct_ident>(query, aggregates, transaction_id, #struct_ident)
         }
 
         #[::ic_cdk::update]
