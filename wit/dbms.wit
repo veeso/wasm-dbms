@@ -1,6 +1,12 @@
 package wasm-dbms:dbms;
 
 interface types {
+    /// Subset of `wasm_dbms_api::Value` exposed across the WIT boundary.
+    ///
+    /// Variants without a stable WIT primitive (Decimal, Date, DateTime, Json,
+    /// Uuid, Custom) are encoded as their canonical string representation;
+    /// the host or guest is responsible for parsing them back into the typed
+    /// `Value`.
     variant value {
         bool-val(bool),
         u8-val(u8),
@@ -11,11 +17,21 @@ interface types {
         i16-val(s16),
         i32-val(s32),
         i64-val(s64),
-        f32-val(f32),
-        f64-val(f64),
         text-val(string),
         blob-val(list<u8>),
+        decimal-val(string),
+        date-val(string),
+        datetime-val(string),
+        json-val(string),
+        uuid-val(string),
+        custom-val(custom-value),
         null-val,
+    }
+
+    record custom-value {
+        type-tag: string,
+        encoded: list<u8>,
+        display: string,
     }
 
     record column-value {
@@ -24,34 +40,154 @@ interface types {
     }
     type row = list<column-value>;
 
+    enum order-direction { asc, desc }
+
+    record order-key {
+        column: string,
+        direction: order-direction,
+    }
+
+    /// Mirrors `wasm_dbms_api::Query`. Structured filters (`Filter`,
+    /// `Filter` for `having`, and per-join expressions) are passed as JSON
+    /// strings produced by `serde_json::to_string` so the WIT surface stays
+    /// flat; the guest deserialises them back into `Filter` before running
+    /// the query.
     record query {
+        /// `Filter` expression serialised as JSON (`WHERE` clause).
         filter: option<string>,
-        order-by: option<string>,
-        order-dir: option<order-direction>,
+        /// Columns the result must be deduplicated on.
+        distinct-by: list<string>,
+        /// Foreign-key relations to load eagerly.
+        eager-relations: list<string>,
+        /// `Join` clauses serialised as JSON.
+        joins: list<string>,
+        /// `GROUP BY` columns.
+        group-by: list<string>,
+        /// `HAVING` `Filter` serialised as JSON. References aggregate outputs
+        /// by their synthetic `agg{N}` names.
+        having: option<string>,
+        /// Multi-key ordering.
+        order-by: list<order-key>,
         limit: option<u64>,
         offset: option<u64>,
     }
-    enum order-direction { asc, desc }
+
+    /// Controls foreign-key handling on `delete`.
+    enum delete-behavior { restrict, cascade }
+
+    /// Aggregate function to compute over a group.
+    variant aggregate-function {
+        /// `COUNT(*)` when the inner is empty, otherwise `COUNT(col)`.
+        count(option<string>),
+        sum(string),
+        avg(string),
+        min(string),
+        max(string),
+    }
+
+    /// Result of one aggregate function evaluated against a group.
+    variant aggregated-value {
+        count(u64),
+        sum(value),
+        avg(value),
+        min(value),
+        max(value),
+    }
+
+    /// One row of aggregated output.
+    record aggregated-row {
+        /// Values of the `GROUP BY` columns identifying this group, in
+        /// declared order. Empty when the query had no `GROUP BY`.
+        group-keys: list<value>,
+        /// One entry per `aggregate-function` passed to `aggregate`, in the
+        /// same order.
+        values: list<aggregated-value>,
+    }
 
     type transaction-id = u64;
 
+    /// Mirrors `wasm_dbms_api::DbmsError` and its inner variants. Detailed
+    /// messages preserve the source `QueryError` / `TableError` string for
+    /// host-side diagnostics.
     variant dbms-error {
+        /// Table not registered in the schema.
         table-not-found(string),
+        /// Primary-key uniqueness violated.
+        primary-key-conflict,
+        /// `#[unique]` column collision.
+        unique-constraint-violation(string),
+        /// Foreign key references a non-existent parent row.
+        broken-foreign-key-reference(string),
+        /// `Restrict` delete blocked by an existing foreign-key reference.
+        foreign-key-constraint-violation(string),
+        /// Unknown column referenced by the query.
+        unknown-column(string),
+        /// Required (non-nullable) column missing on insert.
+        missing-non-nullable-field(string),
+        /// Active transaction not found or already closed.
+        transaction-not-found,
+        /// Query is syntactically or semantically invalid.
+        invalid-query(string),
+        /// Joins used with a typed select path.
+        join-inside-typed-select,
+        /// `GROUP BY` / `HAVING` set on a non-aggregate select path.
+        aggregate-clause-in-select,
+        /// Generic constraint violation.
+        constraint-violation(string),
+        /// Sanitizer rejected a value.
+        sanitization-error(string),
+        /// Validator rejected a value.
         validation-error(string),
-        integrity-error(string),
-        transaction-error(string),
+        /// Underlying memory error.
         memory-error(string),
-        io-error(string),
+        /// Generic catch-all (internal / unexpected condition).
+        internal-error(string),
     }
 }
 
 interface database {
-    use types.{row, query, transaction-id, dbms-error};
+    use types.{
+        row,
+        query,
+        transaction-id,
+        dbms-error,
+        delete-behavior,
+        aggregate-function,
+        aggregated-row,
+    };
 
+    /// Runs a `SELECT` against `table`, returning raw rows.
     select: func(table: string, query: query) -> result<list<row>, dbms-error>;
+
+    /// Runs an aggregate query for `table`, computing each
+    /// `aggregate-function` per group defined by `query.group-by`.
+    aggregate: func(
+        table: string,
+        query: query,
+        aggregates: list<aggregate-function>,
+    ) -> result<list<aggregated-row>, dbms-error>;
+
+    /// Inserts a row built from named column values.
     insert: func(table: string, values: row, tx: option<transaction-id>) -> result<_, dbms-error>;
-    update: func(table: string, values: row, tx: option<transaction-id>) -> result<u64, dbms-error>;
-    delete: func(table: string, filter: option<string>, tx: option<transaction-id>) -> result<u64, dbms-error>;
+
+    /// Updates rows matching `filter` (JSON-serialised `Filter`) with the
+    /// supplied column values.
+    update: func(
+        table: string,
+        values: row,
+        filter: option<string>,
+        tx: option<transaction-id>,
+    ) -> result<u64, dbms-error>;
+
+    /// Deletes rows matching `filter`. `behavior` controls foreign-key
+    /// handling (`restrict` aborts on referenced rows; `cascade` deletes
+    /// referencing rows recursively).
+    delete: func(
+        table: string,
+        behavior: delete-behavior,
+        filter: option<string>,
+        tx: option<transaction-id>,
+    ) -> result<u64, dbms-error>;
 
     begin-transaction: func() -> result<transaction-id, dbms-error>;
     commit: func(tx: transaction-id) -> result<_, dbms-error>;

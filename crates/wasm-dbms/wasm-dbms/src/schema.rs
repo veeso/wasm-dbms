@@ -2,7 +2,8 @@
 // X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 use wasm_dbms_api::prelude::{
-    ColumnDef, DbmsResult, DeleteBehavior, Filter, JoinColumnDef, Query, Value,
+    AggregateFunction, AggregatedRow, ColumnDef, DbmsResult, DeleteBehavior, Filter, JoinColumnDef,
+    Query, Value,
 };
 use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
 
@@ -39,6 +40,17 @@ where
     ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
         crate::join::JoinEngine::new(self).join(dbms, from_table, query)
     }
+
+    /// Performs an aggregate query for the given table name, dispatching to
+    /// the typed [`crate::WasmDbmsDatabase::aggregate`] for the matching
+    /// table.
+    fn aggregate(
+        &self,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
+        table_name: &str,
+        query: Query,
+        aggregates: &[AggregateFunction],
+    ) -> DbmsResult<Vec<AggregatedRow>>;
 
     /// Returns tables and columns that reference the given table via foreign keys.
     fn referenced_tables(&self, table: &'static str) -> Vec<(&'static str, Vec<&'static str>)>;

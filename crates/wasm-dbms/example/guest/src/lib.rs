@@ -66,16 +66,44 @@ fn wit_value_to_dbms(v: wit::Value) -> Value {
         wit::Value::I16Val(n) => Value::Int16(t::Int16(n)),
         wit::Value::I32Val(n) => Value::Int32(t::Int32(n)),
         wit::Value::I64Val(n) => Value::Int64(t::Int64(n)),
-        wit::Value::F32Val(f) => Value::Decimal(t::Decimal(
-            rust_decimal::Decimal::try_from(f).unwrap_or_default(),
-        )),
-        wit::Value::F64Val(f) => Value::Decimal(t::Decimal(
-            rust_decimal::Decimal::try_from(f).unwrap_or_default(),
-        )),
         wit::Value::TextVal(s) => Value::Text(t::Text(s)),
         wit::Value::BlobVal(b) => Value::Blob(t::Blob(b)),
+        wit::Value::DecimalVal(s) => Value::Decimal(t::Decimal(
+            rust_decimal::Decimal::from_str_exact(&s).unwrap_or_default(),
+        )),
+        wit::Value::DateVal(s) => parse_date(&s).map_or(Value::Null, Value::Date),
+        wit::Value::DatetimeVal(_) => {
+            // The DateTime grammar (with microseconds and timezone offset)
+            // isn't worth re-parsing here. Pass DateTime values via the Text
+            // variant if you need to round-trip them through the WIT boundary.
+            Value::Null
+        }
+        wit::Value::JsonVal(s) => serde_json::from_str::<serde_json::Value>(&s)
+            .map(|j| Value::Json(t::Json::from(j)))
+            .unwrap_or(Value::Null),
+        wit::Value::UuidVal(_) => {
+            // Same rationale as DateTime — round-trip via Text instead.
+            Value::Null
+        }
+        wit::Value::CustomVal(c) => Value::Custom(t::CustomValue {
+            type_tag: c.type_tag,
+            encoded: c.encoded,
+            display: c.display,
+        }),
         wit::Value::NullVal => Value::Null,
     }
+}
+
+/// Parses a `YYYY-MM-DD` date string into a [`wasm_dbms_api::prelude::Date`].
+///
+/// The parser is intentionally narrow — anything outside the canonical
+/// `Display` form returns `None` and is mapped to `Value::Null` by the caller.
+fn parse_date(s: &str) -> Option<wasm_dbms_api::prelude::Date> {
+    let mut parts = s.splitn(3, '-');
+    let year = parts.next()?.parse::<u16>().ok()?;
+    let month = parts.next()?.parse::<u8>().ok()?;
+    let day = parts.next()?.parse::<u8>().ok()?;
+    Some(wasm_dbms_api::prelude::Date { year, month, day })
 }
 
 fn dbms_value_to_wit(v: Value) -> wit::Value {
@@ -92,15 +120,16 @@ fn dbms_value_to_wit(v: Value) -> wit::Value {
         Value::Text(s) => wit::Value::TextVal(s.0),
         Value::Blob(b) => wit::Value::BlobVal(b.0),
         Value::Null => wit::Value::NullVal,
-        Value::Decimal(d) => {
-            use rust_decimal::prelude::ToPrimitive as _;
-            wit::Value::F64Val(d.0.to_f64().unwrap_or(0.0))
-        }
-        Value::Date(d) => wit::Value::TextVal(d.to_string()),
-        Value::DateTime(dt) => wit::Value::TextVal(dt.to_string()),
-        Value::Json(j) => wit::Value::TextVal(j.value().to_string()),
-        Value::Uuid(u) => wit::Value::TextVal(u.0.to_string()),
-        Value::Custom(c) => wit::Value::BlobVal(c.encoded),
+        Value::Decimal(d) => wit::Value::DecimalVal(d.0.to_string()),
+        Value::Date(d) => wit::Value::DateVal(d.to_string()),
+        Value::DateTime(dt) => wit::Value::DatetimeVal(dt.to_string()),
+        Value::Json(j) => wit::Value::JsonVal(j.value().to_string()),
+        Value::Uuid(u) => wit::Value::UuidVal(u.0.to_string()),
+        Value::Custom(c) => wit::Value::CustomVal(wit::CustomValue {
+            type_tag: c.type_tag,
+            encoded: c.encoded,
+            display: c.display,
+        }),
     }
 }
 
@@ -109,18 +138,47 @@ fn dbms_value_to_wit(v: Value) -> wit::Value {
 fn dbms_error_to_wit(e: DbmsError) -> wit::DbmsError {
     match e {
         DbmsError::Memory(m) => wit::DbmsError::MemoryError(m.to_string()),
-        DbmsError::Query(QueryError::TableNotFound(t)) => wit::DbmsError::TableNotFound(t),
-        DbmsError::Query(q) => wit::DbmsError::IntegrityError(q.to_string()),
+        DbmsError::Query(q) => query_error_to_wit(q),
         DbmsError::Table(t) => wit::DbmsError::TableNotFound(t.to_string()),
-        DbmsError::Transaction(t) => wit::DbmsError::TransactionError(t.to_string()),
-        DbmsError::Sanitize(s) => wit::DbmsError::ValidationError(s),
+        DbmsError::Transaction(_) => wit::DbmsError::TransactionNotFound,
+        DbmsError::Sanitize(s) => wit::DbmsError::SanitizationError(s),
         DbmsError::Validation(v) => wit::DbmsError::ValidationError(v),
+    }
+}
+
+fn query_error_to_wit(q: QueryError) -> wit::DbmsError {
+    match q {
+        QueryError::PrimaryKeyConflict => wit::DbmsError::PrimaryKeyConflict,
+        QueryError::UniqueConstraintViolation { field } => {
+            wit::DbmsError::UniqueConstraintViolation(field)
+        }
+        QueryError::BrokenForeignKeyReference { table, key } => {
+            wit::DbmsError::BrokenForeignKeyReference(format!("{table}: {key:?}"))
+        }
+        QueryError::ForeignKeyConstraintViolation {
+            referencing_table,
+            field,
+        } => wit::DbmsError::ForeignKeyConstraintViolation(format!("{referencing_table}.{field}")),
+        QueryError::UnknownColumn(c) => wit::DbmsError::UnknownColumn(c),
+        QueryError::MissingNonNullableField(f) => wit::DbmsError::MissingNonNullableField(f),
+        QueryError::TransactionNotFound => wit::DbmsError::TransactionNotFound,
+        QueryError::InvalidQuery(msg) => wit::DbmsError::InvalidQuery(msg),
+        QueryError::JoinInsideTypedSelect => wit::DbmsError::JoinInsideTypedSelect,
+        QueryError::AggregateClauseInSelect => wit::DbmsError::AggregateClauseInSelect,
+        QueryError::ConstraintViolation(msg) => wit::DbmsError::ConstraintViolation(msg),
+        QueryError::MemoryError(m) => wit::DbmsError::MemoryError(m.to_string()),
+        QueryError::TableNotFound(t) => wit::DbmsError::TableNotFound(t),
+        QueryError::RecordNotFound => wit::DbmsError::InternalError("record not found".into()),
+        QueryError::SerializationError(s) => wit::DbmsError::InternalError(s),
+        QueryError::Internal(s) => wit::DbmsError::InternalError(s),
     }
 }
 
 // ── Query conversion ────────────────────────────────────────────────
 
 fn wit_query_to_dbms(q: wit::Query) -> Result<Query, String> {
+    use wasm_dbms_api::prelude::Join;
+
     let mut builder = Query::builder();
 
     if let Some(filter_json) = q.filter {
@@ -129,10 +187,47 @@ fn wit_query_to_dbms(q: wit::Query) -> Result<Query, String> {
         builder = builder.filter(Some(filter));
     }
 
-    if let Some(ref order_col) = q.order_by {
-        builder = match q.order_dir {
-            Some(wit::OrderDirection::Desc) => builder.order_by_desc(order_col),
-            _ => builder.order_by_asc(order_col),
+    if !q.distinct_by.is_empty() {
+        builder = builder.distinct(&q.distinct_by);
+    }
+
+    for relation in &q.eager_relations {
+        builder = builder.with(relation);
+    }
+
+    for join_json in &q.joins {
+        let join = serde_json::from_str::<Join>(join_json)
+            .map_err(|e| format!("invalid join JSON: {e}"))?;
+        builder = match join.join_type {
+            wasm_dbms_api::prelude::JoinType::Inner => {
+                builder.inner_join(&join.table, &join.left_column, &join.right_column)
+            }
+            wasm_dbms_api::prelude::JoinType::Left => {
+                builder.left_join(&join.table, &join.left_column, &join.right_column)
+            }
+            wasm_dbms_api::prelude::JoinType::Right => {
+                builder.right_join(&join.table, &join.left_column, &join.right_column)
+            }
+            wasm_dbms_api::prelude::JoinType::Full => {
+                builder.full_join(&join.table, &join.left_column, &join.right_column)
+            }
+        };
+    }
+
+    if !q.group_by.is_empty() {
+        builder = builder.group_by(&q.group_by);
+    }
+
+    if let Some(having_json) = q.having {
+        let filter = serde_json::from_str::<Filter>(&having_json)
+            .map_err(|e| format!("invalid having JSON: {e}"))?;
+        builder = builder.having(filter);
+    }
+
+    for key in q.order_by {
+        builder = match key.direction {
+            wit::OrderDirection::Asc => builder.order_by_asc(&key.column),
+            wit::OrderDirection::Desc => builder.order_by_desc(&key.column),
         };
     }
 
@@ -145,6 +240,53 @@ fn wit_query_to_dbms(q: wit::Query) -> Result<Query, String> {
     }
 
     Ok(builder.build())
+}
+
+fn wit_aggregate_to_dbms(a: wit::AggregateFunction) -> AggregateFunction {
+    match a {
+        wit::AggregateFunction::Count(col) => AggregateFunction::Count(col),
+        wit::AggregateFunction::Sum(c) => AggregateFunction::Sum(c),
+        wit::AggregateFunction::Avg(c) => AggregateFunction::Avg(c),
+        wit::AggregateFunction::Min(c) => AggregateFunction::Min(c),
+        wit::AggregateFunction::Max(c) => AggregateFunction::Max(c),
+    }
+}
+
+fn aggregated_value_to_wit(v: AggregatedValue) -> wit::AggregatedValue {
+    match v {
+        AggregatedValue::Count(n) => wit::AggregatedValue::Count(n),
+        AggregatedValue::Sum(v) => wit::AggregatedValue::Sum(dbms_value_to_wit(v)),
+        AggregatedValue::Avg(v) => wit::AggregatedValue::Avg(dbms_value_to_wit(v)),
+        AggregatedValue::Min(v) => wit::AggregatedValue::Min(dbms_value_to_wit(v)),
+        AggregatedValue::Max(v) => wit::AggregatedValue::Max(dbms_value_to_wit(v)),
+    }
+}
+
+fn aggregated_row_to_wit(row: AggregatedRow) -> wit::AggregatedRow {
+    wit::AggregatedRow {
+        group_keys: row.group_keys.into_iter().map(dbms_value_to_wit).collect(),
+        values: row
+            .values
+            .into_iter()
+            .map(aggregated_value_to_wit)
+            .collect(),
+    }
+}
+
+fn parse_filter_json(filter: Option<String>) -> Result<Option<Filter>, wit::DbmsError> {
+    filter
+        .map(|f| {
+            serde_json::from_str::<Filter>(&f)
+                .map_err(|e| wit::DbmsError::InvalidQuery(format!("invalid filter JSON: {e}")))
+        })
+        .transpose()
+}
+
+fn wit_delete_behavior(b: wit::DeleteBehavior) -> DeleteBehavior {
+    match b {
+        wit::DeleteBehavior::Restrict => DeleteBehavior::Restrict,
+        wit::DeleteBehavior::Cascade => DeleteBehavior::Cascade,
+    }
 }
 
 // ── Row conversion ──────────────────────────────────────────────────
@@ -222,7 +364,7 @@ export!(GuestDbms);
 
 impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     fn select(table: String, query: wit::Query) -> Result<Vec<wit::Row>, wit::DbmsError> {
-        let query = wit_query_to_dbms(query).map_err(wit::DbmsError::ValidationError)?;
+        let query = wit_query_to_dbms(query).map_err(wit::DbmsError::InvalidQuery)?;
         with_dbms(|ctx| {
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.select_raw(&table, query)
@@ -255,11 +397,31 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         })
     }
 
+    fn aggregate(
+        table: String,
+        query: wit::Query,
+        aggregates: Vec<wit::AggregateFunction>,
+    ) -> Result<Vec<wit::AggregatedRow>, wit::DbmsError> {
+        let query = wit_query_to_dbms(query).map_err(wit::DbmsError::InvalidQuery)?;
+        let aggs: Vec<AggregateFunction> =
+            aggregates.into_iter().map(wit_aggregate_to_dbms).collect();
+        with_dbms(|ctx| {
+            let table_name = intern_str(&table);
+            let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
+            ExampleDatabaseSchema
+                .aggregate(&db, table_name, query, &aggs)
+                .map(|rows| rows.into_iter().map(aggregated_row_to_wit).collect())
+                .map_err(dbms_error_to_wit)
+        })
+    }
+
     fn update(
         table: String,
         values: wit::Row,
+        filter: Option<String>,
         tx: Option<wit::TransactionId>,
     ) -> Result<u64, wit::DbmsError> {
+        let filter = parse_filter_json(filter)?;
         let named_values = wit_row_to_named_values(values);
         with_dbms(|ctx| {
             let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
@@ -268,12 +430,12 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
                 ExampleDatabaseSchema
-                    .update(&db, table_name, &col_values, None)
+                    .update(&db, table_name, &col_values, filter)
                     .map_err(dbms_error_to_wit)
             } else {
                 let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
                 ExampleDatabaseSchema
-                    .update(&db, table_name, &col_values, None)
+                    .update(&db, table_name, &col_values, filter)
                     .map_err(dbms_error_to_wit)
             }
         })
@@ -281,28 +443,24 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
 
     fn delete(
         table: String,
+        behavior: wit::DeleteBehavior,
         filter: Option<String>,
         tx: Option<wit::TransactionId>,
     ) -> Result<u64, wit::DbmsError> {
-        let filter = filter
-            .map(|f| {
-                serde_json::from_str::<Filter>(&f).map_err(|e| {
-                    wit::DbmsError::ValidationError(format!("invalid filter JSON: {e}"))
-                })
-            })
-            .transpose()?;
+        let filter = parse_filter_json(filter)?;
+        let behavior = wit_delete_behavior(behavior);
         with_dbms(|ctx| {
             let table_name = intern_str(&table);
 
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
                 ExampleDatabaseSchema
-                    .delete(&db, table_name, DeleteBehavior::Restrict, filter)
+                    .delete(&db, table_name, behavior, filter)
                     .map_err(dbms_error_to_wit)
             } else {
                 let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
                 ExampleDatabaseSchema
-                    .delete(&db, table_name, DeleteBehavior::Restrict, filter)
+                    .delete(&db, table_name, behavior, filter)
                     .map_err(dbms_error_to_wit)
             }
         })
