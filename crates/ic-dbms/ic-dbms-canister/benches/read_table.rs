@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use candid::CandidType;
 use criterion::{Criterion, criterion_group, criterion_main};
 use ic_dbms_api::prelude::{
-    ColumnDef, Database, DeleteBehavior, Filter, InsertRecord, Query, QueryError, TableSchema,
-    UpdateRecord, Value, flatten_table_columns,
+    AggregateFunction, AggregatedRow, ColumnDef, Database, DeleteBehavior, Filter, InsertRecord,
+    Query, QueryError, TableSchema, UpdateRecord, Value, flatten_table_columns,
 };
 use ic_dbms_canister::prelude::{
     AccessControl, DBMS_CONTEXT, DatabaseSchema, InsertIntegrityValidator, MemoryProvider, Table,
@@ -38,6 +38,22 @@ where
         if table_name == User::table_name() {
             let results = dbms.select_columns::<User>(query)?;
             Ok(flatten_table_columns(results))
+        } else {
+            Err(ic_dbms_api::prelude::IcDbmsError::Query(
+                QueryError::TableNotFound(table_name.to_string()),
+            ))
+        }
+    }
+
+    fn aggregate(
+        &self,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
+        table_name: &str,
+        query: Query,
+        aggregates: &[AggregateFunction],
+    ) -> ic_dbms_api::prelude::IcDbmsResult<Vec<AggregatedRow>> {
+        if table_name == User::table_name() {
+            dbms.aggregate::<User>(query, aggregates)
         } else {
             Err(ic_dbms_api::prelude::IcDbmsError::Query(
                 QueryError::TableNotFound(table_name.to_string()),

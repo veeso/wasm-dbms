@@ -1,8 +1,8 @@
 use candid::CandidType;
 use criterion::{Criterion, criterion_group, criterion_main};
 use ic_dbms_api::prelude::{
-    ColumnDef, Database, DeleteBehavior, Filter, InsertRecord, Query, QueryError, TableSchema,
-    UpdateRecord, Value, flatten_table_columns,
+    AggregateFunction, AggregatedRow, ColumnDef, Database, DeleteBehavior, Filter, InsertRecord,
+    Query, QueryError, TableSchema, UpdateRecord, Value, flatten_table_columns,
 };
 use ic_dbms_canister::prelude::{
     AccessControl, DBMS_CONTEXT, DatabaseSchema, InsertIntegrityValidator, MemoryProvider, Table,
@@ -55,6 +55,22 @@ where
                 let results = dbms.select_columns::<Post>(query)?;
                 Ok(flatten_table_columns(results))
             }
+            _ => Err(ic_dbms_api::prelude::IcDbmsError::Query(
+                QueryError::TableNotFound(table_name.to_string()),
+            )),
+        }
+    }
+
+    fn aggregate(
+        &self,
+        dbms: &WasmDbmsDatabase<'_, M, A>,
+        table_name: &str,
+        query: Query,
+        aggregates: &[AggregateFunction],
+    ) -> ic_dbms_api::prelude::IcDbmsResult<Vec<AggregatedRow>> {
+        match table_name {
+            name if name == User::table_name() => dbms.aggregate::<User>(query, aggregates),
+            name if name == Post::table_name() => dbms.aggregate::<Post>(query, aggregates),
             _ => Err(ic_dbms_api::prelude::IcDbmsError::Query(
                 QueryError::TableNotFound(table_name.to_string()),
             )),
