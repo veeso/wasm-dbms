@@ -40,7 +40,10 @@ pub trait TestEnvExt {
     fn dbms_canister_client_integration(&self) -> Principal;
 }
 
-impl TestEnvExt for PocketIcTestEnv<TestCanisterSetup> {
+impl<T> TestEnvExt for PocketIcTestEnv<T>
+where
+    T: CanisterSetup<Canister = TestCanister>,
+{
     fn dbms_canister(&self) -> Principal {
         self.canister_id(&TestCanister::DbmsCanister)
     }
@@ -64,7 +67,7 @@ impl CanisterSetup for TestCanisterSetup {
             env.canister_id(&TestCanister::DbmsCanisterClientIntegration);
         // install dbms-canister
         let init_arg = Encode!(&IcDbmsCanisterArgs::Init(IcDbmsCanisterInitArgs {
-            allowed_principals: vec![admin(), dbms_canister_client_integration_canister],
+            allowed_principals: Some(vec![admin(), dbms_canister_client_integration_canister]),
         }))
         .expect("failed to encode dbms canister init args");
         env.install_canister(TestCanister::DbmsCanister, init_arg)

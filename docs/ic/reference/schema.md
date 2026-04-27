@@ -126,10 +126,20 @@ service : (IcDbmsCanisterArgs) -> {
   commit : (nat) -> (Result);
   rollback : (nat) -> (Result);
 
-  // ACL methods (shared)
-  acl_add_principal : (principal) -> (Result);
-  acl_remove_principal : (principal) -> (Result);
-  acl_allowed_principals : () -> (vec principal) query;
+  // ACL methods (shared) — granular perms, see Access Control guide
+  grant_admin              : (principal) -> (Result);
+  revoke_admin             : (principal) -> (Result);
+  grant_manage_acl         : (principal) -> (Result);
+  revoke_manage_acl        : (principal) -> (Result);
+  grant_migrate            : (principal) -> (Result);
+  revoke_migrate           : (principal) -> (Result);
+  grant_all_tables_perms   : (principal, TablePerms) -> (Result);
+  revoke_all_tables_perms  : (principal, TablePerms) -> (Result);
+  grant_table_perms        : (principal, text, TablePerms) -> (Result);
+  revoke_table_perms       : (principal, text, TablePerms) -> (Result);
+  remove_identity          : (principal) -> (Result);
+  list_identities          : () -> (Result_Vec_IdentityPerms) query;
+  my_perms                 : () -> (IdentityPerms) query;
 
   // Schema migrations (shared) — see Migration Endpoints below
   has_drift : () -> (Result_bool) query;

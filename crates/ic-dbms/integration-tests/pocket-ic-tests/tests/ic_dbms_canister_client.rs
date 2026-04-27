@@ -7,56 +7,38 @@ use pocket_ic_tests::table::{UserInsertRequest, UserRecord, UserUpdateRequest};
 use pocket_ic_tests::{PocketIcClient, TestCanisterSetup, TestEnvExt as _, admin, bob};
 
 #[pocket_ic_harness::test]
-async fn test_should_add_and_remove_principal_to_acl(env: PocketIcTestEnv<TestCanisterSetup>) {
+async fn test_should_grant_and_revoke_admin(env: PocketIcTestEnv<TestCanisterSetup>) {
+    use ic_dbms_api::prelude::IdentityPerms;
+
     let client = PocketIcClient::new(env.dbms_canister_client_integration(), admin(), &env.pic);
 
-    // Add principal
+    // Grant admin
     let res: Result<IcDbmsResult<()>, String> = client
-        .update(
-            "acl_add_principal",
-            Encode!(&bob()).expect("Failed to encode"),
-        )
+        .update("grant_admin", Encode!(&bob()).expect("Failed to encode"))
         .await
         .expect("Can't update");
 
-    res.expect("Client error")
-        .expect("Failed to add principal to ACL");
+    res.expect("Client error").expect("Failed to grant admin");
 
-    // Verify principal was added
-    let principals: Result<Vec<Principal>, String> = client
-        .update(
-            "acl_allowed_principals",
-            Encode!().expect("Failed to encode"),
-        )
+    // Verify via list_identities
+    let identities: Result<IcDbmsResult<Vec<(Principal, IdentityPerms)>>, String> = client
+        .update("list_identities", Encode!().expect("Failed to encode"))
         .await
         .expect("Can't query");
+    let identities = identities.expect("Client error").expect("list ok");
+    assert!(
+        identities
+            .iter()
+            .any(|(p, perms)| *p == bob() && perms.admin)
+    );
 
-    let principals = principals.expect("Client error");
-    assert!(principals.contains(&bob()));
-
-    // Remove principal
+    // Revoke admin
     let res: Result<IcDbmsResult<()>, String> = client
-        .update(
-            "acl_remove_principal",
-            Encode!(&bob()).expect("Failed to encode"),
-        )
+        .update("revoke_admin", Encode!(&bob()).expect("Failed to encode"))
         .await
         .expect("Can't update");
 
-    res.expect("Client error")
-        .expect("Failed to remove principal from ACL");
-
-    // Verify principal was removed
-    let principals: Result<Vec<Principal>, String> = client
-        .update(
-            "acl_allowed_principals",
-            Encode!().expect("Failed to encode"),
-        )
-        .await
-        .expect("Can't query");
-
-    let principals = principals.expect("Client error");
-    assert!(!principals.contains(&bob()));
+    res.expect("Client error").expect("Failed to revoke admin");
 }
 
 #[pocket_ic_harness::test]

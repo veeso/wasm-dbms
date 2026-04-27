@@ -28,7 +28,10 @@ impl IcDbmsCanisterArgs {
 
 #[derive(Debug, CandidType, Serialize, Deserialize)]
 pub struct IcDbmsCanisterInitArgs {
-    pub allowed_principals: Vec<candid::Principal>,
+    /// Initial admins to bootstrap the granular ACL with full perms
+    /// (`admin` + `manage_acl` + `migrate` + every table perm). When
+    /// `None` or empty, the deployer principal is used.
+    pub allowed_principals: Option<Vec<candid::Principal>>,
 }
 
 #[derive(Debug, CandidType, Serialize, Deserialize)]
@@ -43,10 +46,10 @@ mod tests {
     fn test_unwrap_init_on_init_variant() {
         let principals = vec![candid::Principal::anonymous()];
         let args = IcDbmsCanisterArgs::Init(IcDbmsCanisterInitArgs {
-            allowed_principals: principals.clone(),
+            allowed_principals: Some(principals.clone()),
         });
         let init = args.unwrap_init();
-        assert_eq!(init.allowed_principals, principals);
+        assert_eq!(init.allowed_principals, Some(principals));
     }
 
     #[test]
@@ -66,7 +69,7 @@ mod tests {
     #[should_panic]
     fn test_unwrap_update_on_init_variant_traps() {
         let args = IcDbmsCanisterArgs::Init(IcDbmsCanisterInitArgs {
-            allowed_principals: vec![],
+            allowed_principals: Some(vec![]),
         });
         let _upgrade = args.unwrap_update();
     }
@@ -74,11 +77,20 @@ mod tests {
     #[test]
     fn test_candid_roundtrip_init_args() {
         let args = IcDbmsCanisterArgs::Init(IcDbmsCanisterInitArgs {
-            allowed_principals: vec![candid::Principal::anonymous()],
+            allowed_principals: Some(vec![candid::Principal::anonymous()]),
         });
         let encoded = candid::encode_one(&args).expect("failed to encode");
         let decoded: IcDbmsCanisterArgs = candid::decode_one(&encoded).expect("failed to decode");
         assert!(matches!(decoded, IcDbmsCanisterArgs::Init(_)));
+    }
+
+    #[test]
+    fn test_init_args_default_allowed_is_none() {
+        let args = IcDbmsCanisterArgs::Init(IcDbmsCanisterInitArgs {
+            allowed_principals: None,
+        });
+        let init = args.unwrap_init();
+        assert!(init.allowed_principals.is_none());
     }
 
     #[test]

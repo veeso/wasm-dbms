@@ -17,17 +17,28 @@ pub async fn init_new_agent(ctx: &PocketIcTestEnv<TestCanisterSetup>, add_to_acl
         .await
         .expect("Failed to fetch root key");
 
-    // add agent to ACL if required
+    // grant agent full admin perms if required
     if add_to_acl {
+        use ic_dbms_api::prelude::TablePerms;
         let canister_client = IcDbmsPocketIcClient::new(ctx.dbms_canister(), admin(), &ctx.pic);
         let agent_principal = agent
             .get_principal()
             .expect("failed to get agent's principal");
         canister_client
-            .acl_add_principal(agent_principal)
+            .grant_admin(agent_principal)
             .await
             .expect("failed to call canister")
-            .expect("failed to add principal to ACL");
+            .expect("failed to grant admin");
+        canister_client
+            .grant_manage_acl(agent_principal)
+            .await
+            .expect("failed to call canister")
+            .expect("failed to grant manage_acl");
+        canister_client
+            .grant_all_tables_perms(agent_principal, TablePerms::all())
+            .await
+            .expect("failed to call canister")
+            .expect("failed to grant table perms");
     }
 
     agent

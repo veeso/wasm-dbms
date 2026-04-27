@@ -144,6 +144,9 @@ fn dbms_error_to_wit(e: DbmsError) -> wit::DbmsError {
         DbmsError::Transaction(_) => wit::DbmsError::TransactionNotFound,
         DbmsError::Sanitize(s) => wit::DbmsError::SanitizationError(s),
         DbmsError::Validation(v) => wit::DbmsError::ValidationError(v),
+        DbmsError::AccessDenied { required, .. } => {
+            wit::DbmsError::ValidationError(format!("access denied: {required:?}"))
+        }
     }
 }
 

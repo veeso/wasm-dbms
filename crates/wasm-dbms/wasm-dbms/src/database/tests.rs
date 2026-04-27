@@ -2902,8 +2902,9 @@ mod migration_e2e {
     fn test_acl_operations_bypass_drift_gate() {
         let ctx = setup();
         tamper_snapshot_to_force_drift(&ctx);
-        ctx.acl_add(vec![1, 2, 3]).unwrap();
-        assert!(ctx.acl_is_allowed(&vec![1, 2, 3]));
+        ctx.acl_grant(vec![1, 2, 3], wasm_dbms_api::prelude::PermGrant::Admin)
+            .unwrap();
+        assert!(ctx.granted_admin(&vec![1, 2, 3]));
     }
 
     #[test]
