@@ -27,6 +27,17 @@ pub enum MemoryError {
     /// Error when no index exists for the requested columns.
     #[error("Index not found for columns: {0:?}")]
     IndexNotFound(Vec<String>),
+    /// Error when registering a table whose name hash collides with an
+    /// already-registered table of a different name.
+    #[error(
+        "Name hash collision: table `{candidate}` hashes to the same value as already-registered table `{existing}`"
+    )]
+    NameCollision {
+        /// Name of the table being registered.
+        candidate: String,
+        /// Name of the already-registered table that produced the same hash.
+        existing: String,
+    },
     /// Error when an index entry cannot be located.
     #[error("Entry not found in index")]
     EntryNotFound,

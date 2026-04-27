@@ -10,6 +10,7 @@
   - [Schema Registry](#schema-registry)
   - [ACL Storage](#acl-storage)
   - [Table Registry](#table-registry)
+    - [Schema Snapshot Ledger](#schema-snapshot-ledger)
     - [Page Ledger](#page-ledger)
     - [Free Segments Ledger](#free-segments-ledger)
     - [Autoincrement Ledger](#autoincrement-ledger)
@@ -56,34 +57,38 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 ```txt
 ┌──────────────────────────────────────────────────┐
 │ Page 0: Schema Registry (65 KiB)                 │
-│   - Table fingerprints → Page ledger pages       │
+│   - Table name hashes → table registry pages     │
 ├──────────────────────────────────────────────────┤
 │ Page 1: ACL Table (65 KiB)                       │
 │   - List of allowed principals                   │
 ├──────────────────────────────────────────────────┤
-│ Page 2: Table "users" Page Ledger                │
+│ Page 2: Table "users" Schema Snapshot            │
 ├──────────────────────────────────────────────────┤
-│ Page 3: Table "users" Free Segments Ledger       │
+│ Page 3: Table "users" Page Ledger                │
 ├──────────────────────────────────────────────────┤
-│ Page 4: Table "users" Index Ledger               │
+│ Page 4: Table "users" Free Segments Ledger       │
 ├──────────────────────────────────────────────────┤
-│ Page 5: Table "users" Autoincrement Ledger (*)   │
+│ Page 5: Table "users" Index Ledger               │
 ├──────────────────────────────────────────────────┤
-│ Page 6: Table "posts" Page Ledger                │
+│ Page 6: Table "users" Autoincrement Ledger (*)   │
 ├──────────────────────────────────────────────────┤
-│ Page 7: Table "posts" Free Segments Ledger       │
+│ Page 7: Table "posts" Schema Snapshot            │
 ├──────────────────────────────────────────────────┤
-│ Page 8: Table "posts" Index Ledger               │
+│ Page 8: Table "posts" Page Ledger                │
 ├──────────────────────────────────────────────────┤
-│ Page 9: Table "users" Records - Page 1           │
+│ Page 9: Table "posts" Free Segments Ledger       │
 ├──────────────────────────────────────────────────┤
-│ Page 10: Table "users" Records - Page 2          │
+│ Page 10: Table "posts" Index Ledger              │
 ├──────────────────────────────────────────────────┤
-│ Page 11: B-Tree Node (index on users.id)         │
+│ Page 11: Table "users" Records - Page 1          │
 ├──────────────────────────────────────────────────┤
-│ Page 12: B-Tree Node (index on users.email)      │
+│ Page 12: Table "users" Records - Page 2          │
 ├──────────────────────────────────────────────────┤
-│ Page 13: Table "posts" Records - Page 1          │
+│ Page 13: B-Tree Node (index on users.id)         │
+├──────────────────────────────────────────────────┤
+│ Page 14: B-Tree Node (index on users.email)      │
+├──────────────────────────────────────────────────┤
+│ Page 15: Table "posts" Records - Page 1          │
 ├──────────────────────────────────────────────────┤
 │ ...                                              │
 └──────────────────────────────────────────────────┘
@@ -93,7 +98,7 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 **Layout characteristics:**
 
 - Reserved pages (0-1) are allocated at initialization
-- Each table gets a Page Ledger, Free Segments Ledger, and Index Ledger
+- Each table gets a Schema Snapshot, Page Ledger, Free Segments Ledger, and Index Ledger
 - Tables with `#[autoincrement]` columns also get an Autoincrement Ledger page
 - Record pages and B-tree node pages are allocated on demand
 - Pages can be interleaved between tables
@@ -276,6 +281,7 @@ The Schema Registry maps tables to their storage pages:
 ```rust
 /// Information about a table's storage pages
 pub struct TableRegistryPage {
+    pub schema_snapshot_page: Page,                 // Schema Snapshot Ledger location
     pub pages_list_page: Page,                      // Page Ledger location
     pub free_segments_page: Page,                   // Free Segments Ledger location
     pub index_registry_page: Page,                  // Index Ledger location
@@ -294,9 +300,20 @@ field is `None`, avoiding unnecessary page allocation.
 
 **Table Fingerprint:**
 
-- Unique identifier derived from table schema
-- Used to detect schema changes on upgrade
+- Hash of `TableSchema::table_name()` — stable across rebuilds and schema evolution
+- Used as the key into the schema registry's `HashMap`
 - Enables multiple tables in one canister
+
+**Name collision detection:**
+
+`SchemaRegistry::register_table` is collision-aware. When the fingerprint slot is already
+occupied, the registry loads the persisted [Schema Snapshot](#schema-snapshot-ledger) from
+that table's `schema_snapshot_page` and compares its `name` against the candidate's
+`TableSchema::table_name()`:
+
+- Same name: the entry is the same logical table — return the existing pages, no allocation
+- Different name: two distinct names hashed to the same value — return
+  `MemoryError::NameCollision { candidate, existing }` without allocating any page
 
 ---
 
@@ -340,11 +357,76 @@ Each table has a `TableRegistry` managing its records, plus an optional
 
 ```rust
 pub struct TableRegistry {
-    free_segments_ledger: FreeSegmentsLedger,
+    schema_snapshot_ledger: SchemaSnapshotLedger,
     page_ledger: PageLedger,
+    free_segments_ledger: FreeSegmentsLedger,
     index_ledger: IndexLedger,
+    auto_increment_ledger: Option<AutoincrementLedger>,
 }
 ```
+
+### Schema Snapshot Ledger
+
+The `SchemaSnapshotLedger` persists a single `TableSchemaSnapshot` on the table's
+`schema_snapshot_page`. The snapshot is the frozen, comparable view of the table's
+compile-time schema — name, primary key, alignment, columns, and indexes — used for
+drift detection and migration planning.
+
+```rust
+pub struct SchemaSnapshotLedger {
+    snapshot: TableSchemaSnapshot,  // cached copy of the on-disk snapshot
+}
+
+impl SchemaSnapshotLedger {
+    pub fn init<Schema: TableSchema>(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<()>;
+    pub fn load(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self>;
+    pub fn write(&mut self, page: Page, snapshot: TableSchemaSnapshot, mm: &mut impl MemoryAccess) -> MemoryResult<()>;
+    pub fn get(&self) -> &TableSchemaSnapshot;
+}
+```
+
+**Behavior:**
+
+- `init` is called exactly once per table by `SchemaRegistry::register_table`, capturing
+  the snapshot from `TableSchema::schema_snapshot()` and writing it to the dedicated page
+- `load` decodes the persisted snapshot and caches it in memory
+- `write` replaces the persisted snapshot (used after a successful migration) and updates
+  the cache; on write error the cache is left untouched
+- `get` returns the cached snapshot — no I/O on the hot path
+
+**Serialization format (`TableSchemaSnapshot`):**
+
+```txt
+Offset   Size     Field
+0        1        Snapshot format version (u8, current = 0x01)
+1        1        Table name length (u8)
+2+       N1       UTF-8 table name
++        1        Primary key column name length (u8)
++        N2       UTF-8 primary key column name
++        4        Record alignment (u32, little-endian)
++        2        Column count (u16, little-endian)
++        var      For each column:
+                    - 2 bytes: encoded column size (u16, little-endian)
+                    - var bytes: encoded `ColumnSnapshot`
++        2        Index count (u16, little-endian)
++        var      For each index:
+                    - 2 bytes: encoded index size (u16, little-endian)
+                    - var bytes: encoded `IndexSnapshot`
+```
+
+`ColumnSnapshot` encodes name, data-type tag (with optional payload for `Custom`),
+nullable / auto-increment / unique / primary-key flags, optional foreign key, and
+optional default value. `IndexSnapshot` encodes the covered column names plus the
+unique flag.
+
+**Stability rules:**
+
+- `DataTypeSnapshot` discriminants are frozen — never reordered, never reused
+- New fields append at the tail and bump the container version; old readers stop at
+  the previous length prefix
+- Removed fields leave their slot reserved; later fields do not shift
+
+See [Schema Reference](../reference/schema.md) for the full per-field layout.
 
 ### Page Ledger
 

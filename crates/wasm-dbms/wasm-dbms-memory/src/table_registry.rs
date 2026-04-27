@@ -6,6 +6,7 @@ mod index_ledger;
 mod page_ledger;
 mod raw_record;
 mod record_address;
+mod schema_snapshot_ledger;
 mod table_reader;
 mod write_at;
 
@@ -17,6 +18,7 @@ pub use self::index_ledger::{IndexLedger, IndexTreeWalker};
 use self::page_ledger::PageLedger;
 use self::raw_record::RawRecord;
 pub use self::record_address::RecordAddress;
+pub use self::schema_snapshot_ledger::SchemaSnapshotLedger;
 pub use self::table_reader::{NextRecord, TableReader};
 use self::write_at::WriteAt;
 use crate::{MemoryAccess, TableRegistryPage, align_up};
@@ -30,6 +32,7 @@ use crate::{MemoryAccess, TableRegistryPage, align_up};
 /// but just allow to read/write records from/to memory.
 /// So CRUD checks must be performed by a higher layer, prior to calling these methods.
 pub struct TableRegistry {
+    schema_snapshot_ledger: SchemaSnapshotLedger,
     pub(crate) page_ledger: PageLedger,
     free_segments_ledger: FreeSegmentsLedger,
     index_ledger: IndexLedger,
@@ -40,6 +43,10 @@ impl TableRegistry {
     /// Loads the table registry from memory.
     pub fn load(table_pages: TableRegistryPage, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
+            schema_snapshot_ledger: SchemaSnapshotLedger::load(
+                table_pages.schema_snapshot_page,
+                mm,
+            )?,
             page_ledger: PageLedger::load(table_pages.pages_list_page, mm)?,
             free_segments_ledger: FreeSegmentsLedger::load(table_pages.free_segments_page, mm)?,
             index_ledger: IndexLedger::load(table_pages.index_registry_page, mm)?,
@@ -155,6 +162,16 @@ impl TableRegistry {
     /// Get a mutable reference to the index ledger, allowing to modify the indexes.
     pub fn index_ledger_mut(&mut self) -> &mut IndexLedger {
         &mut self.index_ledger
+    }
+
+    /// Get a reference to the [`SchemaSnapshotLedger`], allowing to read the schema snapshot.
+    pub fn schema_snapshot_ledger(&self) -> &SchemaSnapshotLedger {
+        &self.schema_snapshot_ledger
+    }
+
+    /// Get a mutable reference to the [`SchemaSnapshotLedger`], allowing to modify the schema snapshot.
+    pub fn schema_snapshot_ledger_mut(&mut self) -> &mut SchemaSnapshotLedger {
+        &mut self.schema_snapshot_ledger
     }
 
     /// Get next value for an autoincrement column of the given type, and increment it in the ledger.
@@ -345,11 +362,13 @@ mod tests {
     #[test]
     fn test_should_create_table_registry() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
         let autoincrement_page = mm.allocate_page().expect("failed to get page");
         let table_pages = TableRegistryPage {
+            schema_snapshot_page,
             pages_list_page: page_ledger_page,
             free_segments_page,
             index_registry_page,
@@ -878,11 +897,13 @@ mod tests {
     }
 
     fn registry(mm: &mut MemoryManager<HeapMemoryProvider>) -> TableRegistry {
+        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
         let autoincrement_page = mm.allocate_page().expect("failed to get page");
         let table_pages = TableRegistryPage {
+            schema_snapshot_page,
             pages_list_page: page_ledger_page,
             free_segments_page,
             index_registry_page,
@@ -906,10 +927,12 @@ mod tests {
 
     /// Creates a [`TableRegistry`] without an autoincrement ledger.
     fn registry_without_autoincrement(mm: &mut MemoryManager<HeapMemoryProvider>) -> TableRegistry {
+        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
         let table_pages = TableRegistryPage {
+            schema_snapshot_page,
             pages_list_page: page_ledger_page,
             free_segments_page,
             index_registry_page,
@@ -1126,6 +1149,7 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
 
         // manually set up a Uint8 autoincrement to hit overflow quickly
+        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
@@ -1150,6 +1174,7 @@ mod tests {
         IndexLedger::init(index_registry_page, &[], &mut mm).expect("failed to init index ledger");
 
         let table_pages = TableRegistryPage {
+            schema_snapshot_page,
             pages_list_page: page_ledger_page,
             free_segments_page,
             index_registry_page,

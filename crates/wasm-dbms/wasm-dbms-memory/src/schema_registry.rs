@@ -2,17 +2,20 @@
 
 use std::collections::HashMap;
 
+use wasm_dbms_api::memory::MemoryError;
 use wasm_dbms_api::prelude::{
     DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, Page, PageOffset, TableFingerprint,
     TableSchema,
 };
 
-use crate::table_registry::{AutoincrementLedger, IndexLedger};
+use crate::table_registry::{AutoincrementLedger, IndexLedger, SchemaSnapshotLedger};
 use crate::{MemoryAccess, MemoryManager, MemoryProvider};
 
-/// Data regarding the table registry page.
+/// The dictionary of tables, mapping the table schema fingerprint to the pages where the table data and metadata are stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TableRegistryPage {
+    /// The page where the Schema Snapshot for this table is stored.
+    pub schema_snapshot_page: Page,
     /// The page where the list of pages for this table is stored.
     pub pages_list_page: Page,
     /// The page where the free segments for this table are stored.
@@ -40,7 +43,18 @@ impl SchemaRegistry {
 
     /// Registers a table and allocates it registry page.
     ///
-    /// The [`TableSchema`] type parameter is used to get the [`TableSchema::fingerprint`] of the table schema.
+    /// The [`TableSchema`] type parameter is used to get the [`TableSchema::fingerprint`] of the
+    /// table schema. The fingerprint is derived from the table name, so two distinct names that
+    /// hash to the same value are detected eagerly: when the slot is already occupied by a table
+    /// with a different name, [`MemoryError::NameCollision`] is returned and no allocation is
+    /// performed.
+    ///
+    /// # Errors
+    ///
+    /// - [`MemoryError::NameCollision`] when the fingerprint slot is occupied by a table whose
+    ///   persisted snapshot carries a different name.
+    /// - Any [`MemoryError`] propagated from page allocation, snapshot init, or the registry
+    ///   write-back.
     pub fn register_table<TS>(
         &mut self,
         mm: &mut MemoryManager<impl MemoryProvider>,
@@ -48,13 +62,22 @@ impl SchemaRegistry {
     where
         TS: TableSchema,
     {
-        // check if already registered
+        // check if already registered, and detect name-hash collisions eagerly
         let fingerprint = TS::fingerprint();
-        if let Some(pages) = self.tables.get(&fingerprint) {
-            return Ok(*pages);
+        let candidate_name = TS::table_name();
+        if let Some(pages) = self.tables.get(&fingerprint).copied() {
+            let existing = SchemaSnapshotLedger::load(pages.schema_snapshot_page, mm)?;
+            if existing.get().name != candidate_name {
+                return Err(MemoryError::NameCollision {
+                    candidate: candidate_name.to_string(),
+                    existing: existing.get().name.clone(),
+                });
+            }
+            return Ok(pages);
         }
 
         // allocate table registry page
+        let schema_snapshot_page = mm.allocate_page()?;
         let pages_list_page = mm.allocate_page()?;
         let free_segments_page = mm.allocate_page()?;
         let index_registry_page = mm.allocate_page()?;
@@ -68,6 +91,7 @@ impl SchemaRegistry {
 
         // insert into tables map
         let pages = TableRegistryPage {
+            schema_snapshot_page,
             pages_list_page,
             free_segments_page,
             index_registry_page,
@@ -80,6 +104,8 @@ impl SchemaRegistry {
         // write self to schema page
         mm.write_at(page, 0, self)?;
 
+        // init snapshot ledger for this table
+        SchemaSnapshotLedger::init::<TS>(pages.schema_snapshot_page, mm)?;
         // init index ledger for this table
         IndexLedger::init(pages.index_registry_page, TS::indexes(), mm)?;
         // init autoincrement ledger for this table if needed
@@ -118,6 +144,7 @@ impl Encode for SchemaRegistry {
         // write each entry
         for (fingerprint, page) in &self.tables {
             buffer.extend_from_slice(&fingerprint.to_le_bytes());
+            buffer.extend_from_slice(&page.schema_snapshot_page.to_le_bytes());
             buffer.extend_from_slice(&page.pages_list_page.to_le_bytes());
             buffer.extend_from_slice(&page.free_segments_page.to_le_bytes());
             buffer.extend_from_slice(&page.index_registry_page.to_le_bytes());
@@ -149,9 +176,11 @@ impl Encode for SchemaRegistry {
         for _ in 0..len {
             let fingerprint = u64::from_le_bytes(data[offset..offset + 8].try_into()?);
             offset += 8;
+            let schema_snapshot_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
+            offset += 4;
             let pages_list_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
             offset += 4;
-            let deleted_records_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
+            let free_segments_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
             offset += 4;
             let index_registry_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
             offset += 4;
@@ -167,8 +196,9 @@ impl Encode for SchemaRegistry {
             tables.insert(
                 fingerprint,
                 TableRegistryPage {
+                    schema_snapshot_page,
                     pages_list_page,
-                    free_segments_page: deleted_records_page,
+                    free_segments_page,
                     index_registry_page,
                     autoincrement_registry_page,
                 },
@@ -181,6 +211,7 @@ impl Encode for SchemaRegistry {
         // - 8 bytes for `self.tables.len()`
         // - for each entry:
         //  - 8 bytes for the fingerprint
+        //  - 4 bytes for the schema_snapshot_page
         //  - 4 bytes for the pages_list_page
         //  - 4 bytes for the free_segments_page
         //  - 4 bytes for the index_registry_page
@@ -192,7 +223,7 @@ impl Encode for SchemaRegistry {
             .filter(|page| page.autoincrement_registry_page.is_some())
             .count() as MSize;
 
-        8 + (self.tables.len() as MSize * (4 * 3 + 8 + 1)) + (autoinc_pages * 4)
+        8 + (self.tables.len() as MSize * (4 * 4 + 8 + 1)) + (autoinc_pages * 4)
     }
 }
 
@@ -264,6 +295,51 @@ mod tests {
                 .expect("failed to get second table registry page after reload"),
             another_registry_page
         );
+    }
+
+    #[test]
+    fn test_register_table_writes_snapshot_to_ledger() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+
+        let pages = registry
+            .register_table::<User>(&mut mm)
+            .expect("failed to register table");
+
+        let ledger = SchemaSnapshotLedger::load(pages.schema_snapshot_page, &mut mm)
+            .expect("failed to load snapshot ledger after register_table");
+
+        assert_eq!(ledger.get(), &User::schema_snapshot());
+        assert_eq!(ledger.get().name, "users");
+    }
+
+    #[test]
+    fn test_register_table_returns_name_collision_when_hash_slot_belongs_to_another_name() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+
+        // register `User` so its snapshot lives on disk
+        let pages = registry
+            .register_table::<User>(&mut mm)
+            .expect("failed to register user");
+
+        // simulate a hash collision by rewriting the persisted snapshot to carry a different name
+        let mut tampered = User::schema_snapshot();
+        tampered.name = "imposter".to_string();
+        mm.write_at(pages.schema_snapshot_page, 0, &tampered)
+            .expect("failed to overwrite snapshot");
+
+        let result = registry.register_table::<User>(&mut mm);
+        match result {
+            Err(MemoryError::NameCollision {
+                candidate,
+                existing,
+            }) => {
+                assert_eq!(candidate, "users");
+                assert_eq!(existing, "imposter");
+            }
+            other => panic!("expected NameCollision, got {other:?}"),
+        }
     }
 
     #[test]
@@ -606,9 +682,9 @@ mod tests {
         registry
             .register_table::<User>(&mut mm)
             .expect("failed to register");
-        // One entry without autoincrement: 8 + (8 + 4 + 4 + 4 + 1) = 29
+        // One entry without autoincrement: 8 + (8 + 4 + 4 + 4 + 4 + 1) = 33
         // (1 byte for autoincrement flag, no page bytes since User has no autoincrement column)
-        assert_eq!(registry.size(), 29);
+        assert_eq!(registry.size(), 33);
     }
 
     #[test]
@@ -649,9 +725,9 @@ mod tests {
         registry
             .register_table::<AutoincrementTable>(&mut mm)
             .expect("failed to register");
-        // One entry with autoincrement: 8 + (8 + 4 + 4 + 4 + 1 + 4) = 33
+        // One entry with autoincrement: 8 + (8 + 4 + 4 + 4 + 4 + 1 + 4) = 37
         // (1 byte for autoincrement flag + 4 bytes for the autoincrement page)
-        assert_eq!(registry.size(), 33);
+        assert_eq!(registry.size(), 37);
     }
 
     #[test]

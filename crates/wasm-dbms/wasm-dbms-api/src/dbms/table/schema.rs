@@ -145,9 +145,14 @@ where
     }
 
     /// Returns the fingerprint of the table schema.
+    ///
+    /// The fingerprint is computed as a hash of [`Self::table_name`] so that the same table keeps
+    /// the same identity across rebuilds (where [`std::any::TypeId`] is not stable) and across
+    /// schema evolution. Two distinct types declaring the same `table_name` are intentionally
+    /// considered the same logical table.
     fn fingerprint() -> TableFingerprint {
         let mut hasher = std::hash::DefaultHasher::new();
-        std::any::TypeId::of::<Self>().hash(&mut hasher);
+        Self::table_name().hash(&mut hasher);
         hasher.finish()
     }
 }

@@ -339,11 +339,13 @@ mod tests {
         entries: u32,
         mm: &mut MemoryManager<HeapMemoryProvider>,
     ) -> TableRegistry {
+        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
         let mut registry = TableRegistry::load(
             TableRegistryPage {
+                schema_snapshot_page,
                 pages_list_page: page_ledger_page,
                 free_segments_page,
                 index_registry_page,
