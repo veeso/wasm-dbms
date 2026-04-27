@@ -106,14 +106,14 @@ wasm-dbms provides powerful JSON filtering through the `JsonFilter` enum:
 
 Paths use dot notation with bracket array indices:
 
-| Path | Meaning |
-|------|---------|
-| `"name"` | Root-level field `name` |
-| `"user.name"` | Nested field at `user.name` |
-| `"items[0]"` | First element of `items` array |
-| `"users[0].name"` | `name` field of first user |
-| `"data[0][1]"` | Nested array access |
-| `"[0]"` | First element of root array |
+| Path              | Meaning                        |
+| ----------------- | ------------------------------ |
+| `"name"`          | Root-level field `name`        |
+| `"user.name"`     | Nested field at `user.name`    |
+| `"items[0]"`      | First element of `items` array |
+| `"users[0].name"` | `name` field of first user     |
+| `"data[0][1]"`    | Nested array access            |
+| `"[0]"`           | First element of root array    |
 
 **Path examples:**
 
@@ -151,14 +151,14 @@ let filter = Filter::json("metadata", JsonFilter::contains(pattern));
 
 **Containment behavior:**
 
-| Target | Pattern | Result |
-|--------|---------|--------|
-| `{"a": 1, "b": 2}` | `{"a": 1}` | Match |
-| `{"a": 1}` | `{"a": 1, "b": 2}` | No match |
-| `{"user": {"name": "Alice", "age": 30}}` | `{"user": {"name": "Alice"}}` | Match |
-| `[1, 2, 3]` | `[3, 1]` | Match (order-independent) |
-| `[1, 2]` | `[1, 2, 3]` | No match |
-| `{"tags": ["a", "b", "c"]}` | `{"tags": ["b"]}` | Match |
+| Target                                   | Pattern                       | Result                    |
+| ---------------------------------------- | ----------------------------- | ------------------------- |
+| `{"a": 1, "b": 2}`                       | `{"a": 1}`                    | Match                     |
+| `{"a": 1}`                               | `{"a": 1, "b": 2}`            | No match                  |
+| `{"user": {"name": "Alice", "age": 30}}` | `{"user": {"name": "Alice"}}` | Match                     |
+| `[1, 2, 3]`                              | `[3, 1]`                      | Match (order-independent) |
+| `[1, 2]`                                 | `[1, 2, 3]`                   | No match                  |
+| `{"tags": ["a", "b", "c"]}`              | `{"tags": ["b"]}`             | Match                     |
 
 **Use cases:**
 - Check if user has specific role: `contains({"role": "admin"})`
@@ -201,17 +201,17 @@ let filter = Filter::json("metadata",
 
 **Available comparison methods:**
 
-| Method | Description |
-|--------|-------------|
-| `extract_eq(path, value)` | Equal |
-| `extract_ne(path, value)` | Not equal |
-| `extract_gt(path, value)` | Greater than |
-| `extract_lt(path, value)` | Less than |
-| `extract_ge(path, value)` | Greater than or equal |
-| `extract_le(path, value)` | Less than or equal |
-| `extract_in(path, values)` | Value in list |
-| `extract_is_null(path)` | Path doesn't exist or is null |
-| `extract_not_null(path)` | Path exists and is not null |
+| Method                     | Description                   |
+| -------------------------- | ----------------------------- |
+| `extract_eq(path, value)`  | Equal                         |
+| `extract_ne(path, value)`  | Not equal                     |
+| `extract_gt(path, value)`  | Greater than                  |
+| `extract_lt(path, value)`  | Less than                     |
+| `extract_ge(path, value)`  | Greater than or equal         |
+| `extract_le(path, value)`  | Less than or equal            |
+| `extract_in(path, values)` | Value in list                 |
+| `extract_is_null(path)`    | Path doesn't exist or is null |
+| `extract_not_null(path)`   | Path exists and is not null   |
 
 ### HasKey (Path Existence)
 
@@ -260,15 +260,15 @@ let filter = Filter::json("metadata", JsonFilter::has_key("deleted_at")).not();
 
 When extracting JSON values, they're converted to DBMS types:
 
-| JSON Type | DBMS Value |
-|-----------|------------|
-| `null` | `Value::Null` |
+| JSON Type      | DBMS Value       |
+| -------------- | ---------------- |
+| `null`         | `Value::Null`    |
 | `true`/`false` | `Value::Boolean` |
-| Integer number | `Value::Int64` |
-| Float number | `Value::Decimal` |
-| String | `Value::Text` |
-| Array | `Value::Json` |
-| Object | `Value::Json` |
+| Integer number | `Value::Int64`   |
+| Float number   | `Value::Decimal` |
+| String         | `Value::Text`    |
+| Array          | `Value::Json`    |
+| Object         | `Value::Json`    |
 
 **Comparison examples:**
 

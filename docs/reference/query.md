@@ -71,21 +71,21 @@ Use `Query::builder()` to obtain a `QueryBuilder`.
 
 ### Field Selection
 
-| Method          | Effect                                 |
-|-----------------|----------------------------------------|
-| `.all()`        | Selects all columns (`Select::All`)    |
-| `.field(name)`  | Adds a single column to the selection  |
-| `.fields(iter)` | Adds multiple columns                  |
+| Method          | Effect                                |
+| --------------- | ------------------------------------- |
+| `.all()`        | Selects all columns (`Select::All`)   |
+| `.field(name)`  | Adds a single column to the selection |
+| `.fields(iter)` | Adds multiple columns                 |
 
 The primary key is always included by `Database::select::<T>` even when not explicitly listed.
 
 ### Filters
 
-| Method                    | Effect                                     |
-|---------------------------|--------------------------------------------|
-| `.filter(Option<Filter>)` | Replaces the current filter                |
-| `.and_where(Filter)`      | Combines with existing filter using `AND`  |
-| `.or_where(Filter)`       | Combines with existing filter using `OR`   |
+| Method                    | Effect                                    |
+| ------------------------- | ----------------------------------------- |
+| `.filter(Option<Filter>)` | Replaces the current filter               |
+| `.and_where(Filter)`      | Combines with existing filter using `AND` |
+| `.or_where(Filter)`       | Combines with existing filter using `OR`  |
 
 See [Filters in the Querying Guide](../guides/querying.md#filters) and
 [JSON Filters](./json.md) for the full filter API.
@@ -93,7 +93,7 @@ See [Filters in the Querying Guide](../guides/querying.md#filters) and
 ### Joins
 
 | Method                                    | Join type |
-|-------------------------------------------|-----------|
+| ----------------------------------------- | --------- |
 | `.inner_join(table, left_col, right_col)` | INNER     |
 | `.left_join(table, left_col, right_col)`  | LEFT      |
 | `.right_join(table, left_col, right_col)` | RIGHT     |
@@ -156,7 +156,7 @@ and aggregate results.
 ### Ordering
 
 | Method                   | Effect                              |
-|--------------------------|-------------------------------------|
+| ------------------------ | ----------------------------------- |
 | `.order_by_asc(column)`  | Appends ascending sort by `column`  |
 | `.order_by_desc(column)` | Appends descending sort by `column` |
 
@@ -166,7 +166,7 @@ ties from earlier keys.
 ### Pagination
 
 | Method           | Effect                              |
-|------------------|-------------------------------------|
+| ---------------- | ----------------------------------- |
 | `.limit(usize)`  | Caps the number of records returned |
 | `.offset(usize)` | Skips the first N records           |
 
@@ -192,14 +192,14 @@ pub enum AggregateFunction {
 
 Describes one aggregate function to compute over a group of rows.
 
-| Variant         | SQL equivalent  | Notes                                                                         |
-| --------------- | --------------- | ----------------------------------------------------------------------------- |
-| `Count(None)`   | `COUNT(*)`      | Counts every row in the group                                                 |
-| `Count(Some(c))`| `COUNT(c)`      | Counts non-null values of column `c`                                          |
-| `Sum(c)`        | `SUM(c)`        | Sum of `c` across the group                                                   |
-| `Avg(c)`        | `AVG(c)`        | Arithmetic mean of `c`                                                        |
-| `Min(c)`        | `MIN(c)`        | Minimum value of `c`                                                          |
-| `Max(c)`        | `MAX(c)`        | Maximum value of `c`                                                          |
+| Variant          | SQL equivalent | Notes                                |
+| ---------------- | -------------- | ------------------------------------ |
+| `Count(None)`    | `COUNT(*)`     | Counts every row in the group        |
+| `Count(Some(c))` | `COUNT(c)`     | Counts non-null values of column `c` |
+| `Sum(c)`         | `SUM(c)`       | Sum of `c` across the group          |
+| `Avg(c)`         | `AVG(c)`       | Arithmetic mean of `c`               |
+| `Min(c)`         | `MIN(c)`       | Minimum value of `c`                 |
+| `Max(c)`         | `MAX(c)`       | Maximum value of `c`                 |
 
 ### `AggregatedRow`
 
@@ -265,24 +265,24 @@ planning time (before any rows are scanned) so callers fail fast.
 
 ### Aggregate-specific (`Database::aggregate`)
 
-| Condition                                       | Variant                                  |
-| ----------------------------------------------- | ---------------------------------------- |
-| `SUM` or `AVG` references a non-numeric column  | `InvalidQuery("aggregate requires numeric column: '<col>'")` |
-| Aggregate references a column not on the table  | `UnknownColumn(<col>)`                   |
-| `GROUP BY` references a column not on the table | `UnknownColumn(<col>)`                   |
+| Condition                                       | Variant                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `SUM` or `AVG` references a non-numeric column  | `InvalidQuery("aggregate requires numeric column: '<col>'")`             |
+| Aggregate references a column not on the table  | `UnknownColumn(<col>)`                                                   |
+| `GROUP BY` references a column not on the table | `UnknownColumn(<col>)`                                                   |
 | `HAVING` references unknown column or `agg{N}`  | `InvalidQuery("HAVING references unknown column or aggregate: '<col>'")` |
-| `ORDER BY` references unknown `agg{N}`          | `InvalidQuery("ORDER BY references unknown aggregate output: '<col>'")` |
-| `LIKE` used inside a `HAVING` clause            | `InvalidQuery("LIKE is not supported in HAVING")` |
-| `JSON` filter used inside a `HAVING` clause     | `InvalidQuery("JSON filters are not supported in HAVING")` |
-| Query carries `joins` on an aggregate call      | `InvalidQuery("joins are not supported in aggregate queries")` |
+| `ORDER BY` references unknown `agg{N}`          | `InvalidQuery("ORDER BY references unknown aggregate output: '<col>'")`  |
+| `LIKE` used inside a `HAVING` clause            | `InvalidQuery("LIKE is not supported in HAVING")`                        |
+| `JSON` filter used inside a `HAVING` clause     | `InvalidQuery("JSON filters are not supported in HAVING")`               |
+| Query carries `joins` on an aggregate call      | `InvalidQuery("joins are not supported in aggregate queries")`           |
 | Query carries `eager_relations` on an aggregate | `InvalidQuery("eager relations are not supported in aggregate queries")` |
 
 ### Non-aggregate select paths
 
-| Condition                                               | Variant                       |
-| ------------------------------------------------------- | ----------------------------- |
+| Condition                                                             | Variant                                               |
+| --------------------------------------------------------------------- | ----------------------------------------------------- |
 | `group_by` or `having` set on `select` / `select_raw` / `select_join` | `AggregateClauseInSelect` (use `Database::aggregate`) |
-| Query carries `joins` on a typed `select::<T>` call     | `JoinInsideTypedSelect`       |
+| Query carries `joins` on a typed `select::<T>` call                   | `JoinInsideTypedSelect`                               |
 
 ---
 

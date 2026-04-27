@@ -106,6 +106,149 @@ interface types {
 
     type transaction-id = u64;
 
+    // ── Schema migrations ───────────────────────────────────────────────
+    //
+    // Mirrors `wasm_dbms_api::dbms::migration` and the snapshot types in
+    // `wasm_dbms_api::dbms::table::schema::snapshot`. Used by the
+    // `has-drift`, `pending-migrations`, and `migrate` entry points.
+
+    /// Stable, tag-keyed encoding of a column data type. Discriminants are
+    /// part of the on-disk format and must not be reused or reordered.
+    variant data-type-snapshot {
+        int8,
+        int16,
+        int32,
+        int64,
+        uint8,
+        uint16,
+        uint32,
+        uint64,
+        float32,
+        float64,
+        decimal,
+        boolean,
+        date,
+        datetime,
+        blob,
+        text,
+        uuid,
+        json,
+        custom(string),
+    }
+
+    /// `ON DELETE` referential action.
+    enum on-delete-snapshot { restrict, cascade }
+
+    /// Foreign-key reference attached to a column.
+    record foreign-key-snapshot {
+        table: string,
+        column: string,
+        on-delete: on-delete-snapshot,
+    }
+
+    /// Snapshot of a single column definition.
+    record column-snapshot {
+        name: string,
+        data-type: data-type-snapshot,
+        nullable: bool,
+        auto-increment: bool,
+        unique: bool,
+        primary-key: bool,
+        foreign-key: option<foreign-key-snapshot>,
+        default: option<value>,
+    }
+
+    /// Snapshot of a secondary index.
+    record index-snapshot {
+        columns: list<string>,
+        unique: bool,
+    }
+
+    /// Snapshot of a complete table schema.
+    record table-schema-snapshot {
+        version: u8,
+        name: string,
+        primary-key: string,
+        alignment: u32,
+        columns: list<column-snapshot>,
+        indexes: list<index-snapshot>,
+    }
+
+    /// Foreign-key delta inside `column-changes`. Mirrors the inner
+    /// `Option<ForeignKeySnapshot>` of `ColumnChanges::foreign_key`:
+    /// `none` = no change, `some(drop)` = drop, `some(set(fk))` = add/replace.
+    variant foreign-key-change {
+        drop,
+        set(foreign-key-snapshot),
+    }
+
+    /// Constraint-flag deltas for `migration-op::alter-column`.
+    record column-changes {
+        nullable: option<bool>,
+        unique: option<bool>,
+        auto-increment: option<bool>,
+        primary-key: option<bool>,
+        foreign-key: option<foreign-key-change>,
+    }
+
+    /// Single atomic migration step produced by the planner.
+    variant migration-op {
+        create-table(create-table-op),
+        drop-table(string),
+        add-column(add-column-op),
+        drop-column(drop-column-op),
+        rename-column(rename-column-op),
+        alter-column(alter-column-op),
+        widen-column(type-change-op),
+        transform-column(type-change-op),
+        add-index(index-op),
+        drop-index(index-op),
+    }
+
+    record create-table-op {
+        name: string,
+        schema: table-schema-snapshot,
+    }
+
+    record add-column-op {
+        table: string,
+        column: column-snapshot,
+    }
+
+    record drop-column-op {
+        table: string,
+        column: string,
+    }
+
+    record rename-column-op {
+        table: string,
+        old: string,
+        new: string,
+    }
+
+    record alter-column-op {
+        table: string,
+        column: string,
+        changes: column-changes,
+    }
+
+    record type-change-op {
+        table: string,
+        column: string,
+        old-type: data-type-snapshot,
+        new-type: data-type-snapshot,
+    }
+
+    record index-op {
+        table: string,
+        index: index-snapshot,
+    }
+
+    /// Caller policy gating destructive ops.
+    record migration-policy {
+        allow-destructive: bool,
+    }
+
     /// Mirrors `wasm_dbms_api::DbmsError` and its inner variants. Detailed
     /// messages preserve the source `QueryError` / `TableError` string for
     /// host-side diagnostics.
@@ -156,6 +299,8 @@ interface database {
         delete-behavior,
         aggregate-function,
         aggregated-row,
+        migration-op,
+        migration-policy,
     };
 
     /// Runs a `SELECT` against `table`, returning raw rows.
@@ -194,6 +339,20 @@ interface database {
     begin-transaction: func() -> result<transaction-id, dbms-error>;
     commit: func(tx: transaction-id) -> result<_, dbms-error>;
     rollback: func(tx: transaction-id) -> result<_, dbms-error>;
+
+    /// Returns `true` iff the compiled schema differs from the snapshots
+    /// persisted in stable memory. Cached on the DBMS context after the
+    /// first call.
+    has-drift: func() -> result<bool, dbms-error>;
+
+    /// Returns the migration ops needed to bring the on-disk schema in line
+    /// with the compiled schema. Does not apply anything.
+    pending-migrations: func() -> result<list<migration-op>, dbms-error>;
+
+    /// Plans, validates, sorts, and applies the diff atomically. On success
+    /// the drift flag is cleared; on failure the journal rolls back and the
+    /// flag stays set.
+    migrate: func(policy: migration-policy) -> result<_, dbms-error>;
 }
 
 world dbms {

@@ -18,6 +18,7 @@
     - [Delete](#delete)
     - [Transactions](#transactions)
     - [ACL Management](#acl-management)
+    - [Schema Migrations](#schema-migrations)
   - [Error Handling](#error-handling)
   - [Examples](#examples)
     - [Inter-Canister Communication](#inter-canister-communication)
@@ -163,6 +164,11 @@ pub trait Client {
     async fn acl_add_principal(&self, principal: Principal) -> Result<Result<(), IcDbmsError>>;
     async fn acl_remove_principal(&self, principal: Principal) -> Result<Result<(), IcDbmsError>>;
     async fn acl_allowed_principals(&self) -> Result<Vec<Principal>>;
+
+    // Schema Migrations
+    async fn has_drift(&self) -> Result<Result<bool, IcDbmsError>>;
+    async fn pending_migrations(&self) -> Result<Result<Vec<MigrationOp>, IcDbmsError>>;
+    async fn migrate(&self, policy: MigrationPolicy) -> Result<Result<(), IcDbmsError>>;
 }
 ```
 
@@ -312,6 +318,39 @@ match some_condition {
     false => client.rollback(tx_id).await??,
 }
 ```
+
+### Schema Migrations
+
+Three admin-gated methods inspect and apply schema drift. The Candid
+endpoints behind them (`has_drift` query, `pending_migrations` query, `migrate`
+update) are emitted by `#[derive(DbmsCanister)]`. See the
+[IC migrations guide](./migrations.md) for the upgrade workflow.
+
+```rust
+use ic_dbms_api::prelude::{MigrationOp, MigrationPolicy};
+
+// O(1) once cached on the canister side. True iff a migration is needed.
+let drift: bool = client.has_drift().await??;
+if !drift {
+    return Ok(());
+}
+
+// Plan without applying. Always recomputes; safe to call during drift.
+let plan: Vec<MigrationOp> = client.pending_migrations().await??;
+for op in &plan {
+    eprintln!("  {op:?}");
+}
+
+// Apply. Refuses DropTable / DropColumn unless allow_destructive is set.
+client.migrate(MigrationPolicy::default()).await??;
+
+// Equivalent to:
+client
+    .migrate(MigrationPolicy { allow_destructive: false })
+    .await??;
+```
+
+`migrate` is idempotent — when there is no drift, the call is a cheap no-op.
 
 ### ACL Management
 

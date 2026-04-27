@@ -33,15 +33,15 @@
 
 wasm-dbms uses a structured error system to provide clear information about what went wrong. Errors are categorized by their source:
 
-| Category | Description |
-| -------- | ----------- |
-| Query | Database operation errors (constraints, missing data) |
-| Transaction | Transaction state errors |
-| Validation | Data validation failures |
-| Sanitization | Data sanitization failures |
-| Memory | Low-level memory errors |
-| Migration | Schema migration / drift detection errors |
-| Table | Schema/table definition errors |
+| Category     | Description                                           |
+| ------------ | ----------------------------------------------------- |
+| Query        | Database operation errors (constraints, missing data) |
+| Transaction  | Transaction state errors                              |
+| Validation   | Data validation failures                              |
+| Sanitization | Data sanitization failures                            |
+| Memory       | Low-level memory errors                               |
+| Migration    | Schema migration / drift detection errors             |
+| Table        | Schema/table definition errors                        |
 
 ---
 

@@ -235,12 +235,12 @@ All three writes live in the same journal session as the data rewrites, so parti
 
 Auto-applied without user code. The framework rewrites records in place.
 
-| From → To             | Semantics              |
-| --------------------- | ---------------------- |
-| `IntN` → `IntM`, M > N | sign-extend            |
-| `UintN` → `UintM`, M > N | zero-extend          |
-| `UintN` → `IntM`, M > N | zero-extend into signed |
-| `Float32` → `Float64` | widen                  |
+| From → To                | Semantics               |
+| ------------------------ | ----------------------- |
+| `IntN` → `IntM`, M > N   | sign-extend             |
+| `UintN` → `UintM`, M > N | zero-extend             |
+| `UintN` → `IntM`, M > N  | zero-extend into signed |
+| `Float32` → `Float64`    | widen                   |
 
 Everything else (narrowing, sign flips, int↔float, int↔text, etc.) falls through to `TransformColumn` or errors with `MigrationError::IncompatibleType`.
 
@@ -345,14 +345,14 @@ dbms.migrate(MigrationPolicy { allow_destructive: true })?;
 
 `DbmsError::Migration(MigrationError)` covers the full migration pipeline:
 
-| Variant                | When                                                                                    |
-| ---------------------- | --------------------------------------------------------------------------------------- |
-| `SchemaDrift`          | CRUD called while `drift == true`. Call `migrate(policy)` first.                        |
-| `IncompatibleType`     | Type change is neither in the widening whitelist nor handled by `transform_column`.     |
-| `MissingDefault`       | `AddColumn` on a non-nullable column without `#[default]` or `default_value` override.  |
-| `ConstraintViolation`  | Tightening op found data that violates the new constraint.                              |
-| `DestructiveOpDenied`  | Planner emitted `DropTable` / `DropColumn` while `allow_destructive` is `false`.        |
-| `TransformAborted`     | User `transform_column` impl returned `Err`.                                            |
+| Variant               | When                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `SchemaDrift`         | CRUD called while `drift == true`. Call `migrate(policy)` first.                       |
+| `IncompatibleType`    | Type change is neither in the widening whitelist nor handled by `transform_column`.    |
+| `MissingDefault`      | `AddColumn` on a non-nullable column without `#[default]` or `default_value` override. |
+| `ConstraintViolation` | Tightening op found data that violates the new constraint.                             |
+| `DestructiveOpDenied` | Planner emitted `DropTable` / `DropColumn` while `allow_destructive` is `false`.       |
+| `TransformAborted`    | User `transform_column` impl returned `Err`.                                           |
 
 See the [Migration Errors section in the errors reference](./errors.md#migration-errors) for matching examples and remediation.
 

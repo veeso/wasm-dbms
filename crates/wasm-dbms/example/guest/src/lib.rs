@@ -357,6 +357,158 @@ fn intern_str(s: &str) -> &'static str {
     })
 }
 
+// ── Migration conversion ────────────────────────────────────────────
+
+fn data_type_to_wit(t: DataTypeSnapshot) -> wit::DataTypeSnapshot {
+    match t {
+        DataTypeSnapshot::Int8 => wit::DataTypeSnapshot::Int8,
+        DataTypeSnapshot::Int16 => wit::DataTypeSnapshot::Int16,
+        DataTypeSnapshot::Int32 => wit::DataTypeSnapshot::Int32,
+        DataTypeSnapshot::Int64 => wit::DataTypeSnapshot::Int64,
+        DataTypeSnapshot::Uint8 => wit::DataTypeSnapshot::Uint8,
+        DataTypeSnapshot::Uint16 => wit::DataTypeSnapshot::Uint16,
+        DataTypeSnapshot::Uint32 => wit::DataTypeSnapshot::Uint32,
+        DataTypeSnapshot::Uint64 => wit::DataTypeSnapshot::Uint64,
+        DataTypeSnapshot::Float32 => wit::DataTypeSnapshot::Float32,
+        DataTypeSnapshot::Float64 => wit::DataTypeSnapshot::Float64,
+        DataTypeSnapshot::Decimal => wit::DataTypeSnapshot::Decimal,
+        DataTypeSnapshot::Boolean => wit::DataTypeSnapshot::Boolean,
+        DataTypeSnapshot::Date => wit::DataTypeSnapshot::Date,
+        DataTypeSnapshot::Datetime => wit::DataTypeSnapshot::Datetime,
+        DataTypeSnapshot::Blob => wit::DataTypeSnapshot::Blob,
+        DataTypeSnapshot::Text => wit::DataTypeSnapshot::Text,
+        DataTypeSnapshot::Uuid => wit::DataTypeSnapshot::Uuid,
+        DataTypeSnapshot::Json => wit::DataTypeSnapshot::Json,
+        DataTypeSnapshot::Custom(name) => wit::DataTypeSnapshot::Custom(name),
+    }
+}
+
+fn on_delete_to_wit(d: OnDeleteSnapshot) -> wit::OnDeleteSnapshot {
+    match d {
+        OnDeleteSnapshot::Restrict => wit::OnDeleteSnapshot::Restrict,
+        OnDeleteSnapshot::Cascade => wit::OnDeleteSnapshot::Cascade,
+    }
+}
+
+fn fk_snapshot_to_wit(fk: ForeignKeySnapshot) -> wit::ForeignKeySnapshot {
+    wit::ForeignKeySnapshot {
+        table: fk.table,
+        column: fk.column,
+        on_delete: on_delete_to_wit(fk.on_delete),
+    }
+}
+
+fn column_snapshot_to_wit(c: ColumnSnapshot) -> wit::ColumnSnapshot {
+    wit::ColumnSnapshot {
+        name: c.name,
+        data_type: data_type_to_wit(c.data_type),
+        nullable: c.nullable,
+        auto_increment: c.auto_increment,
+        unique: c.unique,
+        primary_key: c.primary_key,
+        foreign_key: c.foreign_key.map(fk_snapshot_to_wit),
+        default: c.default.map(dbms_value_to_wit),
+    }
+}
+
+fn index_snapshot_to_wit(i: IndexSnapshot) -> wit::IndexSnapshot {
+    wit::IndexSnapshot {
+        columns: i.columns,
+        unique: i.unique,
+    }
+}
+
+fn table_snapshot_to_wit(s: TableSchemaSnapshot) -> wit::TableSchemaSnapshot {
+    wit::TableSchemaSnapshot {
+        version: s.version,
+        name: s.name,
+        primary_key: s.primary_key,
+        alignment: s.alignment,
+        columns: s.columns.into_iter().map(column_snapshot_to_wit).collect(),
+        indexes: s.indexes.into_iter().map(index_snapshot_to_wit).collect(),
+    }
+}
+
+fn column_changes_to_wit(c: ColumnChanges) -> wit::ColumnChanges {
+    wit::ColumnChanges {
+        nullable: c.nullable,
+        unique: c.unique,
+        auto_increment: c.auto_increment,
+        primary_key: c.primary_key,
+        foreign_key: c.foreign_key.map(|fk| match fk {
+            None => wit::ForeignKeyChange::Drop,
+            Some(fk) => wit::ForeignKeyChange::Set(fk_snapshot_to_wit(fk)),
+        }),
+    }
+}
+
+fn migration_op_to_wit(op: MigrationOp) -> wit::MigrationOp {
+    match op {
+        MigrationOp::CreateTable { name, schema } => {
+            wit::MigrationOp::CreateTable(wit::CreateTableOp {
+                name,
+                schema: table_snapshot_to_wit(schema),
+            })
+        }
+        MigrationOp::DropTable { name } => wit::MigrationOp::DropTable(name),
+        MigrationOp::AddColumn { table, column } => wit::MigrationOp::AddColumn(wit::AddColumnOp {
+            table,
+            column: column_snapshot_to_wit(column),
+        }),
+        MigrationOp::DropColumn { table, column } => {
+            wit::MigrationOp::DropColumn(wit::DropColumnOp { table, column })
+        }
+        MigrationOp::RenameColumn { table, old, new } => {
+            wit::MigrationOp::RenameColumn(wit::RenameColumnOp { table, old, new })
+        }
+        MigrationOp::AlterColumn {
+            table,
+            column,
+            changes,
+        } => wit::MigrationOp::AlterColumn(wit::AlterColumnOp {
+            table,
+            column,
+            changes: column_changes_to_wit(changes),
+        }),
+        MigrationOp::WidenColumn {
+            table,
+            column,
+            old_type,
+            new_type,
+        } => wit::MigrationOp::WidenColumn(wit::TypeChangeOp {
+            table,
+            column,
+            old_type: data_type_to_wit(old_type),
+            new_type: data_type_to_wit(new_type),
+        }),
+        MigrationOp::TransformColumn {
+            table,
+            column,
+            old_type,
+            new_type,
+        } => wit::MigrationOp::TransformColumn(wit::TypeChangeOp {
+            table,
+            column,
+            old_type: data_type_to_wit(old_type),
+            new_type: data_type_to_wit(new_type),
+        }),
+        MigrationOp::AddIndex { table, index } => wit::MigrationOp::AddIndex(wit::IndexOp {
+            table,
+            index: index_snapshot_to_wit(index),
+        }),
+        MigrationOp::DropIndex { table, index } => wit::MigrationOp::DropIndex(wit::IndexOp {
+            table,
+            index: index_snapshot_to_wit(index),
+        }),
+    }
+}
+
+fn wit_migration_policy(p: wit::MigrationPolicy) -> MigrationPolicy {
+    MigrationPolicy {
+        allow_destructive: p.allow_destructive,
+    }
+}
+
 // ── Guest implementation ────────────────────────────────────────────
 
 struct GuestDbms;
@@ -482,6 +634,30 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         with_dbms(|ctx| {
             let mut db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx);
             db.rollback().map_err(dbms_error_to_wit)
+        })
+    }
+
+    fn has_drift() -> Result<bool, wit::DbmsError> {
+        with_dbms(|ctx| {
+            let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
+            db.has_drift().map_err(dbms_error_to_wit)
+        })
+    }
+
+    fn pending_migrations() -> Result<Vec<wit::MigrationOp>, wit::DbmsError> {
+        with_dbms(|ctx| {
+            let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
+            db.pending_migrations()
+                .map(|ops| ops.into_iter().map(migration_op_to_wit).collect())
+                .map_err(dbms_error_to_wit)
+        })
+    }
+
+    fn migrate(policy: wit::MigrationPolicy) -> Result<(), wit::DbmsError> {
+        let policy = wit_migration_policy(policy);
+        with_dbms(|ctx| {
+            let mut db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
+            db.migrate(policy).map_err(dbms_error_to_wit)
         })
     }
 }
