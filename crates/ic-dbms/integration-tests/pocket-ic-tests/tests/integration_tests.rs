@@ -5,6 +5,7 @@ mod aggregate;
 mod crud;
 mod custom_types;
 mod ic_dbms_canister_client;
+mod migrations;
 mod select_raw;
 
 #[pocket_ic_harness::test]

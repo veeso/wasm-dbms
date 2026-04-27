@@ -262,4 +262,34 @@ impl Client for IcDbmsPocketIcClient<'_> {
         )
         .await
     }
+
+    async fn has_drift(&self) -> IcDbmsCanisterClientResult<IcDbmsResult<bool>> {
+        self.query(self.principal, self.caller, "has_drift", Vec::new())
+            .await
+    }
+
+    async fn pending_migrations(
+        &self,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<ic_dbms_api::prelude::MigrationOp>>> {
+        self.query(
+            self.principal,
+            self.caller,
+            "pending_migrations",
+            Vec::new(),
+        )
+        .await
+    }
+
+    async fn migrate(
+        &self,
+        policy: ic_dbms_api::prelude::MigrationPolicy,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update(
+            self.principal,
+            self.caller,
+            "migrate",
+            Encode!(&policy).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
 }

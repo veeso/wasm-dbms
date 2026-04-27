@@ -8,7 +8,8 @@ mod inspect;
 use candid::Principal;
 use ic_dbms_api::prelude::{
     AggregateFunction, AggregatedRow, ColumnDef, Database, DeleteBehavior, Filter, IcDbmsResult,
-    InsertRecord, JoinColumnDef, Query, TableSchema, TransactionId, UpdateRecord, Value,
+    InsertRecord, JoinColumnDef, MigrationOp, MigrationPolicy, Query, TableSchema, TransactionId,
+    UpdateRecord, Value,
 };
 use wasm_dbms::prelude::{DatabaseSchema, WasmDbmsDatabase};
 
@@ -192,6 +193,38 @@ where
     assert_caller_owns_transaction(transaction_id.as_ref());
     with_database(transaction_id, database_schema, |db| {
         db.delete::<T>(behaviour, filter)
+    })
+}
+
+/// Returns `true` if the persisted schema differs from the compiled one.
+pub fn has_drift<S>(database_schema: S) -> IcDbmsResult<bool>
+where
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+{
+    assert_caller_is_allowed();
+    with_database(None, database_schema, |db| db.has_drift())
+}
+
+/// Returns the migration ops needed to bring the persisted schema in line
+/// with the compiled one, without applying anything.
+pub fn pending_migrations<S>(database_schema: S) -> IcDbmsResult<Vec<MigrationOp>>
+where
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+{
+    assert_caller_is_allowed();
+    with_database(None, database_schema, |db| db.pending_migrations())
+}
+
+/// Applies a planned migration under `policy`. Transactional: on failure the
+/// stored schema and data are unchanged.
+pub fn migrate<S>(policy: MigrationPolicy, database_schema: S) -> IcDbmsResult<()>
+where
+    S: DatabaseSchema<IcMemoryProvider, IcAccessControlList> + 'static,
+{
+    assert_caller_is_allowed();
+    DBMS_CONTEXT.with(|ctx| {
+        let mut db = WasmDbmsDatabase::oneshot(ctx, database_schema);
+        db.migrate(policy)
     })
 }
 

@@ -190,6 +190,23 @@ impl Client for IcDbmsCanisterClient {
         )
         .await
     }
+
+    async fn has_drift(&self) -> IcDbmsCanisterClientResult<IcDbmsResult<bool>> {
+        self.call("has_drift", &()).await
+    }
+
+    async fn pending_migrations(
+        &self,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<ic_dbms_api::prelude::MigrationOp>>> {
+        self.call("pending_migrations", &()).await
+    }
+
+    async fn migrate(
+        &self,
+        policy: ic_dbms_api::prelude::MigrationPolicy,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("migrate", &(policy,)).await
+    }
 }
 
 #[cfg(test)]
