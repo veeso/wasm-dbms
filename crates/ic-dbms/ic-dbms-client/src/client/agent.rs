@@ -7,8 +7,8 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Decode, Principal};
 use ic_agent::Agent;
 use ic_dbms_api::prelude::{
-    AggregateFunction, AggregatedRow, DeleteBehavior, Filter, IcDbmsResult, InsertRecord, Query,
-    TableSchema, TransactionId, UpdateRecord,
+    AggregateFunction, AggregatedRow, DeleteBehavior, Filter, IcDbmsResult, InsertRecord,
+    MigrationOp, MigrationPolicy, Query, TableSchema, TransactionId, UpdateRecord,
 };
 
 use crate::client::{Client, RawRecords};
@@ -209,5 +209,22 @@ impl Client for IcDbmsAgentClient<'_> {
             (behaviour, filter, transaction_id),
         )
         .await
+    }
+
+    async fn has_drift(&self) -> IcDbmsCanisterClientResult<IcDbmsResult<bool>> {
+        self.query("has_drift", ()).await
+    }
+
+    async fn pending_migrations(
+        &self,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<MigrationOp>>> {
+        self.query("pending_migrations", ()).await
+    }
+
+    async fn migrate(
+        &self,
+        policy: MigrationPolicy,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update("migrate", (policy,)).await
     }
 }

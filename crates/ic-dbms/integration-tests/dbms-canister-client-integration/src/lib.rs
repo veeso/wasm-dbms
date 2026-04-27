@@ -6,8 +6,8 @@ use std::cell::RefCell;
 
 use candid::{CandidType, Deserialize, Principal};
 use ic_dbms_api::prelude::{
-    AggregateFunction, AggregatedRow, DeleteBehavior, Filter, IcDbmsResult, JoinColumnDef, Query,
-    Table, Text, TransactionId, Uint32, Value,
+    AggregateFunction, AggregatedRow, DeleteBehavior, Filter, IcDbmsResult, JoinColumnDef,
+    MigrationOp, MigrationPolicy, Query, Table, Text, TransactionId, Uint32, Value,
 };
 use ic_dbms_client::prelude::{Client as _, IcDbmsCanisterClient};
 
@@ -160,6 +160,24 @@ pub async fn delete(
         .delete::<User>("users", behaviour, filter, transaction_id)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[ic_cdk::update]
+pub async fn has_drift() -> Result<IcDbmsResult<bool>, String> {
+    let client = new_client();
+    client.has_drift().await.map_err(|e| e.to_string())
+}
+
+#[ic_cdk::update]
+pub async fn pending_migrations() -> Result<IcDbmsResult<Vec<MigrationOp>>, String> {
+    let client = new_client();
+    client.pending_migrations().await.map_err(|e| e.to_string())
+}
+
+#[ic_cdk::update]
+pub async fn migrate(policy: MigrationPolicy) -> Result<IcDbmsResult<()>, String> {
+    let client = new_client();
+    client.migrate(policy).await.map_err(|e| e.to_string())
 }
 
 #[inline]

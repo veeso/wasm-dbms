@@ -16,6 +16,7 @@ pub fn dbms_canister(input: DeriveInput) -> syn::Result<TokenStream2> {
     let transaction_api = impl_transaction_api(struct_ident);
     let tables_api = impl_tables_api(&metadata.tables, struct_ident);
     let select_raw_api = impl_select_raw_api(struct_ident);
+    let migration_api = impl_migration_api(struct_ident);
 
     Ok(quote::quote! {
         #init_fn
@@ -24,6 +25,7 @@ pub fn dbms_canister(input: DeriveInput) -> syn::Result<TokenStream2> {
         #transaction_api
         #tables_api
         #select_raw_api
+        #migration_api
     })
 }
 
@@ -143,6 +145,25 @@ fn impl_select_raw_api(struct_ident: &syn::Ident) -> TokenStream2 {
                             .collect()
                     })
             }
+        }
+    }
+}
+
+fn impl_migration_api(struct_ident: &syn::Ident) -> TokenStream2 {
+    quote::quote! {
+        #[::ic_cdk::query]
+        fn has_drift() -> ::ic_dbms_api::prelude::IcDbmsResult<bool> {
+            ::ic_dbms_canister::api::has_drift(#struct_ident)
+        }
+
+        #[::ic_cdk::query]
+        fn pending_migrations() -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<::ic_dbms_api::prelude::MigrationOp>> {
+            ::ic_dbms_canister::api::pending_migrations(#struct_ident)
+        }
+
+        #[::ic_cdk::update]
+        fn migrate(policy: ::ic_dbms_api::prelude::MigrationPolicy) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::migrate(policy, #struct_ident)
         }
     }
 }

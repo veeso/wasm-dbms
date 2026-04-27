@@ -10,7 +10,8 @@ mod types;
 use candid::{CandidType, Principal};
 use ic_dbms_api::prelude::{
     AggregateFunction, AggregatedRow, DeleteBehavior, Filter, IcDbmsResult, InsertRecord,
-    JoinColumnDef, Query, TableSchema, TransactionId, UpdateRecord, Value,
+    JoinColumnDef, MigrationOp, MigrationPolicy, Query, TableSchema, TransactionId, UpdateRecord,
+    Value,
 };
 
 #[cfg(feature = "ic-agent")]
@@ -131,4 +132,20 @@ pub trait Client {
     ) -> impl Future<Output = IcDbmsCanisterClientResult<IcDbmsResult<u64>>>
     where
         T: TableSchema;
+
+    /// Returns `true` when the canister's persisted schema differs from the
+    /// schema compiled into its binary.
+    fn has_drift(&self) -> impl Future<Output = IcDbmsCanisterClientResult<IcDbmsResult<bool>>>;
+
+    /// Returns the migration ops needed to bring the persisted schema in line
+    /// with the compiled one, without applying anything.
+    fn pending_migrations(
+        &self,
+    ) -> impl Future<Output = IcDbmsCanisterClientResult<IcDbmsResult<Vec<MigrationOp>>>>;
+
+    /// Applies a planned migration under `policy`.
+    fn migrate(
+        &self,
+        policy: MigrationPolicy,
+    ) -> impl Future<Output = IcDbmsCanisterClientResult<IcDbmsResult<()>>>;
 }
