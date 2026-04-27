@@ -118,6 +118,92 @@ where
         f(tx)
     }
 
+    // --- ACL surface ------------------------------------------------------
+
+    /// Returns whether `id` is granted `required` on `table`.
+    pub fn granted(
+        &self,
+        id: &A::Id,
+        table: wasm_dbms_api::prelude::TableFingerprint,
+        required: wasm_dbms_api::prelude::TablePerms,
+    ) -> bool {
+        self.ctx.granted(id, table, required)
+    }
+
+    /// Returns whether `id` carries the `admin` bypass flag.
+    pub fn granted_admin(&self, id: &A::Id) -> bool {
+        self.ctx.granted_admin(id)
+    }
+
+    /// Returns whether `id` carries the `manage_acl` flag.
+    pub fn granted_manage_acl(&self, id: &A::Id) -> bool {
+        self.ctx.granted_manage_acl(id)
+    }
+
+    /// Returns whether `id` carries the `migrate` flag.
+    pub fn granted_migrate(&self, id: &A::Id) -> bool {
+        self.ctx.granted_migrate(id)
+    }
+
+    /// Applies a grant on behalf of `caller`. Self-enforces `manage_acl`.
+    pub fn grant(
+        &self,
+        caller: &A::Id,
+        target: A::Id,
+        grant: wasm_dbms_api::prelude::PermGrant,
+    ) -> DbmsResult<()> {
+        if !self.ctx.granted_manage_acl(caller) {
+            return Err(DbmsError::AccessDenied {
+                table: None,
+                required: wasm_dbms_api::prelude::RequiredPerm::ManageAcl,
+            });
+        }
+        self.ctx.acl_grant(target, grant)
+    }
+
+    /// Applies a revoke on behalf of `caller`. Self-enforces `manage_acl`.
+    pub fn revoke(
+        &self,
+        caller: &A::Id,
+        target: &A::Id,
+        revoke: wasm_dbms_api::prelude::PermRevoke,
+    ) -> DbmsResult<()> {
+        if !self.ctx.granted_manage_acl(caller) {
+            return Err(DbmsError::AccessDenied {
+                table: None,
+                required: wasm_dbms_api::prelude::RequiredPerm::ManageAcl,
+            });
+        }
+        self.ctx.acl_revoke(target, revoke)
+    }
+
+    /// Removes `target` from the ACL on behalf of `caller`. Self-enforces
+    /// `manage_acl`.
+    pub fn remove_identity(&self, caller: &A::Id, target: &A::Id) -> DbmsResult<()> {
+        if !self.ctx.granted_manage_acl(caller) {
+            return Err(DbmsError::AccessDenied {
+                table: None,
+                required: wasm_dbms_api::prelude::RequiredPerm::ManageAcl,
+            });
+        }
+        self.ctx.acl_remove_identity(target)
+    }
+
+    /// Returns every identity in the ACL together with its perms, on
+    /// behalf of `caller`. Self-enforces `manage_acl`.
+    pub fn identities(
+        &self,
+        caller: &A::Id,
+    ) -> DbmsResult<Vec<(A::Id, wasm_dbms_api::prelude::IdentityPerms)>> {
+        if !self.ctx.granted_manage_acl(caller) {
+            return Err(DbmsError::AccessDenied {
+                table: None,
+                required: wasm_dbms_api::prelude::RequiredPerm::ManageAcl,
+            });
+        }
+        Ok(self.ctx.acl_identities())
+    }
+
     /// Returns the cached drift flag, computing and caching it on first call.
     ///
     /// `O(tables × snapshot bytes)` on the first invocation; `O(1)` thereafter.

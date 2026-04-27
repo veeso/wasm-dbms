@@ -9,6 +9,10 @@ use crate::memory::{Page, PageOffset};
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 #[derive(Debug, Error, Deserialize, Serialize)]
 pub enum MemoryError {
+    /// Error when the persisted ACL page carries an unsupported layout
+    /// version. Returned by [`crate::dbms::acl`] decoders.
+    #[error("ACL on-page layout version is not supported")]
+    AclLayoutUnsupported,
     /// Error when an autoincrement column has reached its maximum value.
     #[error("Autoincrement overflow: {0} column has reached its maximum value")]
     AutoincrementOverflow(String),

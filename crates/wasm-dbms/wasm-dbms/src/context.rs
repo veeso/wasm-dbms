@@ -9,7 +9,9 @@
 
 use std::cell::{Cell, RefCell};
 
-use wasm_dbms_api::prelude::{DbmsResult, TransactionId};
+use wasm_dbms_api::prelude::{
+    DbmsResult, IdentityPerms, PermGrant, PermRevoke, TableFingerprint, TablePerms, TransactionId,
+};
 use wasm_dbms_memory::prelude::{
     AccessControl, AccessControlList, MemoryManager, MemoryProvider, SchemaRegistry,
     TableRegistryPage,
@@ -119,30 +121,66 @@ where
         sr.register_table::<T>(&mut *mm).map_err(Into::into)
     }
 
-    /// Adds an identity to the access-control list.
-    pub fn acl_add(&self, identity: A::Id) -> DbmsResult<()> {
+    /// Returns whether `name` resolves to a registered table.
+    pub fn has_table(&self, name: &str) -> bool {
+        self.schema_registry
+            .borrow()
+            .table_registry_page_by_name(name)
+            .is_some()
+    }
+
+    /// Returns whether `id` is granted `required` on `table`.
+    pub fn granted(&self, id: &A::Id, table: TableFingerprint, required: TablePerms) -> bool {
+        self.acl.borrow().granted(id, table, required)
+    }
+
+    /// Returns whether `id` carries the `admin` bypass flag.
+    pub fn granted_admin(&self, id: &A::Id) -> bool {
+        self.acl.borrow().granted_admin(id)
+    }
+
+    /// Returns whether `id` carries the `manage_acl` flag.
+    pub fn granted_manage_acl(&self, id: &A::Id) -> bool {
+        self.acl.borrow().granted_manage_acl(id)
+    }
+
+    /// Returns whether `id` carries the `migrate` flag.
+    pub fn granted_migrate(&self, id: &A::Id) -> bool {
+        self.acl.borrow().granted_migrate(id)
+    }
+
+    /// Applies a grant. **Does not** enforce `manage_acl` on the caller —
+    /// callers must check `granted_manage_acl` first or use the
+    /// `Dbms::grant` wrapper which self-enforces.
+    pub fn acl_grant(&self, id: A::Id, grant: PermGrant) -> DbmsResult<()> {
         let mut acl = self.acl.borrow_mut();
         let mut mm = self.mm.borrow_mut();
-        acl.add_identity(identity, &mut mm).map_err(Into::into)
+        acl.grant(id, grant, &mut mm).map_err(Into::into)
     }
 
-    /// Removes an identity from the access-control list.
-    pub fn acl_remove(&self, identity: &A::Id) -> DbmsResult<()> {
+    /// Applies a revoke. Does not enforce `manage_acl` on the caller.
+    pub fn acl_revoke(&self, id: &A::Id, revoke: PermRevoke) -> DbmsResult<()> {
         let mut acl = self.acl.borrow_mut();
         let mut mm = self.mm.borrow_mut();
-        acl.remove_identity(identity, &mut mm).map_err(Into::into)
+        acl.revoke(id, revoke, &mut mm).map_err(Into::into)
     }
 
-    /// Returns all identities currently in the access-control list.
-    pub fn acl_allowed(&self) -> Vec<A::Id> {
-        let acl = self.acl.borrow();
-        acl.allowed_identities()
+    /// Removes an identity entirely. Does not enforce `manage_acl` on the
+    /// caller.
+    pub fn acl_remove_identity(&self, id: &A::Id) -> DbmsResult<()> {
+        let mut acl = self.acl.borrow_mut();
+        let mut mm = self.mm.borrow_mut();
+        acl.remove_identity(id, &mut mm).map_err(Into::into)
     }
 
-    /// Returns whether the given identity is allowed by the ACL.
-    pub fn acl_is_allowed(&self, identity: &A::Id) -> bool {
-        let acl = self.acl.borrow();
-        acl.is_allowed(identity)
+    /// Returns the [`IdentityPerms`] currently held by `id`.
+    pub fn acl_perms(&self, id: &A::Id) -> IdentityPerms {
+        self.acl.borrow().perms(id)
+    }
+
+    /// Returns every identity in the ACL together with its perms.
+    pub fn acl_identities(&self) -> Vec<(A::Id, IdentityPerms)> {
+        self.acl.borrow().identities()
     }
 
     /// Begins a new transaction for the given owner identity.
@@ -208,25 +246,25 @@ mod tests {
     #[test]
     fn test_should_create_context() {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        assert!(ctx.acl_allowed().is_empty());
+        assert!(ctx.acl_identities().is_empty());
     }
 
     #[test]
-    fn test_should_add_acl_identity() {
+    fn test_should_grant_admin_to_identity() {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        ctx.acl_add(vec![1, 2, 3]).unwrap();
-        assert!(ctx.acl_is_allowed(&vec![1, 2, 3]));
-        assert!(!ctx.acl_is_allowed(&vec![4, 5, 6]));
+        ctx.acl_grant(vec![1, 2, 3], PermGrant::Admin).unwrap();
+        assert!(ctx.granted_admin(&vec![1, 2, 3]));
+        assert!(!ctx.granted_admin(&vec![4, 5, 6]));
     }
 
     #[test]
-    fn test_should_remove_acl_identity() {
+    fn test_should_remove_identity() {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        ctx.acl_add(vec![1, 2, 3]).unwrap();
-        ctx.acl_add(vec![4, 5, 6]).unwrap();
-        ctx.acl_remove(&vec![1, 2, 3]).unwrap();
-        assert!(!ctx.acl_is_allowed(&vec![1, 2, 3]));
-        assert!(ctx.acl_is_allowed(&vec![4, 5, 6]));
+        ctx.acl_grant(vec![1, 2, 3], PermGrant::ManageAcl).unwrap();
+        ctx.acl_grant(vec![4, 5, 6], PermGrant::Admin).unwrap();
+        ctx.acl_remove_identity(&vec![4, 5, 6]).unwrap();
+        assert!(!ctx.granted_admin(&vec![4, 5, 6]));
+        assert!(ctx.granted_manage_acl(&vec![1, 2, 3]));
     }
 
     #[test]

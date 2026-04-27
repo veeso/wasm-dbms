@@ -19,6 +19,7 @@ include = [
 readme = "README.md"
 
 [dependencies]
+bitflags = { workspace = true }
 candid = { workspace = true, optional = true }
 lazy-regex = { workspace = true }
 percent-encoding = { workspace = true }

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
-use ic_dbms_api::prelude::IcDbmsResult;
+use ic_dbms_api::prelude::{IcDbmsResult, IdentityPerms, TablePerms};
 
 use crate::client::{Client, RawRecords};
 use crate::prelude::IcDbmsCanisterClientResult;
@@ -59,22 +59,101 @@ impl Client for IcDbmsCanisterClient {
         self.canister_id
     }
 
-    async fn acl_add_principal(
+    async fn grant_admin(
         &self,
         principal: Principal,
     ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
-        self.call("acl_add_principal", &(principal,)).await
+        self.call("grant_admin", &(principal,)).await
     }
 
-    async fn acl_remove_principal(
+    async fn revoke_admin(
         &self,
         principal: Principal,
     ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
-        self.call("acl_remove_principal", &(principal,)).await
+        self.call("revoke_admin", &(principal,)).await
     }
 
-    async fn acl_allowed_principals(&self) -> IcDbmsCanisterClientResult<Vec<Principal>> {
-        self.call("acl_allowed_principals", &()).await
+    async fn grant_manage_acl(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("grant_manage_acl", &(principal,)).await
+    }
+
+    async fn revoke_manage_acl(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("revoke_manage_acl", &(principal,)).await
+    }
+
+    async fn grant_migrate(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("grant_migrate", &(principal,)).await
+    }
+
+    async fn revoke_migrate(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("revoke_migrate", &(principal,)).await
+    }
+
+    async fn grant_all_tables_perms(
+        &self,
+        principal: Principal,
+        perms: TablePerms,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("grant_all_tables_perms", &(principal, perms))
+            .await
+    }
+
+    async fn revoke_all_tables_perms(
+        &self,
+        principal: Principal,
+        perms: TablePerms,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("revoke_all_tables_perms", &(principal, perms))
+            .await
+    }
+
+    async fn grant_table_perms(
+        &self,
+        principal: Principal,
+        table: &str,
+        perms: TablePerms,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("grant_table_perms", &(principal, table.to_string(), perms))
+            .await
+    }
+
+    async fn revoke_table_perms(
+        &self,
+        principal: Principal,
+        table: &str,
+        perms: TablePerms,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("revoke_table_perms", &(principal, table.to_string(), perms))
+            .await
+    }
+
+    async fn remove_identity(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.call("remove_identity", &(principal,)).await
+    }
+
+    async fn list_identities(
+        &self,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<(Principal, IdentityPerms)>>> {
+        self.call("list_identities", &()).await
+    }
+
+    async fn my_perms(&self) -> IcDbmsCanisterClientResult<IdentityPerms> {
+        self.call("my_perms", &()).await
     }
 
     async fn begin_transaction(

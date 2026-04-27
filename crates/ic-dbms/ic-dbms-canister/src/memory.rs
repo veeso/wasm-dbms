@@ -1,4 +1,4 @@
-// Rust guideline compliant 2026-03-01
+// Rust guideline compliant 2026-04-27
 // X-WHERE-CLAUSE, M-PUBLIC-DEBUG, M-CANONICAL-DOCS
 
 //! Memory module provides stable memory management for the IC DBMS Canister.
@@ -10,7 +10,9 @@
 mod provider;
 
 use candid::Principal;
-use ic_dbms_api::prelude::MemoryResult;
+use ic_dbms_api::prelude::{
+    IdentityPerms, MemoryResult, PermGrant, PermRevoke, TableFingerprint, TablePerms,
+};
 use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryManager, MemoryProvider};
 
 #[cfg(target_family = "wasm")]
@@ -37,35 +39,63 @@ impl AccessControl for IcAccessControlList {
         AccessControlList::load(mm).map(Self)
     }
 
-    fn is_allowed(&self, identity: &Self::Id) -> bool {
-        let bytes = identity.as_slice().to_vec();
-        self.0.is_allowed(&bytes)
+    fn granted(&self, id: &Self::Id, table: TableFingerprint, perm: TablePerms) -> bool {
+        self.0.granted(&id.as_slice().to_vec(), table, perm)
     }
 
-    fn allowed_identities(&self) -> Vec<Self::Id> {
-        self.0
-            .allowed_identities()
-            .into_iter()
-            .filter_map(|bytes| Principal::try_from_slice(&bytes).ok())
-            .collect()
+    fn granted_admin(&self, id: &Self::Id) -> bool {
+        self.0.granted_admin(&id.as_slice().to_vec())
     }
 
-    fn add_identity<M>(&mut self, identity: Self::Id, mm: &mut MemoryManager<M>) -> MemoryResult<()>
-    where
-        M: MemoryProvider,
-    {
-        self.0.add_identity(identity.as_slice().to_vec(), mm)
+    fn granted_manage_acl(&self, id: &Self::Id) -> bool {
+        self.0.granted_manage_acl(&id.as_slice().to_vec())
     }
 
-    fn remove_identity<M>(
+    fn granted_migrate(&self, id: &Self::Id) -> bool {
+        self.0.granted_migrate(&id.as_slice().to_vec())
+    }
+
+    fn grant<M>(
         &mut self,
-        identity: &Self::Id,
+        id: Self::Id,
+        grant: PermGrant,
         mm: &mut MemoryManager<M>,
     ) -> MemoryResult<()>
     where
         M: MemoryProvider,
     {
-        self.0.remove_identity(&identity.as_slice().to_vec(), mm)
+        self.0.grant(id.as_slice().to_vec(), grant, mm)
+    }
+
+    fn revoke<M>(
+        &mut self,
+        id: &Self::Id,
+        revoke: PermRevoke,
+        mm: &mut MemoryManager<M>,
+    ) -> MemoryResult<()>
+    where
+        M: MemoryProvider,
+    {
+        self.0.revoke(&id.as_slice().to_vec(), revoke, mm)
+    }
+
+    fn remove_identity<M>(&mut self, id: &Self::Id, mm: &mut MemoryManager<M>) -> MemoryResult<()>
+    where
+        M: MemoryProvider,
+    {
+        self.0.remove_identity(&id.as_slice().to_vec(), mm)
+    }
+
+    fn perms(&self, id: &Self::Id) -> IdentityPerms {
+        self.0.perms(&id.as_slice().to_vec())
+    }
+
+    fn identities(&self) -> Vec<(Self::Id, IdentityPerms)> {
+        self.0
+            .identities()
+            .into_iter()
+            .filter_map(|(bytes, perms)| Principal::try_from_slice(&bytes).ok().map(|p| (p, perms)))
+            .collect()
     }
 }
 

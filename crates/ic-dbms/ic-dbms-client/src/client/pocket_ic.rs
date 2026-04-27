@@ -1,5 +1,5 @@
 use candid::{CandidType, Decode, Encode, Principal};
-use ic_dbms_api::prelude::IcDbmsResult;
+use ic_dbms_api::prelude::{IcDbmsResult, IdentityPerms, TablePerms};
 use pocket_ic::nonblocking::PocketIc;
 
 use crate::client::{Client, RawRecords};
@@ -84,40 +84,167 @@ impl Client for IcDbmsPocketIcClient<'_> {
         self.principal
     }
 
-    async fn acl_add_principal(
+    async fn grant_admin(
         &self,
         principal: Principal,
     ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
         self.update(
             self.principal,
             self.caller,
-            "acl_add_principal",
+            "grant_admin",
             Encode!(&principal).map_err(PocketIcError::Candid)?,
         )
         .await
     }
 
-    async fn acl_remove_principal(
+    async fn revoke_admin(
         &self,
         principal: Principal,
     ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
         self.update(
             self.principal,
             self.caller,
-            "acl_remove_principal",
+            "revoke_admin",
             Encode!(&principal).map_err(PocketIcError::Candid)?,
         )
         .await
     }
 
-    async fn acl_allowed_principals(&self) -> IcDbmsCanisterClientResult<Vec<Principal>> {
-        self.query(
+    async fn grant_manage_acl(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update(
             self.principal,
             self.caller,
-            "acl_allowed_principals",
-            Vec::new(),
+            "grant_manage_acl",
+            Encode!(&principal).map_err(PocketIcError::Candid)?,
         )
         .await
+    }
+
+    async fn revoke_manage_acl(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update(
+            self.principal,
+            self.caller,
+            "revoke_manage_acl",
+            Encode!(&principal).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn grant_migrate(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update(
+            self.principal,
+            self.caller,
+            "grant_migrate",
+            Encode!(&principal).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn revoke_migrate(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update(
+            self.principal,
+            self.caller,
+            "revoke_migrate",
+            Encode!(&principal).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn grant_all_tables_perms(
+        &self,
+        principal: Principal,
+        perms: TablePerms,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update(
+            self.principal,
+            self.caller,
+            "grant_all_tables_perms",
+            Encode!(&principal, &perms).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn revoke_all_tables_perms(
+        &self,
+        principal: Principal,
+        perms: TablePerms,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update(
+            self.principal,
+            self.caller,
+            "revoke_all_tables_perms",
+            Encode!(&principal, &perms).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn grant_table_perms(
+        &self,
+        principal: Principal,
+        table: &str,
+        perms: TablePerms,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        let table_str = table.to_string();
+        self.update(
+            self.principal,
+            self.caller,
+            "grant_table_perms",
+            Encode!(&principal, &table_str, &perms).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn revoke_table_perms(
+        &self,
+        principal: Principal,
+        table: &str,
+        perms: TablePerms,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        let table_str = table.to_string();
+        self.update(
+            self.principal,
+            self.caller,
+            "revoke_table_perms",
+            Encode!(&principal, &table_str, &perms).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn remove_identity(
+        &self,
+        principal: Principal,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<()>> {
+        self.update(
+            self.principal,
+            self.caller,
+            "remove_identity",
+            Encode!(&principal).map_err(PocketIcError::Candid)?,
+        )
+        .await
+    }
+
+    async fn list_identities(
+        &self,
+    ) -> IcDbmsCanisterClientResult<IcDbmsResult<Vec<(Principal, IdentityPerms)>>> {
+        self.query(self.principal, self.caller, "list_identities", Vec::new())
+            .await
+    }
+
+    async fn my_perms(&self) -> IcDbmsCanisterClientResult<IdentityPerms> {
+        self.query(self.principal, self.caller, "my_perms", Vec::new())
+            .await
     }
 
     async fn begin_transaction(

@@ -50,13 +50,27 @@ fn impl_init(tables: &[TableMetadata]) -> TokenStream2 {
         #[::ic_cdk::init]
         fn init(args: ::ic_dbms_api::prelude::IcDbmsCanisterArgs) {
             let args = args.unwrap_init();
+            let principals = match args.allowed_principals {
+                Some(p) if !p.is_empty() => p,
+                _ => vec![::ic_cdk::api::msg_caller()],
+            };
             ::ic_dbms_canister::prelude::DBMS_CONTEXT.with(|ctx| {
-                for principal in args.allowed_principals {
-                    if let Err(err) = ctx.acl_add(principal) {
-                        ::ic_cdk::trap(&format!(
-                            "Failed to add principal to ACL during init: {}",
-                            err
-                        ));
+                for principal in principals {
+                    let grants: [::ic_dbms_api::prelude::PermGrant; 4] = [
+                        ::ic_dbms_api::prelude::PermGrant::Admin,
+                        ::ic_dbms_api::prelude::PermGrant::ManageAcl,
+                        ::ic_dbms_api::prelude::PermGrant::Migrate,
+                        ::ic_dbms_api::prelude::PermGrant::AllTables(
+                            ::ic_dbms_api::prelude::TablePerms::all(),
+                        ),
+                    ];
+                    for g in grants {
+                        if let Err(err) = ctx.acl_grant(principal, g) {
+                            ::ic_cdk::trap(&format!(
+                                "Failed to bootstrap ACL during init: {}",
+                                err
+                            ));
+                        }
                     }
                 }
             });
@@ -68,18 +82,82 @@ fn impl_init(tables: &[TableMetadata]) -> TokenStream2 {
 fn impl_acl_api() -> TokenStream2 {
     quote::quote! {
         #[::ic_cdk::update]
-        fn acl_add_principal(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
-            ::ic_dbms_canister::api::acl_add_principal(principal)
+        fn grant_admin(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::grant_admin(principal)
         }
 
         #[::ic_cdk::update]
-        fn acl_remove_principal(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
-            ::ic_dbms_canister::api::acl_remove_principal(principal)
+        fn revoke_admin(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::revoke_admin(principal)
+        }
+
+        #[::ic_cdk::update]
+        fn grant_manage_acl(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::grant_manage_acl(principal)
+        }
+
+        #[::ic_cdk::update]
+        fn revoke_manage_acl(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::revoke_manage_acl(principal)
+        }
+
+        #[::ic_cdk::update]
+        fn grant_migrate(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::grant_migrate(principal)
+        }
+
+        #[::ic_cdk::update]
+        fn revoke_migrate(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::revoke_migrate(principal)
+        }
+
+        #[::ic_cdk::update]
+        fn grant_all_tables_perms(
+            principal: ::candid::Principal,
+            perms: ::ic_dbms_api::prelude::TablePerms,
+        ) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::grant_all_tables_perms(principal, perms)
+        }
+
+        #[::ic_cdk::update]
+        fn revoke_all_tables_perms(
+            principal: ::candid::Principal,
+            perms: ::ic_dbms_api::prelude::TablePerms,
+        ) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::revoke_all_tables_perms(principal, perms)
+        }
+
+        #[::ic_cdk::update]
+        fn grant_table_perms(
+            principal: ::candid::Principal,
+            table: String,
+            perms: ::ic_dbms_api::prelude::TablePerms,
+        ) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::grant_table_perms(principal, table, perms)
+        }
+
+        #[::ic_cdk::update]
+        fn revoke_table_perms(
+            principal: ::candid::Principal,
+            table: String,
+            perms: ::ic_dbms_api::prelude::TablePerms,
+        ) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::revoke_table_perms(principal, table, perms)
+        }
+
+        #[::ic_cdk::update]
+        fn remove_identity(principal: ::candid::Principal) -> ::ic_dbms_api::prelude::IcDbmsResult<()> {
+            ::ic_dbms_canister::api::remove_identity(principal)
         }
 
         #[::ic_cdk::query]
-        fn acl_allowed_principals() -> Vec<::candid::Principal> {
-            ::ic_dbms_canister::api::acl_allowed_principals()
+        fn list_identities() -> ::ic_dbms_api::prelude::IcDbmsResult<Vec<(::candid::Principal, ::ic_dbms_api::prelude::IdentityPerms)>> {
+            ::ic_dbms_canister::api::list_identities()
+        }
+
+        #[::ic_cdk::query]
+        fn my_perms() -> ::ic_dbms_api::prelude::IdentityPerms {
+            ::ic_dbms_canister::api::my_perms()
         }
     }
 }

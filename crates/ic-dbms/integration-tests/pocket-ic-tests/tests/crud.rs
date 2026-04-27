@@ -128,6 +128,10 @@ async fn test_should_not_allow_unauthorized_call(env: PocketIcTestEnv<TestCanist
     };
     let result = client
         .insert::<User>(User::table_name(), insert_request, None)
-        .await;
-    assert!(result.is_err());
+        .await
+        .expect("call ok");
+    assert!(matches!(
+        result,
+        Err(ic_dbms_api::prelude::DbmsError::AccessDenied { .. })
+    ));
 }

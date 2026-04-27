@@ -155,6 +155,49 @@ const owner = Principal.fromText("aaaaa-aa");
 
 ---
 
+## ACL Types
+
+The granular ACL exposes four types via Candid:
+
+```candid
+type TablePerms = nat8;          // Bitfield: READ=1, INSERT=2, UPDATE=4, DELETE=8
+
+type IdentityPerms = record {
+  admin       : bool;
+  manage_acl  : bool;
+  migrate     : bool;
+  all_tables  : TablePerms;
+  per_table   : vec record { nat64; TablePerms };
+};
+
+type PermGrant = variant {
+  Admin;
+  ManageAcl;
+  Migrate;
+  AllTables : TablePerms;
+  Table     : record { nat64; TablePerms };
+};
+
+type PermRevoke = variant {
+  Admin;
+  ManageAcl;
+  Migrate;
+  AllTables : TablePerms;
+  Table     : record { nat64; TablePerms };
+};
+
+type RequiredPerm = variant {
+  Table     : TablePerms;
+  Admin;
+  ManageAcl;
+  Migrate;
+};
+```
+
+`TablePerms` is encoded as `nat8` so the wire form is a single byte. The
+table identifier in `per_table` / `Table` is a `TableFingerprint` (`nat64`)
+— derived from the table name via xxh3.
+
 ## IC-Specific Considerations
 
 **Re-exports:** `ic_dbms_api::prelude::*` re-exports all types from `wasm_dbms_api::prelude::*` plus IC-specific additions. You do not need to import `wasm_dbms_api` directly.

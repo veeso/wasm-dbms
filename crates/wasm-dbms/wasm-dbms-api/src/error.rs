@@ -5,6 +5,15 @@ use thiserror::Error;
 #[derive(Debug, Error, Serialize, Deserialize)]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 pub enum DbmsError {
+    #[error("Access denied: {required:?} (table: {table:?})")]
+    AccessDenied {
+        /// The fingerprint of the table the operation targeted, when
+        /// applicable. `None` for operational perms (`admin`,
+        /// `manage_acl`, `migrate`).
+        table: Option<crate::dbms::table::TableFingerprint>,
+        /// The perm that was missing.
+        required: crate::dbms::acl::RequiredPerm,
+    },
     #[error("Memory error: {0}")]
     Memory(#[from] crate::memory::MemoryError),
     #[error("Migration error: {0}")]

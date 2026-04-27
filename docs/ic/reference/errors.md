@@ -32,7 +32,9 @@ use ic_dbms_api::prelude::IcDbmsError;
 // IcDbmsError is the same as wasm_dbms_api::DbmsError
 // It provides the full error hierarchy:
 pub enum IcDbmsError {
+    AccessDenied { table: Option<TableFingerprint>, required: RequiredPerm },
     Memory(MemoryError),
+    Migration(MigrationError),
     Query(QueryError),
     Table(TableError),
     Transaction(TransactionError),
@@ -44,6 +46,34 @@ pub enum IcDbmsError {
 You can use `IcDbmsError` or `DbmsError` interchangeably. The `IcDbmsError` alias is conventional in IC codebases.
 
 ---
+
+## AccessDenied
+
+Granular ACL checks return `DbmsError::AccessDenied { table, required }` when
+the caller is missing a perm. `required` is a `RequiredPerm` enum:
+
+| Variant                       | Meaning                              |
+|-------------------------------|--------------------------------------|
+| `Table(TablePerms)`           | Per-table CRUD perm missing.         |
+| `Admin`                       | `admin` bypass missing.              |
+| `ManageAcl`                   | ACL-management perm missing.         |
+| `Migrate`                     | Migration perm missing.              |
+
+`table` is `Some(TableFingerprint)` for table-scoped operations and `None`
+for `manage_acl` / `migrate` failures.
+
+```rust
+match res {
+    Ok(()) => {}
+    Err(IcDbmsError::AccessDenied { required: RequiredPerm::Table(p), .. }) => {
+        eprintln!("missing table perms: {p:?}");
+    }
+    Err(IcDbmsError::AccessDenied { required: RequiredPerm::Migrate, .. }) => {
+        eprintln!("not allowed to migrate");
+    }
+    Err(other) => return Err(other),
+}
+```
 
 ## Double Result Pattern
 

@@ -1,4 +1,6 @@
-use ic_dbms_api::prelude::{DeleteBehavior, Filter, Query, TableSchema, Text, Uint32, Value};
+use ic_dbms_api::prelude::{
+    DeleteBehavior, Filter, Query, TablePerms, TableSchema, Text, Uint32, Value,
+};
 use ic_dbms_client::prelude::{Client as _, IcDbmsAgentClient};
 use pocket_ic_harness::PocketIcTestEnv;
 use pocket_ic_tests::table::{Post, PostInsertRequest, User, UserInsertRequest, UserUpdateRequest};
@@ -16,7 +18,7 @@ async fn test_agent_client_should_return_principal(env: PocketIcTestEnv<TestCani
 }
 
 #[pocket_ic_harness::test]
-async fn test_agent_client_should_add_to_acl(env: PocketIcTestEnv<TestCanisterSetup>) {
+async fn test_agent_client_should_grant_admin(env: PocketIcTestEnv<TestCanisterSetup>) {
     let e = &mut env;
     e.pic.make_live(None).await;
 
@@ -24,57 +26,74 @@ async fn test_agent_client_should_add_to_acl(env: PocketIcTestEnv<TestCanisterSe
     let client = IcDbmsAgentClient::new(&agent, e.dbms_canister());
 
     client
-        .acl_add_principal(bob())
+        .grant_admin(bob())
         .await
         .expect("failed to call canister")
-        .expect("failed to add principal to ACL");
+        .expect("failed to grant admin");
 }
 
 #[pocket_ic_harness::test]
-async fn test_agent_client_should_remove_from_acl(env: PocketIcTestEnv<TestCanisterSetup>) {
+async fn test_agent_client_should_revoke_admin(env: PocketIcTestEnv<TestCanisterSetup>) {
     let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
     let client = IcDbmsAgentClient::new(&agent, e.dbms_canister());
 
-    // Add bob to ACL first
     client
-        .acl_add_principal(bob())
+        .grant_admin(bob())
         .await
         .expect("failed to call canister")
-        .expect("failed to add principal to ACL");
+        .expect("failed to grant admin");
 
-    // Remove bob from ACL
     client
-        .acl_remove_principal(bob())
+        .revoke_admin(bob())
         .await
         .expect("failed to call canister")
-        .expect("failed to remove principal from ACL");
+        .expect("failed to revoke admin");
 
-    // Verify bob is no longer in ACL
-    let acl = client
-        .acl_allowed_principals()
+    let identities = client
+        .list_identities()
         .await
-        .expect("failed to call canister");
-    assert!(!acl.contains(&bob()));
+        .expect("failed to call canister")
+        .expect("failed to list identities");
+    let bob_perms = identities
+        .iter()
+        .find(|(p, _)| *p == bob())
+        .map(|(_, perms)| perms);
+    assert!(bob_perms.map(|p| !p.admin).unwrap_or(true));
 }
 
 #[pocket_ic_harness::test]
-async fn test_agent_client_should_list_allowed_principals(env: PocketIcTestEnv<TestCanisterSetup>) {
+async fn test_agent_client_should_list_identities(env: PocketIcTestEnv<TestCanisterSetup>) {
     let e = &mut env;
     e.pic.make_live(None).await;
 
     let agent = init_new_agent(e, true).await;
     let client = IcDbmsAgentClient::new(&agent, e.dbms_canister());
 
-    let acl = client
-        .acl_allowed_principals()
+    let identities = client
+        .list_identities()
         .await
-        .expect("failed to call canister");
+        .expect("failed to call canister")
+        .expect("failed to list identities");
 
-    // Should contain at least the admin and the agent's principal
-    assert!(acl.contains(&admin()));
+    assert!(identities.iter().any(|(p, _)| *p == admin()));
+}
+
+#[pocket_ic_harness::test]
+async fn test_agent_client_should_grant_table_perms(env: PocketIcTestEnv<TestCanisterSetup>) {
+    let e = &mut env;
+    e.pic.make_live(None).await;
+
+    let agent = init_new_agent(e, true).await;
+    let client = IcDbmsAgentClient::new(&agent, e.dbms_canister());
+
+    client
+        .grant_table_perms(bob(), "users", TablePerms::READ)
+        .await
+        .expect("failed to call canister")
+        .expect("failed to grant table perms");
 }
 
 #[pocket_ic_harness::test]
