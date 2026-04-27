@@ -181,12 +181,12 @@ The planner walks the slice in order: it first looks for a stored column named `
 
 The framework auto-widens these without user code:
 
-| From → To              | Semantics              |
-| ---------------------- | ---------------------- |
-| `IntN` → `IntM`, M > N | sign-extend            |
-| `UintN` → `UintM`, M > N | zero-extend          |
-| `UintN` → `IntM`, M > N | zero-extend into signed |
-| `Float32` → `Float64`  | widen                  |
+| From → To                | Semantics               |
+| ------------------------ | ----------------------- |
+| `IntN` → `IntM`, M > N   | sign-extend             |
+| `UintN` → `UintM`, M > N | zero-extend             |
+| `UintN` → `IntM`, M > N  | zero-extend into signed |
+| `Float32` → `Float64`    | widen                   |
 
 Just edit the field type and migrate. Plan output is `WidenColumn { ... }`.
 

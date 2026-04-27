@@ -9,6 +9,7 @@
   - [DbmsCanister Macro](#dbmscanister-macro)
     - [Basic Usage](#basic-usage)
     - [Generated Candid API](#generated-candid-api)
+    - [Migration Endpoints](#migration-endpoints)
   - [Candid Integration](#candid-integration)
     - [CandidType and Deserialize](#candidtype-and-deserialize)
     - [Candid Export](#candid-export)
@@ -20,7 +21,7 @@
 
 When deploying wasm-dbms on the Internet Computer, your schema definitions need additional IC-specific derives, the `#[candid]` attribute, and a canister generation macro. The core `Table` macro, column attributes (`#[primary_key]`, `#[unique]`, `#[index]`, `#[foreign_key(...)]`, `#[sanitizer(...)]`, `#[validate(...)]`, `#[custom_type]`, `#[alignment]`, plus the migration attributes `#[default]`, `#[renamed_from]`, `#[migrate]`), and generated types (`Record`, `InsertRequest`, `UpdateRequest`, `ForeignFetcher`) work exactly as described in the [generic schema reference](../../reference/schema.md). This document covers only the IC-specific additions.
 
-> **Migrations on the IC:** schema migrations work the same as on the generic backend, but the `DbmsCanister` macro additionally emits the `has_schema_drift`, `plan_migration`, and `migrate` Candid endpoints. See the [Schema Migrations Reference](../../reference/migrations.md) and the [Schema Migrations Guide](../../guides/migrations.md).
+> **Migrations on the IC:** schema migrations work the same as on the generic backend, but the `DbmsCanister` macro additionally emits the `has_drift`, `pending_migrations`, and `migrate` Candid endpoints (see [Migration Endpoints](#migration-endpoints) below). See the [Schema Migrations Reference](../../reference/migrations.md), the [generic Schema Migrations Guide](../../guides/migrations.md), and the [IC Schema Migrations Guide](../guides/migrations.md).
 
 ---
 
@@ -129,6 +130,11 @@ service : (IcDbmsCanisterArgs) -> {
   acl_add_principal : (principal) -> (Result);
   acl_remove_principal : (principal) -> (Result);
   acl_allowed_principals : () -> (vec principal) query;
+
+  // Schema migrations (shared) — see Migration Endpoints below
+  has_drift : () -> (Result_bool) query;
+  pending_migrations : () -> (Result_Vec_MigrationOp) query;
+  migrate : (MigrationPolicy) -> (Result);
 }
 ```
 
@@ -145,6 +151,100 @@ table. The `vec AggregateFunction` parameter lists `COUNT(*)` / `COUNT(col)` /
 `group_by`, `having`, `order_by`, `limit`, and `offset`. See the
 [generic Query API reference](../../reference/query.md#aggregate-types) for
 type definitions and the [aggregate pipeline](../../reference/query.md#execution-order).
+
+### Migration Endpoints
+
+`#[derive(DbmsCanister)]` adds three admin-gated migration endpoints.
+Behaviour, error semantics, and the operator workflow are documented in the
+[IC Schema Migrations Guide](../guides/migrations.md); this section is the
+Candid signature reference.
+
+```candid
+type MigrationPolicy = record {
+  allow_destructive : bool;
+};
+
+type OnDeleteSnapshot = variant { Restrict; Cascade };
+
+type DataTypeSnapshot = variant {
+  Int8; Int16; Int32; Int64;
+  Uint8; Uint16; Uint32; Uint64;
+  Float32; Float64; Decimal;
+  Boolean; Date; Datetime;
+  Blob; Text; Uuid; Json;
+  Custom : text;
+};
+
+type ForeignKeySnapshot = record {
+  table : text;
+  column : text;
+  on_delete : OnDeleteSnapshot;
+};
+
+type IndexSnapshot = record {
+  columns : vec text;
+  unique : bool;
+};
+
+type ColumnSnapshot = record {
+  name : text;
+  data_type : DataTypeSnapshot;
+  nullable : bool;
+  auto_increment : bool;
+  unique : bool;
+  primary_key : bool;
+  foreign_key : opt ForeignKeySnapshot;
+  default : opt Value;
+};
+
+type TableSchemaSnapshot = record {
+  version : nat8;
+  name : text;
+  primary_key : text;
+  alignment : nat32;
+  columns : vec ColumnSnapshot;
+  indexes : vec IndexSnapshot;
+};
+
+type ColumnChanges = record {
+  nullable : opt bool;
+  unique : opt bool;
+  auto_increment : opt bool;
+  primary_key : opt bool;
+  foreign_key : opt opt ForeignKeySnapshot;
+};
+
+type MigrationOp = variant {
+  CreateTable     : record { name : text; schema : TableSchemaSnapshot };
+  DropTable       : record { name : text };
+  AddColumn       : record { table : text; column : ColumnSnapshot };
+  DropColumn      : record { table : text; column : text };
+  RenameColumn    : record { table : text; old : text; new : text };
+  AlterColumn     : record { table : text; column : text; changes : ColumnChanges };
+  WidenColumn     : record { table : text; column : text; old_type : DataTypeSnapshot; new_type : DataTypeSnapshot };
+  TransformColumn : record { table : text; column : text; old_type : DataTypeSnapshot; new_type : DataTypeSnapshot };
+  AddIndex        : record { table : text; index : IndexSnapshot };
+  DropIndex       : record { table : text; index : IndexSnapshot };
+};
+
+has_drift          : () -> (variant { Ok : bool;            Err : IcDbmsError }) query;
+pending_migrations : () -> (variant { Ok : vec MigrationOp; Err : IcDbmsError }) query;
+migrate            : (MigrationPolicy)
+                   -> (variant { Ok;                        Err : IcDbmsError });
+```
+
+- `has_drift` is `O(1)` once the per-context drift flag is cached. CRUD
+  endpoints early-return `IcDbmsError::Migration(MigrationError::SchemaDrift)`
+  while drift is set; ACL and migration endpoints bypass the check.
+- `pending_migrations` always recomputes the diff. Safe to call during drift.
+- `migrate` plans, validates against `MigrationPolicy`, sorts ops into the
+  deterministic apply order, and runs them inside a single journaled session.
+  Failures roll the journal back and leave persisted snapshots untouched.
+
+The `IcDbmsError::Migration(MigrationError)` variants
+(`SchemaDrift`, `IncompatibleType`, `MissingDefault`, `ConstraintViolation`,
+`DestructiveOpDenied`, `TransformAborted`, `DataRewriteUnsupported`) are
+documented in the [errors reference](./errors.md).
 
 **Init arguments:**
 

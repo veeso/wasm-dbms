@@ -29,17 +29,17 @@ wasm-dbms provides a rich set of data types for defining table schemas. Each typ
 
 **Type categories:**
 
-| Category | Types |
-|----------|-------|
-| Integers | Uint8, Uint16, Uint32, Uint64, Int8, Int16, Int32, Int64 |
-| Decimal | Decimal |
-| Text | Text |
-| Boolean | Boolean |
-| Date/Time | Date, DateTime |
-| Binary | Blob |
-| Identifiers | Uuid |
-| Semi-structured | Json |
-| Wrapper | Nullable\<T\> |
+| Category        | Types                                                    |
+| --------------- | -------------------------------------------------------- |
+| Integers        | Uint8, Uint16, Uint32, Uint64, Int8, Int16, Int32, Int64 |
+| Decimal         | Decimal                                                  |
+| Text            | Text                                                     |
+| Boolean         | Boolean                                                  |
+| Date/Time       | Date, DateTime                                           |
+| Binary          | Blob                                                     |
+| Identifiers     | Uuid                                                     |
+| Semi-structured | Json                                                     |
+| Wrapper         | Nullable\<T\>                                            |
 
 > **Note:** The `Principal` type is available in `ic-dbms-api` for Internet Computer integration. See the [IC Data Types](../ic/reference/data-types.md) reference for details.
 
@@ -529,25 +529,25 @@ See the [Custom Data Types Guide](../guides/custom-data-types.md) for step-by-st
 
 ## Type Conversion Reference
 
-| wasm-dbms Type | Rust Type |
-|----------------|-----------|
-| `Uint8` | `u8` |
-| `Uint16` | `u16` |
-| `Uint32` | `u32` |
-| `Uint64` | `u64` |
-| `Int8` | `i8` |
-| `Int16` | `i16` |
-| `Int32` | `i32` |
-| `Int64` | `i64` |
-| `Decimal` | `rust_decimal::Decimal` |
-| `Text` | `String` |
-| `Boolean` | `bool` |
-| `Date` | `chrono::NaiveDate` |
-| `DateTime` | `chrono::DateTime<Utc>` |
-| `Blob` | `Vec<u8>` |
-| `Uuid` | `uuid::Uuid` |
-| `Json` | `serde_json::Value` |
-| `Nullable<T>` | `Option<T>` |
+| wasm-dbms Type | Rust Type               |
+| -------------- | ----------------------- |
+| `Uint8`        | `u8`                    |
+| `Uint16`       | `u16`                   |
+| `Uint32`       | `u32`                   |
+| `Uint64`       | `u64`                   |
+| `Int8`         | `i8`                    |
+| `Int16`        | `i16`                   |
+| `Int32`        | `i32`                   |
+| `Int64`        | `i64`                   |
+| `Decimal`      | `rust_decimal::Decimal` |
+| `Text`         | `String`                |
+| `Boolean`      | `bool`                  |
+| `Date`         | `chrono::NaiveDate`     |
+| `DateTime`     | `chrono::DateTime<Utc>` |
+| `Blob`         | `Vec<u8>`               |
+| `Uuid`         | `uuid::Uuid`            |
+| `Json`         | `serde_json::Value`     |
+| `Nullable<T>`  | `Option<T>`             |
 
 > **Note:** For IC canister usage, these types also map to Candid types. See the [IC Data Types](../ic/reference/data-types.md) reference for the Candid mapping.
 

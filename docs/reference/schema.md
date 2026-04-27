@@ -73,12 +73,12 @@ pub struct User {
 }
 ```
 
-| Derive | Required | Purpose |
-|--------|----------|---------|
-| `Table` | Yes | Generates table schema and related types |
-| `Clone` | Yes | Required by the macro system |
-| `Debug` | Recommended | Useful for debugging |
-| `PartialEq`, `Eq` | Recommended | Useful for comparisons in tests |
+| Derive            | Required    | Purpose                                  |
+| ----------------- | ----------- | ---------------------------------------- |
+| `Table`           | Yes         | Generates table schema and related types |
+| `Clone`           | Yes         | Required by the macro system             |
+| `Debug`           | Recommended | Useful for debugging                     |
+| `PartialEq`, `Eq` | Recommended | Useful for comparisons in tests          |
 
 > **Note:** For IC canister usage, also add `CandidType` and `Deserialize` derives plus the `#[candid]` attribute. See the [IC Schema Reference](../ic/reference/schema.md).
 
@@ -164,12 +164,12 @@ pub struct User {
 
 **Choosing the right type:**
 
-| Type | Max Records |
-|------|-------------|
-| `Uint32` | ~4.3 billion |
+| Type     | Max Records       |
+| -------- | ----------------- |
+| `Uint32` | ~4.3 billion      |
 | `Uint64` | ~18.4 quintillion |
-| `Int32` | ~2.1 billion |
-| `Int64` | ~9.2 quintillion |
+| `Int32`  | ~2.1 billion      |
+| `Int64`  | ~9.2 quintillion  |
 
 > **Tip:** `Uint64` is recommended for most use cases. Only use smaller types when storage space is critical and you are certain the record count will stay within bounds.
 
@@ -290,11 +290,11 @@ pub struct Post {
 
 **Attribute parameters:**
 
-| Parameter | Description |
-|-----------|-------------|
-| `entity` | Rust struct name of the referenced table |
-| `table` | Table name (from `#[table = "..."]`) |
-| `column` | Column name in the referenced table |
+| Parameter | Description                              |
+| --------- | ---------------------------------------- |
+| `entity`  | Rust struct name of the referenced table |
+| `table`   | Table name (from `#[table = "..."]`)     |
+| `column`  | Column name in the referenced table      |
 
 **Nullable foreign key:**
 
@@ -596,13 +596,13 @@ impl Migrate for Event {
 
 **Trait contract:**
 
-| Method | Returns | Effect |
-| ------ | ------- | ------ |
-| `default_value(column)` | `Some(v)` | Use `v` for `AddColumn` on `column`. |
-| `default_value(column)` | `None` | Fall back to `#[default = ...]`, else `MigrationError::MissingDefault`. |
-| `transform_column(column, old)` | `Ok(Some(v))` | Replace stored value with `v`. |
-| `transform_column(column, old)` | `Ok(None)` | No transform; framework errors with `MigrationError::IncompatibleType` unless the type change is a whitelisted widening. |
-| `transform_column(column, old)` | `Err(_)` | Abort the migration; the journaled session rolls back. |
+| Method                          | Returns       | Effect                                                                                                                   |
+| ------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `default_value(column)`         | `Some(v)`     | Use `v` for `AddColumn` on `column`.                                                                                     |
+| `default_value(column)`         | `None`        | Fall back to `#[default = ...]`, else `MigrationError::MissingDefault`.                                                  |
+| `transform_column(column, old)` | `Ok(Some(v))` | Replace stored value with `v`.                                                                                           |
+| `transform_column(column, old)` | `Ok(None)`    | No transform; framework errors with `MigrationError::IncompatibleType` unless the type change is a whitelisted widening. |
+| `transform_column(column, old)` | `Err(_)`      | Abort the migration; the journaled session rolls back.                                                                   |
 
 > **Note:** Without `#[migrate]`, do **not** write `impl Migrate for T {}` yourself — the macro already emitted one and you would get a duplicate-impl error.
 

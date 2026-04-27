@@ -56,12 +56,12 @@ If you are using wasm-dbms outside the Internet Computer (e.g., in a standalone 
 
 IC-DBMS is composed of four crates:
 
-| Crate | Description | Depends On |
-|-------|-------------|------------|
-| **ic-dbms-api** | Shared types, re-exports `wasm-dbms-api` types with IC additions. Provides `IcDbmsError` type alias and IC-compatible type wrappers. | `wasm-dbms-api` |
-| **ic-dbms-canister** | Core canister engine. Provides the `DbmsCanister` derive macro target, ACL management, canister init/upgrade lifecycle, and the IC stable memory provider. | `wasm-dbms`, `ic-dbms-api` |
-| **ic-dbms-macros** | Procedural macros: `#[derive(DatabaseSchema)]` (IC variant, uses IC crate paths) and `#[derive(DbmsCanister)]` for generating complete canister APIs. | `wasm-dbms-macros` |
-| **ic-dbms-client** | Client library with three implementations: `IcDbmsCanisterClient` (inter-canister), `IcDbmsAgentClient` (external via IC agent), `IcDbmsPocketIcClient` (integration testing). | `ic-dbms-api` |
+| Crate                | Description                                                                                                                                                                    | Depends On                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| **ic-dbms-api**      | Shared types, re-exports `wasm-dbms-api` types with IC additions. Provides `IcDbmsError` type alias and IC-compatible type wrappers.                                           | `wasm-dbms-api`            |
+| **ic-dbms-canister** | Core canister engine. Provides the `DbmsCanister` derive macro target, ACL management, canister init/upgrade lifecycle, and the IC stable memory provider.                     | `wasm-dbms`, `ic-dbms-api` |
+| **ic-dbms-macros**   | Procedural macros: `#[derive(DatabaseSchema)]` (IC variant, uses IC crate paths) and `#[derive(DbmsCanister)]` for generating complete canister APIs.                          | `wasm-dbms-macros`         |
+| **ic-dbms-client**   | Client library with three implementations: `IcDbmsCanisterClient` (inter-canister), `IcDbmsAgentClient` (external via IC agent), `IcDbmsPocketIcClient` (integration testing). | `ic-dbms-api`              |
 
 **Import convention:**
 

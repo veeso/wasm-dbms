@@ -24,7 +24,7 @@ wasmtime::component::bindgen!({
 });
 
 use crate::wasm_dbms::dbms::types::{
-    ColumnValue, DbmsError, OrderDirection, OrderKey, Query, Value,
+    ColumnValue, DbmsError, MigrationPolicy, OrderDirection, OrderKey, Query, Value,
 };
 
 /// Default path to the pre-built guest component.
@@ -285,6 +285,19 @@ fn main() -> Result<()> {
         .map_err(dbms_err)?;
     assert!(rows.is_empty(), "Eve should NOT exist after rollback");
     println!("  Verified: Eve does NOT exist after rollback.");
+    println!();
+
+    // ── Schema migrations ───────────────────────────────────────────
+    println!("--- Schema migrations smoke test ---");
+    let drift = db.call_has_drift(&mut store)?.map_err(dbms_err)?;
+    println!("  has_drift = {drift}");
+    let ops = db.call_pending_migrations(&mut store)?.map_err(dbms_err)?;
+    println!("  pending_migrations.len() = {}", ops.len());
+    let policy = MigrationPolicy {
+        allow_destructive: false,
+    };
+    db.call_migrate(&mut store, policy)?.map_err(dbms_err)?;
+    println!("  migrate() applied (no-op)");
     println!();
 
     // ── Final state ─────────────────────────────────────────────────
