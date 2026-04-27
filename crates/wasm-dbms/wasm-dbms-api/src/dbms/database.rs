@@ -1,7 +1,7 @@
 use crate::error::DbmsResult;
 use crate::prelude::{
     AggregateFunction, AggregatedRow, ColumnDef, DeleteBehavior, Filter, InsertRecord,
-    JoinColumnDef, Query, TableSchema, UpdateRecord, Value,
+    JoinColumnDef, MigrationOp, MigrationPolicy, Query, TableSchema, UpdateRecord, Value,
 };
 
 /// CRUD, aggregate, and transaction operations exposed by a wasm-dbms session.
@@ -315,4 +315,51 @@ pub trait Database {
     ///
     /// [`TransactionError::NoActiveTransaction`]: crate::prelude::TransactionError::NoActiveTransaction
     fn rollback(&mut self) -> DbmsResult<()>;
+
+    /// Returns `true` iff the compiled schema differs from the snapshots
+    /// persisted in stable memory.
+    ///
+    /// `O(1)` after the first call thanks to a per-context cache. Implementors
+    /// gate every CRUD entry on this flag so callers can rely on the boolean
+    /// to decide whether a migration is required before doing any work.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`DbmsError::Memory`](crate::prelude::DbmsError::Memory) when
+    /// the persisted snapshots cannot be read.
+    fn has_drift(&self) -> DbmsResult<bool>;
+
+    /// Returns the migration ops needed to bring the on-disk schema in line
+    /// with the compiled schema, without applying anything.
+    ///
+    /// Always recomputes the diff — there is no cache; the call is rare
+    /// (typically once before [`Self::migrate`]) and the result depends on
+    /// runtime state the cache cannot track. Safe to call while drift is
+    /// active.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the same [`DbmsError`](crate::prelude::DbmsError) variants
+    /// the migration diff produces, plus
+    /// [`DbmsError::Memory`](crate::prelude::DbmsError::Memory) when persisted
+    /// snapshots cannot be read.
+    fn pending_migrations(&self) -> DbmsResult<Vec<MigrationOp>>;
+
+    /// Applies a planned migration under `policy`.
+    ///
+    /// Plans the diff, sorts the ops into deterministic apply order, validates
+    /// against `policy`, then executes inside the implementation's journaled
+    /// atomic block. On success the drift cache is cleared so subsequent CRUD
+    /// calls pass; on failure the journal rolls back and the drift flag stays
+    /// set.
+    ///
+    /// # Errors
+    ///
+    /// - [`MigrationError::DestructiveOpDenied`](crate::prelude::MigrationError::DestructiveOpDenied)
+    ///   when the planner emits a destructive op disallowed by `policy`.
+    /// - [`MigrationError::DataRewriteUnsupported`](crate::prelude::MigrationError::DataRewriteUnsupported)
+    ///   for column-mutating ops not yet implemented (see issue #91).
+    /// - Any other [`MigrationError`](crate::prelude::MigrationError) variant
+    ///   raised by the diff or apply pipeline.
+    fn migrate(&mut self, policy: MigrationPolicy) -> DbmsResult<()>;
 }

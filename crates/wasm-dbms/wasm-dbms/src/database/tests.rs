@@ -2714,6 +2714,271 @@ fn select_with_having_is_rejected() {
     assert!(err.to_string().contains("GROUP BY"));
 }
 
+mod migration_e2e {
+    use wasm_dbms_api::prelude::{
+        ColumnSnapshot, DataTypeSnapshot, Database as _, DbmsError, IndexSnapshot,
+        InsertRecord as _, MigrationError, MigrationOp, MigrationPolicy, Query, TableSchema as _,
+        Text, Uint32, Value,
+    };
+    use wasm_dbms_macros::{DatabaseSchema, Table};
+    use wasm_dbms_memory::MemoryAccess;
+    use wasm_dbms_memory::prelude::HeapMemoryProvider;
+
+    use crate::prelude::{DbmsContext, WasmDbmsDatabase};
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "users"]
+    pub struct User {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(User = "users")]
+    pub struct UserSchema;
+
+    fn setup() -> DbmsContext<HeapMemoryProvider> {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        UserSchema::register_tables(&ctx).unwrap();
+        ctx
+    }
+
+    fn tamper_snapshot_to_force_drift(ctx: &DbmsContext<HeapMemoryProvider>) {
+        let snapshot_page = {
+            let sr = ctx.schema_registry.borrow();
+            sr.table_registry_page::<User>()
+                .unwrap()
+                .schema_snapshot_page
+        };
+        let mut tampered = User::schema_snapshot();
+        tampered.indexes.push(IndexSnapshot {
+            columns: vec!["name".to_string()],
+            unique: false,
+        });
+        ctx.mm
+            .borrow_mut()
+            .write_at(snapshot_page, 0, &tampered)
+            .unwrap();
+        ctx.clear_drift();
+    }
+
+    #[test]
+    fn test_has_drift_returns_false_for_matching_schemas() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        assert!(!db.has_drift().unwrap());
+    }
+
+    #[test]
+    fn test_has_drift_returns_true_after_persisted_snapshot_diverges() {
+        let ctx = setup();
+        tamper_snapshot_to_force_drift(&ctx);
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        assert!(db.has_drift().unwrap());
+    }
+
+    #[test]
+    fn test_pending_migrations_is_empty_when_schemas_match() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        let ops = db.pending_migrations().unwrap();
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn test_pending_migrations_produces_drop_index_for_extra_persisted_index() {
+        let ctx = setup();
+        tamper_snapshot_to_force_drift(&ctx);
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        let ops = db.pending_migrations().unwrap();
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(
+            &ops[0],
+            MigrationOp::DropIndex { table, index }
+                if table == "users" && index.columns == vec!["name".to_string()]
+        ));
+    }
+
+    #[test]
+    fn test_migrate_clears_drift_and_persists_compiled_snapshot() {
+        let ctx = setup();
+        tamper_snapshot_to_force_drift(&ctx);
+        let mut db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+
+        assert!(db.has_drift().unwrap());
+        db.migrate(MigrationPolicy::default()).unwrap();
+        assert!(!db.has_drift().unwrap());
+
+        let stored = ctx
+            .schema_registry
+            .borrow()
+            .stored_snapshots(&mut *ctx.mm.borrow_mut())
+            .unwrap();
+        let users = stored.iter().find(|s| s.name == "users").unwrap();
+        assert!(
+            !users
+                .indexes
+                .iter()
+                .any(|i| i.columns == vec!["name".to_string()]),
+            "extra index should be removed by the migration"
+        );
+    }
+
+    #[test]
+    fn test_select_returns_schema_drift_error_while_drift_is_active() {
+        let ctx = setup();
+        tamper_snapshot_to_force_drift(&ctx);
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+
+        let result = db.select::<User>(Query::builder().build());
+        assert!(matches!(
+            result,
+            Err(DbmsError::Migration(MigrationError::SchemaDrift))
+        ));
+    }
+
+    #[test]
+    fn test_insert_returns_schema_drift_error_while_drift_is_active() {
+        let ctx = setup();
+        tamper_snapshot_to_force_drift(&ctx);
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+
+        let insert = UserInsertRequest::from_values(&[
+            (User::columns()[0], Value::Uint32(Uint32(1))),
+            (User::columns()[1], Value::Text(Text("alice".to_string()))),
+        ])
+        .unwrap();
+        let result = db.insert::<User>(insert);
+        assert!(matches!(
+            result,
+            Err(DbmsError::Migration(MigrationError::SchemaDrift))
+        ));
+    }
+
+    #[test]
+    fn test_acl_operations_bypass_drift_gate() {
+        let ctx = setup();
+        tamper_snapshot_to_force_drift(&ctx);
+        ctx.acl_add(vec![1, 2, 3]).unwrap();
+        assert!(ctx.acl_is_allowed(&vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn test_crud_resumes_after_successful_migration() {
+        let ctx = setup();
+
+        {
+            let pre_db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+            let insert = UserInsertRequest::from_values(&[
+                (User::columns()[0], Value::Uint32(Uint32(1))),
+                (User::columns()[1], Value::Text(Text("alice".to_string()))),
+            ])
+            .unwrap();
+            pre_db.insert::<User>(insert).unwrap();
+        }
+
+        tamper_snapshot_to_force_drift(&ctx);
+
+        let mut db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        let blocked = db.select::<User>(Query::builder().build());
+        assert!(matches!(
+            blocked,
+            Err(DbmsError::Migration(MigrationError::SchemaDrift))
+        ));
+
+        db.migrate(MigrationPolicy::default()).unwrap();
+
+        let rows = db.select::<User>(Query::builder().build()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, Some(Uint32(1)));
+        assert_eq!(rows[0].name, Some(Text("alice".to_string())));
+    }
+
+    #[test]
+    fn test_migrate_rejects_destructive_drop_table_under_default_policy() {
+        let ctx = setup();
+        let stale_snapshot = wasm_dbms_api::prelude::TableSchemaSnapshot {
+            version: wasm_dbms_api::prelude::TableSchemaSnapshot::latest_version(),
+            name: "stale_table".to_string(),
+            primary_key: "id".to_string(),
+            alignment: 8,
+            columns: vec![ColumnSnapshot {
+                name: "id".to_string(),
+                data_type: DataTypeSnapshot::Uint32,
+                nullable: false,
+                auto_increment: false,
+                unique: true,
+                primary_key: true,
+                foreign_key: None,
+                default: None,
+            }],
+            indexes: vec![],
+        };
+        ctx.schema_registry
+            .borrow_mut()
+            .register_table_from_snapshot(&stale_snapshot, &mut *ctx.mm.borrow_mut())
+            .unwrap();
+        ctx.clear_drift();
+
+        let mut db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        assert!(db.has_drift().unwrap());
+
+        let result = db.migrate(MigrationPolicy::default());
+        assert!(matches!(
+            result,
+            Err(DbmsError::Migration(MigrationError::DestructiveOpDenied { ref op })) if op.contains("DropTable")
+        ));
+
+        let after = db.select::<User>(Query::builder().build());
+        assert!(matches!(
+            after,
+            Err(DbmsError::Migration(MigrationError::SchemaDrift))
+        ));
+    }
+
+    #[test]
+    fn test_migrate_with_destructive_policy_drops_stale_table() {
+        let ctx = setup();
+        let stale_snapshot = wasm_dbms_api::prelude::TableSchemaSnapshot {
+            version: wasm_dbms_api::prelude::TableSchemaSnapshot::latest_version(),
+            name: "stale_table".to_string(),
+            primary_key: "id".to_string(),
+            alignment: 8,
+            columns: vec![ColumnSnapshot {
+                name: "id".to_string(),
+                data_type: DataTypeSnapshot::Uint32,
+                nullable: false,
+                auto_increment: false,
+                unique: true,
+                primary_key: true,
+                foreign_key: None,
+                default: None,
+            }],
+            indexes: vec![],
+        };
+        ctx.schema_registry
+            .borrow_mut()
+            .register_table_from_snapshot(&stale_snapshot, &mut *ctx.mm.borrow_mut())
+            .unwrap();
+        ctx.clear_drift();
+
+        let mut db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        db.migrate(MigrationPolicy {
+            allow_destructive: true,
+        })
+        .unwrap();
+
+        let stored = ctx
+            .schema_registry
+            .borrow()
+            .stored_snapshots(&mut *ctx.mm.borrow_mut())
+            .unwrap();
+        assert!(!stored.iter().any(|s| s.name == "stale_table"));
+        assert!(stored.iter().any(|s| s.name == "users"));
+    }
+}
+
 #[test]
 fn select_join_with_group_by_is_rejected() {
     use wasm_dbms_api::prelude::Database as _;

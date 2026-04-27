@@ -38,8 +38,12 @@ fn impl_database_schema(struct_ident: &syn::Ident, tables: &[TableEntry]) -> Tok
     let validate_insert_fn = impl_validate_insert(tables);
     let validate_update_fn = impl_validate_update(tables);
     let migrate_default_fn = impl_migrate_default(tables);
+    let migrate_default_dyn_fn = impl_migrate_default_dyn();
     let migrate_transform_fn = impl_migrate_transform(tables);
+    let migrate_transform_dyn_fn = impl_migrate_transform_dyn();
     let compiled_snapshots_fn = impl_compiled_snapshots(tables);
+    let compiled_snapshots_dyn_fn = impl_compiled_snapshots_dyn();
+    let renamed_from_dyn_fn = impl_renamed_from_dyn(tables);
 
     quote::quote! {
         impl<M, A> ::wasm_dbms::prelude::DatabaseSchema<M, A> for #struct_ident
@@ -56,8 +60,12 @@ fn impl_database_schema(struct_ident: &syn::Ident, tables: &[TableEntry]) -> Tok
             #validate_insert_fn
             #validate_update_fn
             #migrate_default_fn
+            #migrate_default_dyn_fn
             #migrate_transform_fn
+            #migrate_transform_dyn_fn
             #compiled_snapshots_fn
+            #compiled_snapshots_dyn_fn
+            #renamed_from_dyn_fn
         }
     }
 }
@@ -391,6 +399,66 @@ fn impl_compiled_snapshots(tables: &[TableEntry]) -> TokenStream2 {
     quote::quote! {
         fn compiled_snapshots() -> Vec<::wasm_dbms_api::prelude::TableSchemaSnapshot> {
             vec![#(#entries),*]
+        }
+    }
+}
+
+fn impl_compiled_snapshots_dyn() -> TokenStream2 {
+    quote::quote! {
+        fn compiled_snapshots_dyn(&self) -> Vec<::wasm_dbms_api::prelude::TableSchemaSnapshot> {
+            <Self as ::wasm_dbms::prelude::DatabaseSchema<M, A>>::compiled_snapshots()
+        }
+    }
+}
+
+fn impl_migrate_default_dyn() -> TokenStream2 {
+    quote::quote! {
+        fn migrate_default_dyn(
+            &self,
+            table: &str,
+            column: &str,
+        ) -> Option<::wasm_dbms_api::prelude::Value> {
+            <Self as ::wasm_dbms::prelude::DatabaseSchema<M, A>>::migrate_default(table, column)
+        }
+    }
+}
+
+fn impl_migrate_transform_dyn() -> TokenStream2 {
+    quote::quote! {
+        fn migrate_transform_dyn(
+            &self,
+            table: &str,
+            column: &str,
+            old: ::wasm_dbms_api::prelude::Value,
+        ) -> ::wasm_dbms_api::prelude::DbmsResult<Option<::wasm_dbms_api::prelude::Value>> {
+            <Self as ::wasm_dbms::prelude::DatabaseSchema<M, A>>::migrate_transform(table, column, old)
+        }
+    }
+}
+
+fn impl_renamed_from_dyn(tables: &[TableEntry]) -> TokenStream2 {
+    let match_arms: Vec<_> = tables
+        .iter()
+        .map(|t| {
+            let entity = &t.table;
+            quote::quote! {
+                name if name == <#entity as ::wasm_dbms_api::prelude::TableSchema>::table_name() => {
+                    <#entity as ::wasm_dbms_api::prelude::TableSchema>::columns()
+                        .iter()
+                        .find(|c| c.name == column)
+                        .map(|c| c.renamed_from.to_vec())
+                        .unwrap_or_default()
+                }
+            }
+        })
+        .collect();
+
+    quote::quote! {
+        fn renamed_from_dyn(&self, table: &str, column: &str) -> Vec<&'static str> {
+            match table {
+                #(#match_arms)*
+                _ => Vec::new(),
+            }
         }
     }
 }

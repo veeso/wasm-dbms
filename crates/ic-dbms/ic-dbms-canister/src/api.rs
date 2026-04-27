@@ -393,6 +393,8 @@ mod tests {
 
     fn init_acl() {
         DBMS_CONTEXT.with(|ctx| {
+            crate::tests::TestDatabaseSchema::register_tables(ctx)
+                .expect("failed to register tables");
             ctx.acl_add(alice()).unwrap();
         });
     }

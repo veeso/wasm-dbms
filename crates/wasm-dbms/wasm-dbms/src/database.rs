@@ -3,6 +3,7 @@
 mod aggregate;
 mod filter_analyzer;
 mod index_reader;
+mod migration;
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -10,8 +11,9 @@ use std::collections::HashSet;
 use wasm_dbms_api::prelude::{
     AggregateFunction, AggregatedRow, ColumnDef, DataTypeKind, Database, DbmsError, DbmsResult,
     DeleteBehavior, Filter, ForeignFetcher, ForeignKeyDef, InsertRecord, JoinColumnDef,
-    OrderDirection, Query, QueryError, TableColumns, TableError, TableRecord, TableSchema,
-    TransactionError, TransactionId, UpdateRecord, Value, ValuesSource,
+    MigrationError, MigrationOp, MigrationPolicy, OrderDirection, Query, QueryError, TableColumns,
+    TableError, TableRecord, TableSchema, TransactionError, TransactionId, UpdateRecord, Value,
+    ValuesSource,
 };
 use wasm_dbms_memory::RecordAddress;
 use wasm_dbms_memory::prelude::{
@@ -99,6 +101,35 @@ where
         let ts = self.ctx.transaction_session.borrow();
         let tx = ts.get_transaction(txid)?;
         f(tx)
+    }
+
+    /// Returns the cached drift flag, computing and caching it on first call.
+    ///
+    /// `O(tables × snapshot bytes)` on the first invocation; `O(1)` thereafter.
+    /// Cleared by [`Self::migrate`] on success so subsequent CRUD calls
+    /// recompute against the new state.
+    fn drift_check(&self) -> DbmsResult<bool> {
+        if self.ctx.is_migrating() {
+            return Ok(false);
+        }
+        if let Some(cached) = self.ctx.cached_drift() {
+            return Ok(cached);
+        }
+        let drifted = migration::snapshots::compute_drift(self.ctx, self.schema.as_ref())?;
+        self.ctx.set_drift(drifted);
+        Ok(drifted)
+    }
+
+    /// Returns `Err(SchemaDrift)` when the cached drift flag is set.
+    ///
+    /// Called as the first line of every CRUD entry point on the
+    /// [`Database`] trait so reads and writes refuse to proceed against a
+    /// schema the storage layer cannot interpret.
+    fn ensure_no_drift(&self) -> DbmsResult<()> {
+        if self.drift_check()? {
+            return Err(DbmsError::Migration(MigrationError::SchemaDrift));
+        }
+        Ok(())
     }
 
     /// Executes a closure atomically using a write-ahead journal.
@@ -1014,6 +1045,7 @@ where
     where
         T: TableSchema,
     {
+        self.ensure_no_drift()?;
         if !query.joins.is_empty() {
             return Err(DbmsError::Query(QueryError::JoinInsideTypedSelect));
         }
@@ -1022,6 +1054,7 @@ where
     }
 
     fn select_raw(&self, table: &str, query: Query) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
+        self.ensure_no_drift()?;
         self.schema.select(self, table, query)
     }
 
@@ -1030,6 +1063,7 @@ where
         table: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
+        self.ensure_no_drift()?;
         self.select_join_inner(table, query)
     }
 
@@ -1041,6 +1075,7 @@ where
     where
         T: TableSchema,
     {
+        self.ensure_no_drift()?;
         aggregate::run_aggregate::<T, _, _>(self, query, aggregates)
     }
 
@@ -1049,6 +1084,7 @@ where
         T: TableSchema,
         T::Insert: InsertRecord<Schema = T>,
     {
+        self.ensure_no_drift()?;
         let mut table_registry = self.load_table_registry::<T>()?;
         let record_values = record.clone().into_values();
         let record_values =
@@ -1090,6 +1126,7 @@ where
         T: TableSchema,
         T::Update: UpdateRecord<Schema = T>,
     {
+        self.ensure_no_drift()?;
         let filter = patch.where_clause().clone();
         if self.transaction.is_some() {
             let rows = self.existing_rows_for_filter::<T>(filter.clone())?;
@@ -1186,6 +1223,7 @@ where
     where
         T: TableSchema,
     {
+        self.ensure_no_drift()?;
         if self.transaction.is_some() {
             let rows = self.existing_rows_for_filter::<T>(filter.clone())?;
             let count = rows.len() as u64;
@@ -1234,6 +1272,7 @@ where
     }
 
     fn commit(&mut self) -> DbmsResult<()> {
+        self.ensure_no_drift()?;
         let Some(txid) = self.transaction.take() else {
             return Err(DbmsError::Transaction(
                 TransactionError::NoActiveTransaction,
@@ -1293,6 +1332,27 @@ where
         let mut ts = self.ctx.transaction_session.borrow_mut();
         ts.close_transaction(&txid);
         Ok(())
+    }
+
+    fn has_drift(&self) -> DbmsResult<bool> {
+        self.drift_check()
+    }
+
+    fn pending_migrations(&self) -> DbmsResult<Vec<MigrationOp>> {
+        let stored = {
+            let sr = self.ctx.schema_registry.borrow();
+            let mut mm = self.ctx.mm.borrow_mut();
+            sr.stored_snapshots(&mut *mm)?
+        };
+        let compiled = self.schema.compiled_snapshots_dyn();
+        migration::diff::diff(&stored, &compiled, self.schema.as_ref())
+    }
+
+    fn migrate(&mut self, policy: MigrationPolicy) -> DbmsResult<()> {
+        let mut ops = self.pending_migrations()?;
+        migration::plan::validate(&ops, policy)?;
+        migration::plan::order_ops(&mut ops);
+        migration::apply::apply(self, ops)
     }
 }
 

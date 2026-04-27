@@ -109,6 +109,13 @@ where
     where
         Self: Sized;
 
+    /// Object-safe sibling of [`Self::migrate_default`].
+    ///
+    /// The macro emits a one-line dispatch to the `Sized` variant so callers
+    /// holding a `&dyn DatabaseSchema` can resolve `AddColumn` defaults
+    /// without re-genericising on `S`.
+    fn migrate_default_dyn(&self, table: &str, column: &str) -> Option<Value>;
+
     /// Transforms a stored value when migrating a column to an incompatible
     /// type by dispatching to the table's
     /// [`Migrate::transform_column`](wasm_dbms_api::prelude::Migrate::transform_column)
@@ -116,6 +123,14 @@ where
     fn migrate_transform(table: &str, column: &str, old: Value) -> DbmsResult<Option<Value>>
     where
         Self: Sized;
+
+    /// Object-safe sibling of [`Self::migrate_transform`].
+    fn migrate_transform_dyn(
+        &self,
+        table: &str,
+        column: &str,
+        old: Value,
+    ) -> DbmsResult<Option<Value>>;
 
     /// Returns the compile-time [`TableSchemaSnapshot`] for every table in the
     /// schema.
@@ -125,6 +140,19 @@ where
     fn compiled_snapshots() -> Vec<TableSchemaSnapshot>
     where
         Self: Sized;
+
+    /// Object-safe sibling of [`Self::compiled_snapshots`].
+    ///
+    /// `WasmDbmsDatabase` holds a `Box<dyn DatabaseSchema>`, so it cannot call
+    /// `compiled_snapshots()` directly (that method requires `Self: Sized`).
+    fn compiled_snapshots_dyn(&self) -> Vec<TableSchemaSnapshot>;
+
+    /// Returns the compile-time `renamed_from` chain for `column` on `table`.
+    ///
+    /// Used by the migration diff stage to detect rename operations: when a
+    /// compiled column does not match any stored column by name, the diff
+    /// walks this list looking for a stored column under a previous name.
+    fn renamed_from_dyn(&self, table: &str, column: &str) -> Vec<&'static str>;
 }
 
 #[cfg(test)]

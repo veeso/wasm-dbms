@@ -39,13 +39,31 @@ impl IndexLedger {
         indexes: &[IndexDef],
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
-        let mut tables = HashMap::with_capacity(indexes.len());
-        for index in indexes {
+        Self::init_from_keys(
+            ledger_page,
+            indexes
+                .iter()
+                .map(|index| index.0.iter().map(ToString::to_string).collect::<Vec<_>>()),
+            mm,
+        )
+    }
+
+    /// Initializes the index ledger from owned column-key vectors.
+    ///
+    /// Used by the migration engine, which materialises a table from a
+    /// [`TableSchemaSnapshot`] and therefore has no `'static` slice handy.
+    pub fn init_from_keys<I>(
+        ledger_page: Page,
+        index_keys: I,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<()>
+    where
+        I: IntoIterator<Item = Vec<String>>,
+    {
+        let mut tables = HashMap::new();
+        for key in index_keys {
             let root_page = IndexTree::<wasm_dbms_api::prelude::Uint32>::init(mm)?.root_page();
-            tables.insert(
-                index.0.iter().map(ToString::to_string).collect::<Vec<_>>(),
-                root_page,
-            );
+            tables.insert(key, root_page);
         }
 
         let ledger = IndexLedger {

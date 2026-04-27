@@ -29,6 +29,7 @@ thiserror = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
 wasm-dbms-macros = { workspace = true }
+xxhash-rust = { workspace = true }
 
 [features]
 default = []

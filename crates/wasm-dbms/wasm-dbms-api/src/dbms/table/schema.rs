@@ -1,6 +1,6 @@
 pub mod snapshot;
 
-use std::hash::{Hash as _, Hasher as _};
+use xxhash_rust::xxh3::xxh3_64;
 
 pub use self::snapshot::{
     ColumnSnapshot, DataTypeSnapshot, ForeignKeySnapshot, IndexSnapshot, OnDeleteSnapshot,
@@ -151,8 +151,16 @@ where
     /// schema evolution. Two distinct types declaring the same `table_name` are intentionally
     /// considered the same logical table.
     fn fingerprint() -> TableFingerprint {
-        let mut hasher = std::hash::DefaultHasher::new();
-        Self::table_name().hash(&mut hasher);
-        hasher.finish()
+        fingerprint_for_name(Self::table_name())
     }
+}
+
+/// Computes the [`TableFingerprint`] for an arbitrary table name.
+///
+/// Uses `xxh3_64` (deterministic, stable across processes and architectures).
+/// Used by the migration engine to derive the registry key for tables it
+/// knows only by name (e.g. when applying a `MigrationOp::CreateTable` from a
+/// snapshot, which does not carry compile-time `TypeId` information).
+pub fn fingerprint_for_name(name: &str) -> TableFingerprint {
+    xxh3_64(name.as_bytes())
 }

@@ -15,7 +15,7 @@ pub use self::record::{
 };
 pub use self::schema::{
     ColumnSnapshot, DataTypeSnapshot, ForeignKeySnapshot, IndexSnapshot, OnDeleteSnapshot,
-    TableFingerprint, TableSchema, TableSchemaSnapshot,
+    TableFingerprint, TableSchema, TableSchemaSnapshot, fingerprint_for_name,
 };
 
 /// Table related errors

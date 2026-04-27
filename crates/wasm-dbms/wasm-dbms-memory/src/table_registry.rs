@@ -277,9 +277,31 @@ impl TableRegistry {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use wasm_dbms_api::prelude::{
-        DEFAULT_ALIGNMENT, DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult,
-        PageOffset,
+        DEFAULT_ALIGNMENT, DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult, Page,
+        PageOffset, TableSchemaSnapshot,
     };
+
+    use crate::MemoryAccess;
+
+    /// Writes a minimal valid [`TableSchemaSnapshot`] to `page` so subsequent
+    /// `TableRegistry::load` calls can decode it.
+    ///
+    /// Required because the table-registry unit tests allocate raw pages and
+    /// load the registry directly, bypassing the
+    /// [`SchemaRegistry::register_table`](crate::SchemaRegistry::register_table)
+    /// path that normally writes the snapshot for them.
+    pub fn write_dummy_schema_snapshot(page: Page, mm: &mut impl MemoryAccess) {
+        let dummy = TableSchemaSnapshot {
+            version: TableSchemaSnapshot::latest_version(),
+            name: "dummy".to_string(),
+            primary_key: "id".to_string(),
+            alignment: 8,
+            columns: vec![],
+            indexes: vec![],
+        };
+        mm.write_at(page, 0, &dummy)
+            .expect("failed to write dummy snapshot");
+    }
 
     /// A simple user struct for testing purposes (no macro dependencies).
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -367,6 +389,7 @@ mod tests {
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
         let autoincrement_page = mm.allocate_page().expect("failed to get page");
+        super::test_utils::write_dummy_schema_snapshot(schema_snapshot_page, &mut mm);
         let table_pages = TableRegistryPage {
             schema_snapshot_page,
             pages_list_page: page_ledger_page,
@@ -902,6 +925,7 @@ mod tests {
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
         let autoincrement_page = mm.allocate_page().expect("failed to get page");
+        super::test_utils::write_dummy_schema_snapshot(schema_snapshot_page, mm);
         let table_pages = TableRegistryPage {
             schema_snapshot_page,
             pages_list_page: page_ledger_page,
@@ -931,6 +955,7 @@ mod tests {
         let page_ledger_page = mm.allocate_page().expect("failed to get page");
         let free_segments_page = mm.allocate_page().expect("failed to get page");
         let index_registry_page = mm.allocate_page().expect("failed to get page");
+        super::test_utils::write_dummy_schema_snapshot(schema_snapshot_page, mm);
         let table_pages = TableRegistryPage {
             schema_snapshot_page,
             pages_list_page: page_ledger_page,
@@ -1172,6 +1197,8 @@ mod tests {
 
         // init index ledger
         IndexLedger::init(index_registry_page, &[], &mut mm).expect("failed to init index ledger");
+
+        super::test_utils::write_dummy_schema_snapshot(schema_snapshot_page, &mut mm);
 
         let table_pages = TableRegistryPage {
             schema_snapshot_page,

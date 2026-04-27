@@ -17,6 +17,7 @@ include = ["src/**/*", "../../../LICENSE", "README.md", "../../../CHANGELOG.md"]
 rust_decimal = { workspace = true }
 wasm-dbms-api = { workspace = true }
 wasm-dbms-memory = { workspace = true }
+xxhash-rust = { workspace = true }
 
 [dev-dependencies]
 candid = { workspace = true }

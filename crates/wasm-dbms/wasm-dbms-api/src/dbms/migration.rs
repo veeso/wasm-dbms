@@ -251,6 +251,15 @@ pub enum MigrationError {
         /// Reason propagated from the user transform.
         reason: String,
     },
+    /// Column-mutating op (`AddColumn`, `DropColumn`, `RenameColumn`,
+    /// `WidenColumn`, `TransformColumn`) requires a snapshot-driven record
+    /// (de)serializer that is tracked separately and not yet wired into the
+    /// apply pipeline.
+    #[error("Migration op `{op}` requires snapshot-driven record rewrite (see issue #91)")]
+    DataRewriteUnsupported {
+        /// Short tag for the offending op kind.
+        op: String,
+    },
 }
 
 #[cfg(test)]

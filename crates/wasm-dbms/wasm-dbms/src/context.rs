@@ -7,7 +7,7 @@
 //! state. Internal `RefCell` wrappers allow shared-reference mutation
 //! through a single shared reference.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use wasm_dbms_api::prelude::{DbmsResult, TransactionId};
 use wasm_dbms_memory::prelude::{
@@ -54,6 +54,16 @@ where
 
     /// Active write-ahead journal for atomic operations.
     pub(crate) journal: RefCell<Option<Journal>>,
+
+    /// Lazily computed drift flag: `Some(true)` when the compiled schema
+    /// diverges from the snapshots persisted in stable memory, `Some(false)`
+    /// when they match, `None` until the first check on this context.
+    pub(crate) drift: Cell<Option<bool>>,
+
+    /// Set while a migration apply pass is mutating stable memory so the
+    /// per-CRUD drift gate does not block the engine's own internal reads
+    /// (e.g. tightening validation that scans existing rows).
+    pub(crate) migrating: Cell<bool>,
 }
 
 impl<M> DbmsContext<M>
@@ -73,6 +83,8 @@ where
             acl: RefCell::new(acl),
             transaction_session: RefCell::new(TransactionSession::default()),
             journal: RefCell::new(None),
+            drift: Cell::new(None),
+            migrating: Cell::new(false),
         }
     }
 }
@@ -94,6 +106,8 @@ where
             acl: RefCell::new(acl),
             transaction_session: RefCell::new(TransactionSession::default()),
             journal: RefCell::new(None),
+            drift: Cell::new(None),
+            migrating: Cell::new(false),
         }
     }
 
@@ -142,6 +156,31 @@ where
     pub fn has_transaction(&self, tx_id: &TransactionId, caller: &[u8]) -> bool {
         let ts = self.transaction_session.borrow();
         ts.has_transaction(tx_id, caller)
+    }
+
+    /// Returns the cached drift flag, or `None` if it has not been computed yet.
+    pub(crate) fn cached_drift(&self) -> Option<bool> {
+        self.drift.get()
+    }
+
+    /// Caches the drift flag for the lifetime of the context (until cleared).
+    pub(crate) fn set_drift(&self, value: bool) {
+        self.drift.set(Some(value));
+    }
+
+    /// Clears the cached drift flag, forcing the next call to recompute.
+    pub(crate) fn clear_drift(&self) {
+        self.drift.set(None);
+    }
+
+    /// Returns `true` while a migration apply pass is mutating stable memory.
+    pub(crate) fn is_migrating(&self) -> bool {
+        self.migrating.get()
+    }
+
+    /// Sets the migration-in-progress guard.
+    pub(crate) fn set_migrating(&self, value: bool) {
+        self.migrating.set(value);
     }
 }
 

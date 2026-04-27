@@ -2,14 +2,9 @@ use std::collections::HashSet;
 
 use candid::CandidType;
 use criterion::{Criterion, criterion_group, criterion_main};
-use ic_dbms_api::prelude::{
-    AggregateFunction, AggregatedRow, ColumnDef, Database, DeleteBehavior, Filter, InsertRecord,
-    Migrate, Query, QueryError, TableSchema, TableSchemaSnapshot, UpdateRecord, Value,
-    flatten_table_columns,
-};
+use ic_dbms_api::prelude::{Database, DeleteBehavior, Filter, Query, Value};
 use ic_dbms_canister::prelude::{
-    AccessControl, DBMS_CONTEXT, DatabaseSchema, InsertIntegrityValidator, MemoryProvider, Table,
-    Text, Uint64, UpdateIntegrityValidator, WasmDbmsDatabase, get_referenced_tables,
+    DBMS_CONTEXT, DatabaseSchema, Table, Text, Uint64, WasmDbmsDatabase,
 };
 use serde::Deserialize;
 
@@ -23,161 +18,9 @@ pub struct User {
     email: Text,
 }
 
+#[derive(DatabaseSchema)]
+#[tables(User = "users")]
 pub struct TestDatabaseSchema;
-
-impl<M, A> DatabaseSchema<M, A> for TestDatabaseSchema
-where
-    M: MemoryProvider,
-    A: AccessControl,
-{
-    fn select(
-        &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
-        table_name: &str,
-        query: Query,
-    ) -> ic_dbms_api::prelude::IcDbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
-        if table_name == User::table_name() {
-            let results = dbms.select_columns::<User>(query)?;
-            Ok(flatten_table_columns(results))
-        } else {
-            Err(ic_dbms_api::prelude::IcDbmsError::Query(
-                QueryError::TableNotFound(table_name.to_string()),
-            ))
-        }
-    }
-
-    fn aggregate(
-        &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
-        table_name: &str,
-        query: Query,
-        aggregates: &[AggregateFunction],
-    ) -> ic_dbms_api::prelude::IcDbmsResult<Vec<AggregatedRow>> {
-        if table_name == User::table_name() {
-            dbms.aggregate::<User>(query, aggregates)
-        } else {
-            Err(ic_dbms_api::prelude::IcDbmsError::Query(
-                QueryError::TableNotFound(table_name.to_string()),
-            ))
-        }
-    }
-
-    fn referenced_tables(&self, table: &'static str) -> Vec<(&'static str, Vec<&'static str>)> {
-        let tables = &[(User::table_name(), User::columns())];
-        get_referenced_tables(table, tables)
-    }
-
-    fn insert(
-        &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
-        table_name: &'static str,
-        record_values: &[(ColumnDef, Value)],
-    ) -> ic_dbms_api::prelude::IcDbmsResult<()> {
-        if table_name == User::table_name() {
-            let insert_request = UserInsertRequest::from_values(record_values)?;
-            dbms.insert::<User>(insert_request)
-        } else {
-            Err(ic_dbms_api::prelude::IcDbmsError::Query(
-                QueryError::TableNotFound(table_name.to_string()),
-            ))
-        }
-    }
-
-    fn delete(
-        &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
-        table_name: &'static str,
-        delete_behavior: DeleteBehavior,
-        filter: Option<Filter>,
-    ) -> ic_dbms_api::prelude::IcDbmsResult<u64> {
-        if table_name == User::table_name() {
-            dbms.delete::<User>(delete_behavior, filter)
-        } else {
-            Err(ic_dbms_api::prelude::IcDbmsError::Query(
-                QueryError::TableNotFound(table_name.to_string()),
-            ))
-        }
-    }
-
-    fn update(
-        &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
-        table_name: &'static str,
-        patch_values: &[(ColumnDef, Value)],
-        filter: Option<Filter>,
-    ) -> ic_dbms_api::prelude::IcDbmsResult<u64> {
-        if table_name == User::table_name() {
-            let update_request = UserUpdateRequest::from_values(patch_values, filter);
-            dbms.update::<User>(update_request)
-        } else {
-            Err(ic_dbms_api::prelude::IcDbmsError::Query(
-                QueryError::TableNotFound(table_name.to_string()),
-            ))
-        }
-    }
-
-    fn validate_insert(
-        &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
-        table_name: &'static str,
-        record_values: &[(ColumnDef, Value)],
-    ) -> ic_dbms_api::prelude::IcDbmsResult<()> {
-        if table_name == User::table_name() {
-            InsertIntegrityValidator::<User, M, A>::new(dbms).validate(record_values)
-        } else {
-            Err(ic_dbms_api::prelude::IcDbmsError::Query(
-                QueryError::TableNotFound(table_name.to_string()),
-            ))
-        }
-    }
-
-    fn validate_update(
-        &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
-        table_name: &'static str,
-        record_values: &[(ColumnDef, Value)],
-        old_pk: Value,
-    ) -> ic_dbms_api::prelude::IcDbmsResult<()> {
-        if table_name == User::table_name() {
-            UpdateIntegrityValidator::<User, M, A>::new(dbms, old_pk).validate(record_values)
-        } else {
-            Err(ic_dbms_api::prelude::IcDbmsError::Query(
-                QueryError::TableNotFound(table_name.to_string()),
-            ))
-        }
-    }
-
-    fn migrate_default(table: &str, column: &str) -> Option<Value> {
-        if table == User::table_name() {
-            User::default_value(column).or_else(|| {
-                User::columns()
-                    .iter()
-                    .find(|c| c.name == column)
-                    .and_then(|c| c.default.map(|f| f()))
-            })
-        } else {
-            None
-        }
-    }
-
-    fn migrate_transform(
-        table: &str,
-        column: &str,
-        old: Value,
-    ) -> ic_dbms_api::prelude::IcDbmsResult<Option<Value>> {
-        if table == User::table_name() {
-            User::transform_column(column, old)
-        } else {
-            Err(ic_dbms_api::prelude::IcDbmsError::Query(
-                QueryError::TableNotFound(table.to_string()),
-            ))
-        }
-    }
-
-    fn compiled_snapshots() -> Vec<TableSchemaSnapshot> {
-        vec![User::schema_snapshot()]
-    }
-}
 
 /// Load test fixtures into the database.
 fn load_fixtures(count: u64) {

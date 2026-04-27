@@ -178,5 +178,17 @@ mod tests {
         fn rollback(&mut self) -> DbmsResult<()> {
             unimplemented!()
         }
+
+        fn has_drift(&self) -> DbmsResult<bool> {
+            unimplemented!()
+        }
+
+        fn pending_migrations(&self) -> DbmsResult<Vec<crate::prelude::MigrationOp>> {
+            unimplemented!()
+        }
+
+        fn migrate(&mut self, _policy: crate::prelude::MigrationPolicy) -> DbmsResult<()> {
+            unimplemented!()
+        }
     }
 }

@@ -72,3 +72,4 @@ wit-bindgen = { version = "0.57", default-features = false, features = [
   "macros",
   "realloc",
 ] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }

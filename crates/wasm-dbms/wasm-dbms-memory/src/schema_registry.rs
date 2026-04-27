@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use wasm_dbms_api::memory::MemoryError;
 use wasm_dbms_api::prelude::{
     DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, Page, PageOffset, TableFingerprint,
-    TableSchema,
+    TableSchema, TableSchemaSnapshot, fingerprint_for_name,
 };
 
 use crate::table_registry::{AutoincrementLedger, IndexLedger, SchemaSnapshotLedger};
@@ -128,6 +128,126 @@ impl SchemaRegistry {
         TS: TableSchema,
     {
         self.tables.get(&TS::fingerprint()).copied()
+    }
+
+    /// Returns the table registry page for the table with the given name.
+    ///
+    /// Used by the migration engine, which knows tables only by name when
+    /// applying ops decoded from snapshots.
+    pub fn table_registry_page_by_name(&self, name: &str) -> Option<TableRegistryPage> {
+        self.tables.get(&fingerprint_for_name(name)).copied()
+    }
+
+    /// Registers a table from a snapshot, allocating its registry pages.
+    ///
+    /// The migration engine uses this entry point when applying a
+    /// `MigrationOp::CreateTable`: the source of truth is a
+    /// [`TableSchemaSnapshot`], not a `TableSchema` type.
+    ///
+    /// # Errors
+    ///
+    /// - [`MemoryError::NameCollision`] when the fingerprint slot is occupied
+    ///   by a table with a different name.
+    /// - Any [`MemoryError`] propagated from page allocation, snapshot init,
+    ///   index init, or registry persistence.
+    pub fn register_table_from_snapshot(
+        &mut self,
+        snapshot: &TableSchemaSnapshot,
+        mm: &mut MemoryManager<impl MemoryProvider>,
+    ) -> MemoryResult<TableRegistryPage> {
+        let fingerprint = fingerprint_for_name(&snapshot.name);
+        let candidate_name = snapshot.name.as_str();
+        if let Some(pages) = self.tables.get(&fingerprint).copied() {
+            let existing = SchemaSnapshotLedger::load(pages.schema_snapshot_page, mm)?;
+            if existing.get().name != candidate_name {
+                return Err(MemoryError::NameCollision {
+                    candidate: candidate_name.to_string(),
+                    existing: existing.get().name.clone(),
+                });
+            }
+            return Ok(pages);
+        }
+
+        let schema_snapshot_page = mm.allocate_page()?;
+        let pages_list_page = mm.allocate_page()?;
+        let free_segments_page = mm.allocate_page()?;
+        let index_registry_page = mm.allocate_page()?;
+        let has_autoincrement = snapshot.columns.iter().any(|col| col.auto_increment);
+        let autoincrement_registry_page = if has_autoincrement {
+            Some(mm.allocate_page()?)
+        } else {
+            None
+        };
+
+        let pages = TableRegistryPage {
+            schema_snapshot_page,
+            pages_list_page,
+            free_segments_page,
+            index_registry_page,
+            autoincrement_registry_page,
+        };
+        self.tables.insert(fingerprint, pages);
+
+        let page = mm.schema_page();
+        mm.write_at(page, 0, self)?;
+
+        mm.write_at(pages.schema_snapshot_page, 0, snapshot)?;
+        IndexLedger::init_from_keys(
+            pages.index_registry_page,
+            snapshot.indexes.iter().map(|idx| idx.columns.clone()),
+            mm,
+        )?;
+
+        Ok(pages)
+    }
+
+    /// Removes the table identified by `name` from the registry and persists
+    /// the change.
+    ///
+    /// Used by the migration engine when applying a `MigrationOp::DropTable`.
+    /// The pages owned by the dropped table are leaked in v1 (issue #90 tracks
+    /// page reclamation).
+    ///
+    /// Returns the [`TableRegistryPage`] previously associated with the table,
+    /// or `None` if no such table was registered.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MemoryError`] if persisting the updated registry fails.
+    pub fn unregister_table(
+        &mut self,
+        name: &str,
+        mm: &mut MemoryManager<impl MemoryProvider>,
+    ) -> MemoryResult<Option<TableRegistryPage>> {
+        let fingerprint = fingerprint_for_name(name);
+        let removed = self.tables.remove(&fingerprint);
+        if removed.is_some() {
+            let page = mm.schema_page();
+            mm.write_at(page, 0, self)?;
+        }
+        Ok(removed)
+    }
+
+    /// Returns the persisted [`TableSchemaSnapshot`] for every registered table.
+    ///
+    /// The order is unspecified. Callers that need a stable order (e.g. for
+    /// drift hashing) must sort by [`TableSchemaSnapshot::name`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the first [`MemoryError`] encountered while loading any
+    /// snapshot page.
+    pub fn stored_snapshots(
+        &self,
+        mm: &mut MemoryManager<impl MemoryProvider>,
+    ) -> MemoryResult<Vec<TableSchemaSnapshot>> {
+        self.tables
+            .values()
+            .map(|pages| {
+                SchemaSnapshotLedger::load(pages.schema_snapshot_page, mm)
+                    .map(|ledger| ledger.get().clone())
+            })
+            .collect()
     }
 }
 
@@ -881,5 +1001,161 @@ mod tests {
         ) -> Option<Box<dyn wasm_dbms_api::prelude::Validate>> {
             None
         }
+    }
+
+    // -- Migration-engine entry points -------------------------------------
+
+    use wasm_dbms_api::prelude::{ColumnSnapshot, DataTypeSnapshot, TableSchemaSnapshot};
+
+    fn dummy_snapshot(name: &str) -> TableSchemaSnapshot {
+        TableSchemaSnapshot {
+            version: TableSchemaSnapshot::latest_version(),
+            name: name.to_string(),
+            primary_key: "id".to_string(),
+            alignment: 8,
+            columns: vec![ColumnSnapshot {
+                name: "id".to_string(),
+                data_type: DataTypeSnapshot::Uint32,
+                nullable: false,
+                auto_increment: false,
+                unique: true,
+                primary_key: true,
+                foreign_key: None,
+                default: None,
+            }],
+            indexes: vec![],
+        }
+    }
+
+    #[test]
+    fn test_table_registry_page_by_name_returns_pages_for_registered_table() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let pages = registry
+            .register_table::<User>(&mut mm)
+            .expect("failed to register user");
+
+        let by_name = registry
+            .table_registry_page_by_name("users")
+            .expect("missing pages by name");
+        assert_eq!(by_name, pages);
+    }
+
+    #[test]
+    fn test_table_registry_page_by_name_returns_none_for_unknown_table() {
+        let registry = SchemaRegistry::default();
+        assert!(registry.table_registry_page_by_name("missing").is_none());
+    }
+
+    #[test]
+    fn test_stored_snapshots_returns_empty_for_unregistered_registry() {
+        let mut mm = make_mm();
+        let registry = SchemaRegistry::default();
+        let snapshots = registry
+            .stored_snapshots(&mut mm)
+            .expect("failed to read snapshots");
+        assert!(snapshots.is_empty());
+    }
+
+    #[test]
+    fn test_stored_snapshots_returns_one_entry_per_registered_table() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        registry
+            .register_table::<User>(&mut mm)
+            .expect("failed to register user");
+        registry
+            .register_table::<AnotherTable>(&mut mm)
+            .expect("failed to register another");
+
+        let snapshots = registry
+            .stored_snapshots(&mut mm)
+            .expect("failed to load snapshots");
+        assert_eq!(snapshots.len(), 2);
+        let names: Vec<&str> = snapshots.iter().map(|snap| snap.name.as_str()).collect();
+        assert!(names.contains(&"users"));
+        assert!(names.contains(&"another_table"));
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_allocates_pages_and_persists_snapshot() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let snapshot = dummy_snapshot("fresh");
+
+        let pages = registry
+            .register_table_from_snapshot(&snapshot, &mut mm)
+            .expect("failed to register from snapshot");
+
+        let loaded = SchemaSnapshotLedger::load(pages.schema_snapshot_page, &mut mm).expect("load");
+        assert_eq!(loaded.get(), &snapshot);
+        assert!(registry.table_registry_page_by_name("fresh").is_some());
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_is_idempotent_for_same_name() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let snapshot = dummy_snapshot("fresh");
+
+        let first = registry
+            .register_table_from_snapshot(&snapshot, &mut mm)
+            .expect("first");
+        let second = registry
+            .register_table_from_snapshot(&snapshot, &mut mm)
+            .expect("second");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_detects_name_collision() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let snapshot = dummy_snapshot("users");
+
+        let pages = registry
+            .register_table_from_snapshot(&snapshot, &mut mm)
+            .expect("first");
+
+        // Tamper persisted snapshot to simulate a colliding fingerprint with a
+        // different name.
+        let mut tampered = snapshot.clone();
+        tampered.name = "imposter".to_string();
+        mm.write_at(pages.schema_snapshot_page, 0, &tampered)
+            .expect("overwrite");
+
+        let result = registry.register_table_from_snapshot(&snapshot, &mut mm);
+        assert!(matches!(
+            result,
+            Err(MemoryError::NameCollision {
+                ref candidate,
+                ref existing,
+            }) if candidate == "users" && existing == "imposter"
+        ));
+    }
+
+    #[test]
+    fn test_unregister_table_removes_entry_and_returns_previous_pages() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let pages = registry
+            .register_table::<User>(&mut mm)
+            .expect("failed to register");
+
+        let removed = registry
+            .unregister_table("users", &mut mm)
+            .expect("unregister");
+        assert_eq!(removed, Some(pages));
+        assert!(registry.table_registry_page_by_name("users").is_none());
+    }
+
+    #[test]
+    fn test_unregister_table_returns_none_for_unknown_table() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let removed = registry
+            .unregister_table("missing", &mut mm)
+            .expect("unregister");
+        assert!(removed.is_none());
     }
 }
