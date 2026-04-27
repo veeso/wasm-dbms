@@ -22,17 +22,13 @@ pub(crate) fn order_ops(ops: &mut [MigrationOp]) {
 
 /// Validates the planned ops against `policy` before any memory mutation.
 ///
-/// Defense-in-depth: catches destructive ops the diff layer can produce, plus
-/// re-checks `DefaultMissing` for `AddColumn` ops in case the diff was
-/// short-circuited (e.g. by a future caller bypassing the diff entry point).
+/// Defense-in-depth: catches destructive ops the diff layer can produce
+/// before the journaled apply pass opens.
 ///
 /// # Errors
 ///
 /// - [`MigrationError::DestructiveOpDenied`] when `policy.allow_destructive`
 ///   is `false` and the plan includes a `DropTable` or `DropColumn`.
-/// - [`MigrationError::DefaultMissing`] when a non-nullable `AddColumn` op
-///   lacks a static `#[default]` (the dispatch fallback is verified later, at
-///   apply time, since it requires a schema reference).
 pub(crate) fn validate(ops: &[MigrationOp], policy: MigrationPolicy) -> DbmsResult<()> {
     for op in ops {
         match op {
@@ -44,14 +40,6 @@ pub(crate) fn validate(ops: &[MigrationOp], policy: MigrationPolicy) -> DbmsResu
             MigrationOp::DropColumn { table, column } if !policy.allow_destructive => {
                 return Err(DbmsError::Migration(MigrationError::DestructiveOpDenied {
                     op: format!("DropColumn({table}.{column})"),
-                }));
-            }
-            MigrationOp::AddColumn { table, column }
-                if !column.nullable && column.default.is_none() =>
-            {
-                return Err(DbmsError::Migration(MigrationError::DefaultMissing {
-                    table: table.clone(),
-                    column: column.name.clone(),
                 }));
             }
             _ => {}
@@ -282,13 +270,9 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_rejects_add_column_without_default_for_non_nullable() {
+    fn test_validate_allows_add_column_without_static_default() {
         let ops = vec![add_column("users", "email", false, false)];
-        let result = validate(&ops, MigrationPolicy::default());
-        assert!(matches!(
-            result,
-            Err(DbmsError::Migration(MigrationError::DefaultMissing { ref column, .. })) if column == "email"
-        ));
+        validate(&ops, MigrationPolicy::default()).expect("apply resolves dynamic defaults");
     }
 
     #[test]

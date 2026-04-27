@@ -202,23 +202,24 @@ impl TableRegistry {
                 .commit_reused_space_raw(physical_size_msize, segment, mm)?;
             (page, offset)
         } else {
-            let (page, offset) = self
-                .page_ledger
-                .get_page_and_offset_raw(physical_size_u64, mm)?;
+            let (page, offset) =
+                self.page_ledger
+                    .get_page_and_offset_raw(physical_size_u64, alignment, mm)?;
             self.page_ledger.commit_raw(page, total, alignment, mm)?;
             (page, offset)
         };
-
-        let aligned_offset = align_up_msize(offset, alignment);
         let mut full = Vec::with_capacity(total as usize);
         full.extend_from_slice(&length.to_le_bytes());
         full.extend_from_slice(bytes);
-        mm.write_at_raw(page, aligned_offset, &full)?;
+        mm.write_at_raw(page, offset, &full)?;
+        let physical_size = align_up_msize(RAW_RECORD_HEADER_SIZE + length, alignment);
+        let padding = physical_size.saturating_sub(RAW_RECORD_HEADER_SIZE + length);
+        if padding > 0 {
+            let padding_offset = offset + RAW_RECORD_HEADER_SIZE + length;
+            mm.zero_raw(page, padding_offset, padding)?;
+        }
 
-        Ok(RecordAddress {
-            page,
-            offset: aligned_offset,
-        })
+        Ok(RecordAddress { page, offset })
     }
 
     /// Read raw record bytes at the given address (header stripped).

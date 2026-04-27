@@ -1,4 +1,4 @@
-//! Schema snapshot canonicalisation and drift detection.
+//! Schema snapshot canonicalisation and persisted schema hashing.
 //!
 //! The hash function and the canonicalisation rules below are part of the
 //! on-disk contract: changing either invalidates the drift comparison for every
@@ -8,12 +8,8 @@
 //! change to the canonicalisation logic in this file that does **not** also
 //! bump the snapshot version requires manual coordination across deployments.
 
-use wasm_dbms_api::prelude::{DbmsResult, Encode, TableSchemaSnapshot};
-use wasm_dbms_memory::prelude::{AccessControl, MemoryProvider};
+use wasm_dbms_api::prelude::{Encode, TableSchemaSnapshot};
 use xxhash_rust::xxh3::Xxh3;
-
-use crate::context::DbmsContext;
-use crate::schema::DatabaseSchema;
 
 /// Computes the drift hash for a set of snapshots.
 ///
@@ -34,32 +30,6 @@ pub(crate) fn compute_hash(mut snapshots: Vec<TableSchemaSnapshot>) -> u64 {
     hasher.digest()
 }
 
-/// Returns `true` iff the compiled snapshots reachable through `schema` differ
-/// from the snapshots persisted in `ctx`'s schema registry.
-///
-/// The check loads every persisted snapshot from disk via
-/// [`SchemaRegistry::stored_snapshots`](wasm_dbms_memory::prelude::SchemaRegistry::stored_snapshots),
-/// and compares hashes. The cost grows linearly with the number of registered
-/// tables; the engine caches the result on `DbmsContext` so the hot CRUD path
-/// pays for it only once per process.
-pub(crate) fn compute_drift<M, A>(
-    ctx: &DbmsContext<M, A>,
-    schema: &dyn DatabaseSchema<M, A>,
-) -> DbmsResult<bool>
-where
-    M: MemoryProvider,
-    A: AccessControl,
-{
-    let stored = {
-        let sr = ctx.schema_registry.borrow();
-        let mut mm = ctx.mm.borrow_mut();
-        sr.stored_snapshots(&mut *mm)?
-    };
-    let compiled = schema.compiled_snapshots_dyn();
-
-    Ok(compute_hash(stored) != compute_hash(compiled))
-}
-
 #[cfg(test)]
 mod tests {
     use wasm_dbms_api::prelude::{
@@ -72,6 +42,7 @@ mod tests {
 
     use super::*;
     use crate::context::DbmsContext;
+    use crate::schema::DatabaseSchema;
 
     fn snapshot(name: &str, columns: Vec<ColumnSnapshot>) -> TableSchemaSnapshot {
         TableSchemaSnapshot {
@@ -150,16 +121,17 @@ mod tests {
     pub struct UserSchema;
 
     #[test]
-    fn test_compute_drift_returns_false_when_compiled_matches_stored() {
+    fn test_schema_registry_hash_matches_compiled_schema() {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
         UserSchema::register_tables(&ctx).unwrap();
 
-        let drifted = compute_drift(&ctx, &UserSchema).expect("compute_drift failed");
-        assert!(!drifted);
+        let compiled_hash =
+            compute_hash(<UserSchema as DatabaseSchema<HeapMemoryProvider>>::compiled_snapshots());
+        assert_eq!(ctx.schema_registry.borrow().schema_hash(), compiled_hash);
     }
 
     #[test]
-    fn test_compute_drift_returns_true_when_persisted_snapshot_diverges() {
+    fn test_schema_registry_hash_changes_when_persisted_snapshot_diverges() {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
         UserSchema::register_tables(&ctx).unwrap();
 
@@ -186,8 +158,15 @@ mod tests {
             .borrow_mut()
             .write_at(snapshot_page, 0, &tampered)
             .unwrap();
+        {
+            let mut schema_registry = ctx.schema_registry.borrow_mut();
+            let mut mm = ctx.mm.borrow_mut();
+            schema_registry.refresh_schema_hash(&mut *mm).unwrap();
+            schema_registry.save(&mut *mm).unwrap();
+        }
 
-        let drifted = compute_drift(&ctx, &UserSchema).expect("compute_drift failed");
-        assert!(drifted);
+        let compiled_hash =
+            compute_hash(<UserSchema as DatabaseSchema<HeapMemoryProvider>>::compiled_snapshots());
+        assert_ne!(ctx.schema_registry.borrow().schema_hash(), compiled_hash);
     }
 }

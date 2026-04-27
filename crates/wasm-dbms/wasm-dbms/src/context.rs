@@ -55,10 +55,9 @@ where
     /// Active write-ahead journal for atomic operations.
     pub(crate) journal: RefCell<Option<Journal>>,
 
-    /// Lazily computed drift flag: `Some(true)` when the compiled schema
-    /// diverges from the snapshots persisted in stable memory, `Some(false)`
-    /// when they match, `None` until the first check on this context.
-    pub(crate) drift: Cell<Option<bool>>,
+    /// Cached `(compiled_schema_hash, drifted)` pair for the most recent
+    /// schema attached to a database session on this context.
+    pub(crate) drift: Cell<Option<(u64, bool)>>,
 
     /// Set while a migration apply pass is mutating stable memory so the
     /// per-CRUD drift gate does not block the engine's own internal reads
@@ -158,14 +157,16 @@ where
         ts.has_transaction(tx_id, caller)
     }
 
-    /// Returns the cached drift flag, or `None` if it has not been computed yet.
-    pub(crate) fn cached_drift(&self) -> Option<bool> {
-        self.drift.get()
+    /// Returns the cached drift flag for `compiled_hash`, if present.
+    pub(crate) fn cached_drift_for(&self, compiled_hash: u64) -> Option<bool> {
+        self.drift
+            .get()
+            .and_then(|(hash, drifted)| (hash == compiled_hash).then_some(drifted))
     }
 
-    /// Caches the drift flag for the lifetime of the context (until cleared).
-    pub(crate) fn set_drift(&self, value: bool) {
-        self.drift.set(Some(value));
+    /// Caches the drift flag for the given compiled schema hash.
+    pub(crate) fn set_drift(&self, compiled_hash: u64, value: bool) {
+        self.drift.set(Some((compiled_hash, value)));
     }
 
     /// Clears the cached drift flag, forcing the next call to recompute.

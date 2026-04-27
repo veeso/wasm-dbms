@@ -299,6 +299,7 @@ where
 {
     let mut snapshot = load_snapshot_for_mutation(db, table, touched)?;
     snapshot.indexes.retain(|i| i != index);
+    rebuild_indexes_from_storage(db, table, &snapshot)?;
     persist_pending_snapshot(touched, snapshot);
     Ok(())
 }
@@ -541,7 +542,7 @@ where
 
     // Resolve default outside the rewrite borrow scope.
     let default = resolve_default(db, table, column)?;
-    validate_added_column_constraints(db, table, column, &default)?;
+    validate_added_column_constraints(db, table, &old_snapshot, column, &default)?;
     let column_name = column.name.clone();
 
     rewrite_table(db, table, &old_snapshot, &new_snapshot, |mut values| {
@@ -558,6 +559,7 @@ where
 fn validate_added_column_constraints<M, A>(
     db: &WasmDbmsDatabase<'_, M, A>,
     table: &str,
+    old_snapshot: &TableSchemaSnapshot,
     column: &ColumnSnapshot,
     default: &Value,
 ) -> DbmsResult<()>
@@ -573,7 +575,7 @@ where
         }));
     }
 
-    let row_count = count_rows(db, table)?;
+    let row_count = count_rows_by_snapshot(db, table, old_snapshot)?;
     if column.unique && row_count > 1 {
         return Err(DbmsError::Migration(MigrationError::ConstraintViolation {
             table: table.to_string(),
@@ -794,12 +796,16 @@ where
         .collect()
 }
 
-fn count_rows<M, A>(db: &WasmDbmsDatabase<'_, M, A>, table: &str) -> DbmsResult<usize>
+fn count_rows_by_snapshot<M, A>(
+    db: &WasmDbmsDatabase<'_, M, A>,
+    table: &str,
+    snapshot: &TableSchemaSnapshot,
+) -> DbmsResult<usize>
 where
     M: MemoryProvider,
     A: AccessControl,
 {
-    Ok(db.schema.select(db, table, Query::builder().build())?.len())
+    Ok(load_raw_rows(db, table, snapshot)?.len())
 }
 
 fn validate_no_nulls<M, A>(
@@ -894,6 +900,16 @@ where
             &mut writer,
         )?;
     }
+
+    let mut sr = db.ctx.schema_registry.borrow_mut();
+    let mut mm = db.ctx.mm.borrow_mut();
+    let mut journal_ref = db.ctx.journal.borrow_mut();
+    let journal = journal_ref
+        .as_mut()
+        .expect("journal must be active inside atomic");
+    let mut writer = JournaledWriter::new(&mut *mm, journal);
+    sr.refresh_schema_hash(&mut writer)?;
+    sr.save(&mut writer)?;
     Ok(())
 }
 
@@ -909,6 +925,8 @@ mod tests {
     use super::*;
     use crate::context::DbmsContext;
     use crate::database::migration::plan::order_ops;
+    use crate::database::migration::snapshots;
+    use crate::schema::DatabaseSchema;
 
     #[derive(Debug, Table, Clone, PartialEq, Eq)]
     #[table = "users"]
@@ -922,9 +940,37 @@ mod tests {
     #[tables(User = "users")]
     pub struct UserSchema;
 
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "dynamic_default_users"]
+    #[migrate]
+    pub struct DynamicDefaultUser {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+    }
+
+    impl wasm_dbms_api::prelude::Migrate for DynamicDefaultUser {
+        fn default_value(column: &str) -> Option<Value> {
+            match column {
+                "email" => Some(Value::Text(Text("dynamic@example.com".to_string()))),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(DynamicDefaultUser = "dynamic_default_users")]
+    pub struct DynamicDefaultUserSchema;
+
     fn fresh_db() -> DbmsContext<HeapMemoryProvider> {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
         UserSchema::register_tables(&ctx).unwrap();
+        ctx
+    }
+
+    fn fresh_dynamic_default_db() -> DbmsContext<HeapMemoryProvider> {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        DynamicDefaultUserSchema::register_tables(&ctx).unwrap();
         ctx
     }
 
@@ -1211,6 +1257,19 @@ mod tests {
         .unwrap();
     }
 
+    fn insert_dynamic_default_user(
+        db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+        id: u32,
+        name: &str,
+    ) {
+        use wasm_dbms_api::prelude::Database;
+        db.insert::<DynamicDefaultUser>(DynamicDefaultUserInsertRequest {
+            id: Uint32(id),
+            name: Text(name.to_string()),
+        })
+        .unwrap();
+    }
+
     /// Read the stored snapshot for `name`.
     fn stored_snapshot(ctx: &DbmsContext<HeapMemoryProvider>, name: &str) -> TableSchemaSnapshot {
         ctx.schema_registry
@@ -1359,6 +1418,47 @@ mod tests {
     }
 
     #[test]
+    fn test_add_column_uses_dynamic_migrate_default() {
+        let ctx = fresh_dynamic_default_db();
+        {
+            let db = WasmDbmsDatabase::oneshot(&ctx, DynamicDefaultUserSchema);
+            insert_dynamic_default_user(&db, 1, "alice");
+        }
+
+        let new_col = ColumnSnapshot {
+            name: "email".to_string(),
+            data_type: DataTypeSnapshot::Text,
+            nullable: false,
+            auto_increment: false,
+            unique: false,
+            primary_key: false,
+            foreign_key: None,
+            default: None,
+        };
+        {
+            let db = WasmDbmsDatabase::oneshot(&ctx, DynamicDefaultUserSchema);
+            apply(
+                &db,
+                vec![MigrationOp::AddColumn {
+                    table: "dynamic_default_users".to_string(),
+                    column: new_col,
+                }],
+            )
+            .unwrap();
+        }
+
+        let snap = stored_snapshot(&ctx, "dynamic_default_users");
+        let rows = read_rows_under(&ctx, &snap);
+        assert_eq!(rows.len(), 1);
+        let email = rows[0]
+            .iter()
+            .find(|(n, _)| n == "email")
+            .map(|(_, v)| v)
+            .unwrap();
+        assert_eq!(email, &Value::Text(Text("dynamic@example.com".to_string())));
+    }
+
+    #[test]
     fn test_add_column_unique_default_is_rejected_and_rolled_back() {
         let ctx = fresh_db();
         {
@@ -1429,6 +1529,55 @@ mod tests {
             .map(|(_, v)| v)
             .unwrap();
         assert_eq!(id, &Value::Uint32(Uint32(1)));
+    }
+
+    #[test]
+    fn test_drop_index_rebuilds_physical_index_ledger() {
+        let ctx = fresh_db();
+        {
+            let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+            insert_user(&db, 1, "alice");
+            apply(
+                &db,
+                vec![MigrationOp::AddIndex {
+                    table: "users".to_string(),
+                    index: IndexSnapshot {
+                        columns: vec!["name".to_string()],
+                        unique: false,
+                    },
+                }],
+            )
+            .expect("create test index");
+        }
+
+        let pages = ctx
+            .schema_registry
+            .borrow()
+            .table_registry_page::<User>()
+            .expect("users table registry page");
+        {
+            let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+            apply(
+                &db,
+                vec![MigrationOp::DropIndex {
+                    table: "users".to_string(),
+                    index: IndexSnapshot {
+                        columns: vec!["name".to_string()],
+                        unique: false,
+                    },
+                }],
+            )
+            .unwrap();
+        }
+
+        let mut mm = ctx.mm.borrow_mut();
+        let reloaded =
+            IndexLedger::load(pages.index_registry_page, &mut *mm).expect("reload index ledger");
+        let result = reloaded.search(&["name"], &Value::Text(Text("alice".to_string())), &mut *mm);
+        assert!(
+            result.is_err(),
+            "dropped index tree should no longer exist on disk"
+        );
     }
 
     #[test]
@@ -1996,11 +2145,14 @@ mod tests {
     #[test]
     fn test_apply_clears_drift_flag_on_success() {
         let ctx = fresh_db();
-        ctx.set_drift(true);
         let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        let compiled_hash = snapshots::compute_hash(<UserSchema as DatabaseSchema<
+            HeapMemoryProvider,
+        >>::compiled_snapshots());
+        ctx.set_drift(compiled_hash, true);
 
         apply(&db, vec![]).unwrap();
-        assert!(ctx.cached_drift().is_none());
+        assert_eq!(ctx.cached_drift_for(compiled_hash), None);
     }
 
     /// Touch the `MigrationPolicy` import so the test module compiles cleanly

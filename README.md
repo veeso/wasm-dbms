@@ -205,13 +205,14 @@ canister.
 - [x] Complex queries with filtering and pagination
 - [x] Relationships between tables with foreign keys
 - [x] Transactions with commit and rollback
+- [x] Aggregation functions (COUNT, SUM, AVG, etc.)
 - [x] Access Control Lists (ACL) to restrict access to the database
 - [x] Validation, Sanitizers and constraints on table columns
 - [x] JOIN operations between tables
 - [x] Custom data types
 - [x] Runtime-agnostic core (wasm-dbms) for any WASM runtime
 - [x] Indexes for faster queries
-- [ ] Migrations to update the database schema on canister upgrades
+- [x] Migrations to update the database schema on the fly
 - [ ] SQL query support
 
 ## Documentation

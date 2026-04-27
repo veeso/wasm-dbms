@@ -7,6 +7,7 @@ use wasm_dbms_api::prelude::{
     DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, Page, PageOffset, TableFingerprint,
     TableSchema, TableSchemaSnapshot, fingerprint_for_name,
 };
+use xxhash_rust::xxh3::Xxh3;
 
 use crate::memory_manager::{SCHEMA_PAGE, UNCLAIMED_PAGES_PAGE};
 use crate::table_registry::{AutoincrementLedger, IndexLedger, SchemaSnapshotLedger};
@@ -31,6 +32,7 @@ pub struct TableRegistryPage {
 /// The schema registry takes care of storing and retrieving table schemas from memory.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SchemaRegistry {
+    schema_hash: u64,
     tables: HashMap<TableFingerprint, TableRegistryPage>,
 }
 
@@ -39,6 +41,11 @@ impl SchemaRegistry {
     pub fn load(mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         let registry: Self = mm.read_at(SCHEMA_PAGE, 0)?;
         Ok(registry)
+    }
+
+    /// Returns the cached hash of every persisted schema snapshot.
+    pub const fn schema_hash(&self) -> u64 {
+        self.schema_hash
     }
 
     /// Registers a table and allocates it registry page.
@@ -99,10 +106,6 @@ impl SchemaRegistry {
         };
         self.tables.insert(fingerprint, pages);
 
-        // get schema page
-        // write self to schema page
-        mm.write_at(SCHEMA_PAGE, 0, self)?;
-
         // init snapshot ledger for this table
         SchemaSnapshotLedger::init::<TS>(pages.schema_snapshot_page, mm)?;
         // init index ledger for this table
@@ -111,6 +114,9 @@ impl SchemaRegistry {
         if let Some(autoinc_page) = pages.autoincrement_registry_page {
             AutoincrementLedger::init::<TS>(autoinc_page, mm)?;
         }
+
+        self.refresh_schema_hash(mm)?;
+        self.save(mm)?;
 
         Ok(pages)
     }
@@ -186,14 +192,14 @@ impl SchemaRegistry {
         };
         self.tables.insert(fingerprint, pages);
 
-        mm.write_at(SCHEMA_PAGE, 0, self)?;
-
         mm.write_at(pages.schema_snapshot_page, 0, snapshot)?;
         IndexLedger::init_from_keys(
             pages.index_registry_page,
             snapshot.indexes.iter().map(|idx| idx.columns.clone()),
             mm,
         )?;
+        self.refresh_schema_hash(mm)?;
+        self.save(mm)?;
 
         Ok(pages)
     }
@@ -234,7 +240,8 @@ impl SchemaRegistry {
             let removed = self.tables.remove(&fingerprint);
             debug_assert_eq!(removed, Some(pages));
             registry.release_pages(pages, mm)?;
-            mm.write_at(SCHEMA_PAGE, 0, self)?;
+            self.refresh_schema_hash(mm)?;
+            self.save(mm)?;
             return Ok(removed);
         }
         Ok(None)
@@ -261,6 +268,25 @@ impl SchemaRegistry {
             })
             .collect()
     }
+
+    /// Recomputes the cached schema hash from the currently registered tables.
+    pub fn refresh_schema_hash(&mut self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
+        self.schema_hash = compute_hash(self.stored_snapshots(mm)?);
+        Ok(())
+    }
+}
+
+fn compute_hash(mut snapshots: Vec<TableSchemaSnapshot>) -> u64 {
+    snapshots.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut hasher = Xxh3::new();
+    hasher.update(&[TableSchemaSnapshot::latest_version()]);
+    for snapshot in &snapshots {
+        let bytes = snapshot.encode();
+        hasher.update(&(bytes.len() as u64).to_le_bytes());
+        hasher.update(&bytes);
+    }
+    hasher.digest()
 }
 
 impl Encode for SchemaRegistry {
@@ -269,8 +295,10 @@ impl Encode for SchemaRegistry {
     const ALIGNMENT: PageOffset = DEFAULT_ALIGNMENT;
 
     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
-        // prepare buffer; size is 8 bytes for len + (8 + (4 * 2)) bytes for each entry
+        // prepare buffer; size is 8 bytes for schema_hash + 8 bytes for len
+        // + fixed-size fields for each entry.
         let mut buffer = Vec::with_capacity(self.size() as usize);
+        buffer.extend_from_slice(&self.schema_hash.to_le_bytes());
         // write 8 bytes len of map
         buffer.extend_from_slice(&(self.tables.len() as u64).to_le_bytes());
         // write each entry
@@ -296,6 +324,8 @@ impl Encode for SchemaRegistry {
         Self: Sized,
     {
         let mut offset = 0;
+        let schema_hash = u64::from_le_bytes(data[offset..offset + 8].try_into()?);
+        offset += 8;
         // read len
         let len = u64::from_le_bytes(
             data[offset..offset + 8]
@@ -336,10 +366,14 @@ impl Encode for SchemaRegistry {
                 },
             );
         }
-        Ok(Self { tables })
+        Ok(Self {
+            schema_hash,
+            tables,
+        })
     }
 
     fn size(&self) -> MSize {
+        // - 8 bytes for `self.schema_hash`
         // - 8 bytes for `self.tables.len()`
         // - for each entry:
         //  - 8 bytes for the fingerprint
@@ -355,7 +389,7 @@ impl Encode for SchemaRegistry {
             .filter(|page| page.autoincrement_registry_page.is_some())
             .count() as MSize;
 
-        8 + (self.tables.len() as MSize * (4 * 4 + 8 + 1)) + (autoinc_pages * 4)
+        16 + (self.tables.len() as MSize * (4 * 4 + 8 + 1)) + (autoinc_pages * 4)
     }
 }
 
@@ -812,14 +846,15 @@ mod tests {
     fn test_schema_registry_size() {
         let mut mm = make_mm();
         let mut registry = SchemaRegistry::default();
-        // Empty size: 8 bytes for length
-        assert_eq!(registry.size(), 8);
+        // Empty size: 8 bytes for schema_hash + 8 bytes for table count.
+        assert_eq!(registry.size(), 16);
         registry
             .register_table::<User>(&mut mm)
             .expect("failed to register");
-        // One entry without autoincrement: 8 + (8 + 4 + 4 + 4 + 4 + 1) = 33
+        // One entry without autoincrement:
+        // 16 + (8 + 4 + 4 + 4 + 4 + 1) = 41
         // (1 byte for autoincrement flag, no page bytes since User has no autoincrement column)
-        assert_eq!(registry.size(), 33);
+        assert_eq!(registry.size(), 41);
     }
 
     #[test]
@@ -860,9 +895,10 @@ mod tests {
         registry
             .register_table::<AutoincrementTable>(&mut mm)
             .expect("failed to register");
-        // One entry with autoincrement: 8 + (8 + 4 + 4 + 4 + 4 + 1 + 4) = 37
+        // One entry with autoincrement:
+        // 16 + (8 + 4 + 4 + 4 + 4 + 1 + 4) = 45
         // (1 byte for autoincrement flag + 4 bytes for the autoincrement page)
-        assert_eq!(registry.size(), 37);
+        assert_eq!(registry.size(), 45);
     }
 
     #[test]

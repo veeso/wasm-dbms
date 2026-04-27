@@ -23,12 +23,23 @@ use wasm_dbms_memory::prelude::{
 use self::filter_analyzer::{IndexPlan, analyze_filter};
 use self::index_reader::{IndexReader, IndexSearchResult};
 use crate::context::DbmsContext;
+use crate::database::migration::snapshots;
 use crate::schema::DatabaseSchema;
 use crate::transaction::journal::{Journal, JournaledWriter};
 use crate::transaction::{DatabaseOverlay, Transaction, TransactionOp};
 
 /// Default capacity for SELECT queries.
 const DEFAULT_SELECT_CAPACITY: usize = 128;
+
+fn prime_drift_cache<M, A>(ctx: &DbmsContext<M, A>, schema: &dyn DatabaseSchema<M, A>)
+where
+    M: MemoryProvider,
+    A: AccessControl,
+{
+    let compiled_hash = snapshots::compute_hash(schema.compiled_snapshots_dyn());
+    let drifted = ctx.schema_registry.borrow().schema_hash() != compiled_hash;
+    ctx.set_drift(compiled_hash, drifted);
+}
 
 /// The main DBMS database struct, generic over `MemoryProvider` and
 /// `AccessControl`.
@@ -55,9 +66,11 @@ where
 {
     /// Creates a one-shot (non-transactional) database instance.
     pub fn oneshot(ctx: &'ctx DbmsContext<M, A>, schema: impl DatabaseSchema<M, A> + 'ctx) -> Self {
+        let schema = Box::new(schema);
+        prime_drift_cache(ctx, schema.as_ref());
         Self {
             ctx,
-            schema: Box::new(schema),
+            schema,
             transaction: None,
         }
     }
@@ -68,9 +81,11 @@ where
         schema: impl DatabaseSchema<M, A> + 'ctx,
         transaction_id: TransactionId,
     ) -> Self {
+        let schema = Box::new(schema);
+        prime_drift_cache(ctx, schema.as_ref());
         Self {
             ctx,
-            schema: Box::new(schema),
+            schema,
             transaction: Some(transaction_id),
         }
     }
@@ -112,11 +127,12 @@ where
         if self.ctx.is_migrating() {
             return Ok(false);
         }
-        if let Some(cached) = self.ctx.cached_drift() {
+        let compiled_hash = snapshots::compute_hash(self.schema.compiled_snapshots_dyn());
+        if let Some(cached) = self.ctx.cached_drift_for(compiled_hash) {
             return Ok(cached);
         }
-        let drifted = migration::snapshots::compute_drift(self.ctx, self.schema.as_ref())?;
-        self.ctx.set_drift(drifted);
+        let drifted = self.ctx.schema_registry.borrow().schema_hash() != compiled_hash;
+        self.ctx.set_drift(compiled_hash, drifted);
         Ok(drifted)
     }
 

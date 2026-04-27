@@ -15,7 +15,6 @@ use crate::{MemoryAccess, align_up};
 struct Position {
     page: Page,
     offset: PageOffset,
-    size: u64,
 }
 
 /// Represents the next record to read from memory.
@@ -71,7 +70,6 @@ where
         let position = page_ledger.pages().first().map(|page_record| Position {
             page: page_record.page,
             offset: 0,
-            size: mm.page_size().saturating_sub(page_record.free),
         });
         let page_size = mm.page_size() as usize;
         Self {
@@ -86,12 +84,12 @@ where
 
     /// Reads the next record from the table registry.
     pub fn try_next(&mut self) -> MemoryResult<Option<NextRecord<E>>> {
-        let Some(Position { page, offset, size }) = self.position else {
+        let Some(Position { page, offset }) = self.position else {
             return Ok(None);
         };
 
         // find next record segment
-        let Some(next_record) = self.find_next_record(page, offset, size)? else {
+        let Some(next_record) = self.find_next_record(page, offset)? else {
             // no more records
             self.position = None;
             return Ok(None);
@@ -118,32 +116,26 @@ where
         &mut self,
         mut page: Page,
         mut offset: PageOffset,
-        mut page_size: u64,
     ) -> MemoryResult<Option<FoundRecord>> {
         loop {
-            // get read_len (cannot read more than page_size)
-            let read_len =
-                std::cmp::min(self.page_size, page_size as usize).saturating_sub(offset as usize);
             // if offset is zero, read page; otherwise, just reuse buffer
             if offset == 0 {
-                self.mm.read_at_raw(page, 0, &mut self.buffer[..read_len])?;
+                self.mm.read_at_raw(page, 0, &mut self.buffer)?;
             }
 
             // find next record in buffer; if found, return it
-            let buf_end = (page_size as usize).max(offset as usize);
             if let Some((next_segment_offset, next_segment_size)) =
-                self.find_next_record_position(&self.buffer[..buf_end], offset as usize)?
+                self.find_next_record_position(&self.buffer, offset as usize)?
             {
                 // found a record; return it
                 let new_offset = next_segment_offset + next_segment_size as PageOffset;
-                let new_position = if new_offset as u64 >= page_size {
+                let new_position = if new_offset as usize >= self.page_size {
                     // move to next page
                     self.next_page(page)
                 } else {
                     Some(Position {
                         page,
                         offset: new_offset,
-                        size: page_size,
                     })
                 };
                 return Ok(Some(FoundRecord {
@@ -159,7 +151,6 @@ where
                 Some(pos) => {
                     page = pos.page;
                     offset = pos.offset;
-                    page_size = pos.size;
                 }
                 None => break,
             }
@@ -177,7 +168,6 @@ where
             .map(|page_record| Position {
                 page: page_record.page,
                 offset: 0,
-                size: (self.page_size as u64).saturating_sub(page_record.free),
             })
     }
 

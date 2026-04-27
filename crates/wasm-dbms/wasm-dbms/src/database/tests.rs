@@ -2715,8 +2715,10 @@ fn select_with_having_is_rejected() {
 }
 
 mod migration_e2e {
+    use std::borrow::Cow;
+
     use wasm_dbms_api::prelude::{
-        ColumnSnapshot, DataTypeSnapshot, Database as _, DbmsError, IndexSnapshot,
+        ColumnSnapshot, DataTypeSnapshot, Database as _, DbmsError, Encode as _, IndexSnapshot,
         InsertRecord as _, MigrationError, MigrationOp, MigrationPolicy, Query, TableSchema as _,
         Text, Uint32, Value,
     };
@@ -2724,7 +2726,9 @@ mod migration_e2e {
     use wasm_dbms_memory::MemoryAccess;
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
+    use crate::database::migration::snapshots;
     use crate::prelude::{DbmsContext, WasmDbmsDatabase};
+    use crate::schema::DatabaseSchema;
 
     #[derive(Debug, Table, Clone, PartialEq, Eq)]
     #[table = "users"]
@@ -2737,6 +2741,29 @@ mod migration_e2e {
     #[derive(DatabaseSchema)]
     #[tables(User = "users")]
     pub struct UserSchema;
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "users"]
+    #[migrate]
+    pub struct UserV2 {
+        #[primary_key]
+        pub id: Uint32,
+        pub name: Text,
+        pub email: Text,
+    }
+
+    impl wasm_dbms_api::prelude::Migrate for UserV2 {
+        fn default_value(column: &str) -> Option<Value> {
+            match column {
+                "email" => Some(Value::Text(Text("dynamic@example.com".to_string()))),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(UserV2 = "users")]
+    pub struct UserSchemaV2;
 
     fn setup() -> DbmsContext<HeapMemoryProvider> {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
@@ -2760,6 +2787,10 @@ mod migration_e2e {
             .borrow_mut()
             .write_at(snapshot_page, 0, &tampered)
             .unwrap();
+        let mut schema_registry = ctx.schema_registry.borrow_mut();
+        let mut mm = ctx.mm.borrow_mut();
+        schema_registry.refresh_schema_hash(&mut *mm).unwrap();
+        schema_registry.save(&mut *mm).unwrap();
         ctx.clear_drift();
     }
 
@@ -2768,6 +2799,17 @@ mod migration_e2e {
         let ctx = setup();
         let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
         assert!(!db.has_drift().unwrap());
+    }
+
+    #[test]
+    fn test_database_creation_eagerly_caches_drift_flag() {
+        let ctx = setup();
+        let compiled_hash = snapshots::compute_hash(<UserSchema as DatabaseSchema<
+            HeapMemoryProvider,
+        >>::compiled_snapshots());
+        assert_eq!(ctx.cached_drift_for(compiled_hash), None);
+        let _db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        assert_eq!(ctx.cached_drift_for(compiled_hash), Some(false));
     }
 
     #[test]
@@ -2976,6 +3018,77 @@ mod migration_e2e {
             .unwrap();
         assert!(!stored.iter().any(|s| s.name == "stale_table"));
         assert!(stored.iter().any(|s| s.name == "users"));
+    }
+
+    #[test]
+    fn test_migrate_accepts_dynamic_default_for_non_nullable_added_column() {
+        let ctx = setup();
+        {
+            let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+            let insert = UserInsertRequest::from_values(&[
+                (User::columns()[0], Value::Uint32(Uint32(1))),
+                (User::columns()[1], Value::Text(Text("alice".to_string()))),
+            ])
+            .unwrap();
+            db.insert::<User>(insert).unwrap();
+        }
+
+        let mut db = WasmDbmsDatabase::oneshot(&ctx, UserSchemaV2);
+        assert!(db.has_drift().unwrap());
+        db.migrate(MigrationPolicy::default()).unwrap();
+
+        let snapshot = {
+            let mut mm = ctx.mm.borrow_mut();
+            ctx.schema_registry
+                .borrow()
+                .stored_snapshots(&mut *mm)
+                .unwrap()
+                .into_iter()
+                .find(|snapshot| snapshot.name == "users")
+                .unwrap()
+        };
+        let pages = ctx
+            .schema_registry
+            .borrow()
+            .table_registry_page_by_name("users")
+            .unwrap();
+        let raw_body = {
+            let mut mm = ctx.mm.borrow_mut();
+            let registry = wasm_dbms_memory::TableRegistry::load(pages, &mut *mm).unwrap();
+            let mut reader = registry.iter_raw(snapshot.alignment as u16, &mut *mm);
+            let raw = reader.try_next().unwrap().expect("migrated row");
+            raw.bytes
+        };
+        let decoded_snapshot =
+            crate::database::migration::codec::decode_record_by_snapshot(&raw_body, &snapshot)
+                .unwrap();
+        assert_eq!(decoded_snapshot.len(), 3);
+        let decoded_row = UserV2::decode(Cow::Borrowed(&raw_body)).unwrap();
+        assert_eq!(decoded_row.email, Text("dynamic@example.com".to_string()));
+        {
+            let mut mm = ctx.mm.borrow_mut();
+            let registry = wasm_dbms_memory::TableRegistry::load(pages, &mut *mm).unwrap();
+            let mut reader = registry.read::<UserV2, _>(&mut *mm);
+            let first = reader.try_next().unwrap().expect("typed migrated row");
+            assert_eq!(first.record.email, Text("dynamic@example.com".to_string()));
+            let second = reader.try_next();
+            assert!(
+                second.is_ok(),
+                "typed reader should not error after migrated row"
+            );
+            assert!(
+                second.unwrap().is_none(),
+                "typed reader should stop after one row"
+            );
+        }
+        let rows = db.select_raw("users", Query::builder().build()).unwrap();
+        assert_eq!(rows.len(), 1);
+        let email = rows[0]
+            .iter()
+            .find(|(column, _)| column.name == "email")
+            .map(|(_, value)| value)
+            .expect("email column should be present after migration");
+        assert_eq!(email, &Value::Text(Text("dynamic@example.com".to_string())));
     }
 }
 

@@ -111,6 +111,7 @@ impl PageLedger {
     pub fn get_page_and_offset_raw(
         &mut self,
         physical_size: u64,
+        alignment: PageOffset,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<(Page, PageOffset)> {
         let page_size = mm.page_size();
@@ -123,10 +124,12 @@ impl PageLedger {
 
         let next_page = self.pages.pages.iter().find(|page_record| {
             let taken = page_size.saturating_sub(page_record.free);
-            taken + physical_size <= page_size
+            let aligned_offset = align_up_u64(taken, alignment as u64);
+            aligned_offset + physical_size <= page_size
         });
         if let Some(page_record) = next_page {
-            let offset = page_size.saturating_sub(page_record.free) as PageOffset;
+            let taken = page_size.saturating_sub(page_record.free);
+            let offset = align_up_u64(taken, alignment as u64) as PageOffset;
             return Ok((page_record.page, offset));
         }
 
@@ -150,19 +153,23 @@ impl PageLedger {
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
         if let Some(page_record) = self.pages.pages.iter_mut().find(|pr| pr.page == page) {
-            if page_record.free < record_size {
-                return Err(wasm_dbms_api::prelude::MemoryError::DataTooLarge {
-                    page_size: page_record.free,
-                    requested: record_size,
-                });
-            }
-            let alignment = alignment as u64;
+            let page_size = mm.page_size();
+            let taken = page_size.saturating_sub(page_record.free);
+            let aligned_offset = align_up_u64(taken, alignment as u64);
+            let alignment_gap = aligned_offset.saturating_sub(taken);
             let padded = if alignment == 0 {
                 record_size
             } else {
-                record_size.div_ceil(alignment) * alignment
+                record_size.div_ceil(alignment as u64) * alignment as u64
             };
-            page_record.free = page_record.free.saturating_sub(padded);
+            let consumed = alignment_gap + padded;
+            if page_record.free < consumed {
+                return Err(wasm_dbms_api::prelude::MemoryError::DataTooLarge {
+                    page_size: page_record.free,
+                    requested: consumed,
+                });
+            }
+            page_record.free = page_record.free.saturating_sub(consumed);
             self.write(mm)?;
             return Ok(());
         }
@@ -200,6 +207,14 @@ impl PageLedger {
     /// Write the page ledger to memory.
     fn write(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
         mm.write_at(self.ledger_page, 0, &self.pages)
+    }
+}
+
+fn align_up_u64(offset: u64, alignment: u64) -> u64 {
+    if alignment == 0 || offset.is_multiple_of(alignment) {
+        offset
+    } else {
+        offset + (alignment - (offset % alignment))
     }
 }
 
