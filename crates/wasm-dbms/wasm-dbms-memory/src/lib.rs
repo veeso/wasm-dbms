@@ -22,26 +22,29 @@ mod memory_manager;
 mod provider;
 mod schema_registry;
 pub mod table_registry;
+mod unclaimed_pages;
 
 pub use self::acl::{AccessControl, AccessControlList, NoAccessControl};
 pub use self::memory_access::MemoryAccess;
-pub use self::memory_manager::{MemoryManager, align_up};
+pub use self::memory_manager::{MemoryManager, RESERVED_PAGES, align_up};
 pub use self::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
 pub use self::schema_registry::{SchemaRegistry, TableRegistryPage};
 pub use self::table_registry::{
     IndexLedger, IndexTreeWalker, NextRecord, RawRecordBytes, RawTableReader, RecordAddress,
     TableReader, TableRegistry,
 };
+pub use self::unclaimed_pages::{UNCLAIMED_PAGES_CAPACITY, UnclaimedPages};
 
 /// Prelude re-exports for convenient use.
 pub mod prelude {
     pub use super::acl::{AccessControl, AccessControlList, NoAccessControl};
     pub use super::memory_access::MemoryAccess;
-    pub use super::memory_manager::{MemoryManager, align_up};
+    pub use super::memory_manager::{MemoryManager, RESERVED_PAGES, align_up};
     pub use super::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
     pub use super::schema_registry::{SchemaRegistry, TableRegistryPage};
     pub use super::table_registry::{
         AutoincrementLedger, IndexLedger, IndexTreeWalker, NextRecord, RawRecordBytes,
         RawTableReader, RecordAddress, TableReader, TableRegistry,
     };
+    pub use super::unclaimed_pages::{UNCLAIMED_PAGES_CAPACITY, UnclaimedPages};
 }

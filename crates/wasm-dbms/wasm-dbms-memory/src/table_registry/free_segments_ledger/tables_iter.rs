@@ -69,7 +69,7 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         let mut pages = Vec::new();
         for _ in 0..COUNT {
-            let page = mm.allocate_page().expect("Failed to allocate page");
+            let page = mm.claim_page().expect("Failed to allocate page");
             let mut table = FreeSegmentsTable::load(page, &mut mm).expect("Failed to load page");
             // insert a segment
             table

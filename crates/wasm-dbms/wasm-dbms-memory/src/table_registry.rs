@@ -263,6 +263,57 @@ impl TableRegistry {
         )
     }
 
+    /// Releases every page owned by this table back to the unclaimed-pages
+    /// ledger.
+    ///
+    /// Walks the page ledger, free-segments ledger, every B-tree in the
+    /// index ledger, plus the dedicated schema-snapshot and
+    /// autoincrement-registry pages, and hands each one to
+    /// [`MemoryAccess::unclaim_page`]. Used by `MigrationOp::DropTable`.
+    ///
+    /// `table_pages` must be the [`TableRegistryPage`] this registry was
+    /// loaded from — the schema-snapshot and autoincrement pages are not
+    /// stored inside the registry itself.
+    ///
+    /// After this call the table's pages are reclaimable by future
+    /// [`MemoryAccess::claim_page`] calls. The caller is responsible for
+    /// removing the table's entry from the schema registry.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any [`wasm_dbms_api::prelude::MemoryError`] surfaced
+    /// while walking ledgers or releasing pages.
+    pub fn release_pages(
+        self,
+        table_pages: TableRegistryPage,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<()> {
+        self.page_ledger.release_pages(mm)?;
+        self.free_segments_ledger.release_pages(mm)?;
+        self.index_ledger.release_pages(mm)?;
+        mm.unclaim_page(table_pages.schema_snapshot_page)?;
+        if let Some(page) = table_pages.autoincrement_registry_page {
+            mm.unclaim_page(page)?;
+        }
+        Ok(())
+    }
+
+    /// Returns how many pages dropping this table would release.
+    pub fn releasable_pages_count(
+        &self,
+        table_pages: TableRegistryPage,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<usize> {
+        let mut count = self.page_ledger.releasable_pages_count();
+        count += self.free_segments_ledger.releasable_pages_count();
+        count += self.index_ledger.releasable_pages_count(mm)?;
+        count += 1; // schema snapshot page
+        if table_pages.autoincrement_registry_page.is_some() {
+            count += 1;
+        }
+        Ok(count)
+    }
+
     /// Get a reference to the index ledger, allowing to read the indexes.
     pub fn index_ledger(&self) -> &IndexLedger {
         &self.index_ledger
@@ -503,11 +554,11 @@ mod tests {
     #[test]
     fn test_should_create_table_registry() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
-        let page_ledger_page = mm.allocate_page().expect("failed to get page");
-        let free_segments_page = mm.allocate_page().expect("failed to get page");
-        let index_registry_page = mm.allocate_page().expect("failed to get page");
-        let autoincrement_page = mm.allocate_page().expect("failed to get page");
+        let schema_snapshot_page = mm.claim_page().expect("failed to get page");
+        let page_ledger_page = mm.claim_page().expect("failed to get page");
+        let free_segments_page = mm.claim_page().expect("failed to get page");
+        let index_registry_page = mm.claim_page().expect("failed to get page");
+        let autoincrement_page = mm.claim_page().expect("failed to get page");
         super::test_utils::write_dummy_schema_snapshot(schema_snapshot_page, &mut mm);
         let table_pages = TableRegistryPage {
             schema_snapshot_page,
@@ -1039,11 +1090,11 @@ mod tests {
     }
 
     fn registry(mm: &mut MemoryManager<HeapMemoryProvider>) -> TableRegistry {
-        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
-        let page_ledger_page = mm.allocate_page().expect("failed to get page");
-        let free_segments_page = mm.allocate_page().expect("failed to get page");
-        let index_registry_page = mm.allocate_page().expect("failed to get page");
-        let autoincrement_page = mm.allocate_page().expect("failed to get page");
+        let schema_snapshot_page = mm.claim_page().expect("failed to get page");
+        let page_ledger_page = mm.claim_page().expect("failed to get page");
+        let free_segments_page = mm.claim_page().expect("failed to get page");
+        let index_registry_page = mm.claim_page().expect("failed to get page");
+        let autoincrement_page = mm.claim_page().expect("failed to get page");
         super::test_utils::write_dummy_schema_snapshot(schema_snapshot_page, mm);
         let table_pages = TableRegistryPage {
             schema_snapshot_page,
@@ -1070,10 +1121,10 @@ mod tests {
 
     /// Creates a [`TableRegistry`] without an autoincrement ledger.
     fn registry_without_autoincrement(mm: &mut MemoryManager<HeapMemoryProvider>) -> TableRegistry {
-        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
-        let page_ledger_page = mm.allocate_page().expect("failed to get page");
-        let free_segments_page = mm.allocate_page().expect("failed to get page");
-        let index_registry_page = mm.allocate_page().expect("failed to get page");
+        let schema_snapshot_page = mm.claim_page().expect("failed to get page");
+        let page_ledger_page = mm.claim_page().expect("failed to get page");
+        let free_segments_page = mm.claim_page().expect("failed to get page");
+        let index_registry_page = mm.claim_page().expect("failed to get page");
         super::test_utils::write_dummy_schema_snapshot(schema_snapshot_page, mm);
         let table_pages = TableRegistryPage {
             schema_snapshot_page,
@@ -1293,11 +1344,11 @@ mod tests {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
 
         // manually set up a Uint8 autoincrement to hit overflow quickly
-        let schema_snapshot_page = mm.allocate_page().expect("failed to get page");
-        let page_ledger_page = mm.allocate_page().expect("failed to get page");
-        let free_segments_page = mm.allocate_page().expect("failed to get page");
-        let index_registry_page = mm.allocate_page().expect("failed to get page");
-        let autoinc_page = mm.allocate_page().expect("failed to get page");
+        let schema_snapshot_page = mm.claim_page().expect("failed to get page");
+        let page_ledger_page = mm.claim_page().expect("failed to get page");
+        let free_segments_page = mm.claim_page().expect("failed to get page");
+        let index_registry_page = mm.claim_page().expect("failed to get page");
+        let autoinc_page = mm.claim_page().expect("failed to get page");
 
         // Use the Uint8AutoincTable from the autoincrement_ledger tests — we replicate the
         // TableSchema inline since it's in a sibling test module.

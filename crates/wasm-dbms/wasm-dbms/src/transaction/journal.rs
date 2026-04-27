@@ -110,9 +110,19 @@ where
         self.mm.page_size()
     }
 
-    fn allocate_page(&mut self) -> MemoryResult<Page> {
-        // Page allocation is NOT journaled by design.
-        self.mm.allocate_page()
+    fn grow_one_page(&mut self) -> MemoryResult<Page> {
+        // Page growth is NOT journaled by design — extending the high-water
+        // mark cannot be reversed by replaying byte-level original snapshots.
+        // A grown page that is not subsequently referenced after a rollback
+        // simply leaks until the next process lifetime.
+        self.mm.grow_one_page()
+    }
+
+    fn zero_page(&mut self, page: Page) -> MemoryResult<()> {
+        // Capture the full pre-zero page so a rollback restores it.
+        let page_size = self.mm.page_size() as usize;
+        self.journal.record(self.mm, page, 0, page_size)?;
+        self.mm.zero_page(page)
     }
 
     fn read_at<D>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>
@@ -343,26 +353,58 @@ mod tests {
     }
 
     #[test]
-    fn test_journal_allocate_page_is_not_rolled_back() {
+    fn test_journal_grow_one_page_is_not_rolled_back() {
         let mut mm = make_mm();
-        let pages_before = mm.page_size(); // just need a count proxy
-        let _ = pages_before;
 
         let mut journal = Journal::new();
         let new_page;
         {
             let mut writer = JournaledWriter::new(&mut mm, &mut journal);
-            new_page = writer.allocate_page().expect("Failed to allocate page");
+            new_page = writer.grow_one_page().expect("Failed to grow page");
         }
 
         journal
             .rollback(&mut mm)
             .expect("Failed to rollback journal");
 
-        // Page allocation is not journaled — verify we can still read from the page.
+        // Page growth is not journaled — verify we can still read from the page.
         let mut buf = vec![0u8; 8];
         mm.read_at_raw(new_page, 0, &mut buf)
             .expect("Page should still exist after rollback");
+    }
+
+    #[test]
+    fn test_journal_unclaim_page_rolls_back_zero_and_ledger_update() {
+        let mut mm = make_mm();
+
+        // Pre-stage: claim a page directly on `mm` (outside the journal) and
+        // populate it with a recognizable byte pattern.
+        let page = mm.claim_page().expect("Failed to claim page");
+        mm.write_at_raw(page, 0, &[0xDE, 0xAD, 0xBE, 0xEF])
+            .expect("Failed to write pattern");
+
+        // Run unclaim through the journaled writer.
+        let mut journal = Journal::new();
+        {
+            let mut writer = JournaledWriter::new(&mut mm, &mut journal);
+            writer.unclaim_page(page).expect("Failed to unclaim page");
+        }
+
+        // After rollback the page must still be considered claimed (the
+        // ledger update is reverted) and its contents must match the
+        // pre-unclaim pattern.
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
+
+        let mut buf = [0u8; 4];
+        mm.read_at_raw(page, 0, &mut buf).expect("Failed to read");
+        assert_eq!(buf, [0xDE, 0xAD, 0xBE, 0xEF]);
+
+        // A subsequent claim must grow the high-water mark — the rolled-back
+        // unclaim must not have left the page in the unclaimed-pages ledger.
+        let next = mm.claim_page().expect("Failed to claim after rollback");
+        assert_ne!(next, page);
     }
 
     #[test]

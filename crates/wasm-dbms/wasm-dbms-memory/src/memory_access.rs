@@ -1,4 +1,4 @@
-// Rust guideline compliant 2026-03-01
+// Rust guideline compliant 2026-04-27
 // X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 //! Trait abstracting page-level memory operations.
@@ -10,6 +10,9 @@
 
 use wasm_dbms_api::prelude::{Encode, MemoryResult, Page, PageOffset};
 
+use crate::memory_manager::UNCLAIMED_PAGES_PAGE;
+use crate::unclaimed_pages::UnclaimedPages;
+
 /// Abstraction over page-level memory operations.
 ///
 /// All table-registry and ledger functions are generic over this trait
@@ -19,8 +22,43 @@ pub trait MemoryAccess {
     /// Returns the size of a single memory page.
     fn page_size(&self) -> u64;
 
-    /// Allocates an additional page in memory and returns its number.
-    fn allocate_page(&mut self) -> MemoryResult<Page>;
+    /// Grows the underlying memory by exactly one page and returns the
+    /// freshly allocated page number.
+    ///
+    /// The returned page is zero-initialized. This primitive is **not
+    /// journaled** — page growth cannot be rolled back, so a transaction
+    /// that aborts after a `grow_one_page` simply leaks the new page.
+    fn grow_one_page(&mut self) -> MemoryResult<Page>;
+
+    /// Zeros out an entire page. Used by [`MemoryAccess::unclaim_page`]
+    /// to scrub residual data before publishing the page to the
+    /// unclaimed-pages ledger.
+    fn zero_page(&mut self, page: Page) -> MemoryResult<()>;
+
+    /// Hands out a page for use by a caller.
+    ///
+    /// Reuses a page from the unclaimed-pages ledger when one is
+    /// available; otherwise grows the memory by one page.
+    fn claim_page(&mut self) -> MemoryResult<Page> {
+        let mut ledger: UnclaimedPages = self.read_at(UNCLAIMED_PAGES_PAGE, 0)?;
+        if let Some(page) = ledger.pop() {
+            self.write_at(UNCLAIMED_PAGES_PAGE, 0, &ledger)?;
+            return Ok(page);
+        }
+        self.grow_one_page()
+    }
+
+    /// Returns `page` to the unclaimed-pages ledger so it can be reused
+    /// by a future [`MemoryAccess::claim_page`] call.
+    ///
+    /// The page contents are zeroed before being published to the
+    /// ledger.
+    fn unclaim_page(&mut self, page: Page) -> MemoryResult<()> {
+        self.zero_page(page)?;
+        let mut ledger: UnclaimedPages = self.read_at(UNCLAIMED_PAGES_PAGE, 0)?;
+        ledger.push(page)?;
+        self.write_at(UNCLAIMED_PAGES_PAGE, 0, &ledger)
+    }
 
     /// Reads a typed value from the specified page and offset.
     fn read_at<D>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>

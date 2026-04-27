@@ -161,6 +161,33 @@ impl IndexLedger {
         IndexTree::<K>::load(root_page).range_scan(start_key, end_key, mm)
     }
 
+    /// Releases every B-tree node page across every index in this ledger,
+    /// plus the ledger page itself, back to the unclaimed-pages ledger.
+    ///
+    /// Used by destructive migration ops (e.g. `MigrationOp::DropTable`).
+    /// After this call the ledger is logically dropped and must not be
+    /// accessed again.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any [`MemoryError`] surfaced while walking trees or
+    /// releasing pages.
+    pub fn release_pages(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
+        for &root in self.tables.0.values() {
+            self::index_tree::release_index_tree_pages(root, mm)?;
+        }
+        mm.unclaim_page(self.ledger_page)
+    }
+
+    /// Returns how many pages dropping this ledger would release.
+    pub fn releasable_pages_count(&self, mm: &mut impl MemoryAccess) -> MemoryResult<usize> {
+        let mut count = 1usize;
+        for &root in self.tables.0.values() {
+            count += self::index_tree::index_tree_pages(root, mm)?.len();
+        }
+        Ok(count)
+    }
+
     fn lookup_root_page(&self, columns: &[&str]) -> MemoryResult<Page> {
         let key = columns.iter().map(ToString::to_string).collect::<Vec<_>>();
         self.tables
@@ -368,7 +395,7 @@ mod tests {
     #[test]
     fn test_init_no_indexes() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let ledger_page = mm.allocate_page().expect("failed to allocate page");
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
 
         IndexLedger::init(ledger_page, &[], &mut mm).expect("init failed");
 
@@ -379,7 +406,7 @@ mod tests {
     #[test]
     fn test_init_and_load_single_index() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let ledger_page = mm.allocate_page().expect("failed to allocate page");
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
 
         let indexes = [IndexDef(&["email"])];
         IndexLedger::init(ledger_page, &indexes, &mut mm).expect("init failed");
@@ -392,7 +419,7 @@ mod tests {
     #[test]
     fn test_init_and_load_multiple_indexes() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let ledger_page = mm.allocate_page().expect("failed to allocate page");
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
 
         let indexes = [IndexDef(&["id"]), IndexDef(&["first_name", "last_name"])];
         IndexLedger::init(ledger_page, &indexes, &mut mm).expect("init failed");
@@ -411,7 +438,7 @@ mod tests {
     #[test]
     fn test_init_allocates_distinct_root_pages() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let ledger_page = mm.allocate_page().expect("failed to allocate page");
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
 
         let indexes = [IndexDef(&["a"]), IndexDef(&["b"]), IndexDef(&["c"])];
         IndexLedger::init(ledger_page, &indexes, &mut mm).expect("init failed");
@@ -428,7 +455,7 @@ mod tests {
     #[test]
     fn test_ledger_insert_search_delete_update_and_range_scan() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let ledger_page = mm.allocate_page().expect("failed to allocate page");
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
         let indexes = [IndexDef(&["email"])];
         IndexLedger::init(ledger_page, &indexes, &mut mm).expect("init failed");
         let mut ledger = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
@@ -493,9 +520,60 @@ mod tests {
     }
 
     #[test]
+    fn test_release_pages_unclaims_every_btree_node_and_ledger_page() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let ledger_page = mm.claim_page().expect("claim ledger");
+        IndexLedger::init(
+            ledger_page,
+            &[IndexDef(&["k"]), IndexDef(&["other"])],
+            &mut mm,
+        )
+        .expect("init");
+        let mut ledger = IndexLedger::load(ledger_page, &mut mm).expect("load");
+
+        for i in 0..32u32 {
+            ledger
+                .insert(
+                    &["k"],
+                    Uint32(i),
+                    RecordAddress {
+                        page: 1,
+                        offset: i as PageOffset,
+                    },
+                    &mut mm,
+                )
+                .expect("insert");
+        }
+
+        let pages_before = mm.pages_count();
+        ledger
+            .release_pages(&mut mm)
+            .expect("release_pages must succeed");
+
+        // The first claim after release must reuse a page (no high-water
+        // bump). With LIFO ordering it returns the ledger page itself —
+        // it was unclaimed last, so it is popped first.
+        let first_reclaim = mm.claim_page().expect("claim");
+        assert_eq!(mm.pages_count(), pages_before);
+        assert_eq!(first_reclaim, ledger_page);
+
+        // Continue claiming: every page we get back must have been part of
+        // the original (released) memory range, never a freshly grown one,
+        // until the unclaimed-pages stack is drained.
+        let high_water = (pages_before - 1) as Page;
+        for _ in 0..2 {
+            let page = mm.claim_page().expect("claim");
+            assert!(
+                page <= high_water,
+                "expected reclaimed page <= {high_water}, got {page}"
+            );
+        }
+    }
+
+    #[test]
     fn test_ledger_missing_index_returns_error() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let ledger_page = mm.allocate_page().expect("failed to allocate page");
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
         IndexLedger::init(ledger_page, &[], &mut mm).expect("init failed");
         let mut ledger = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
 

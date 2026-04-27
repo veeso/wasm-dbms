@@ -11,8 +11,9 @@
 //! Structural ops are implemented directly:
 //!
 //! - `CreateTable` — registers a new table from its compiled snapshot.
-//! - `DropTable` — removes the entry from the schema registry; pages are
-//!   currently leaked (issue #90 tracks reclamation).
+//! - `DropTable` — removes the entry from the schema registry and returns
+//!   every page owned by the dropped table to the unclaimed-pages ledger
+//!   for reuse by future `claim_page` calls.
 //! - `AlterColumn` — snapshot-only edit, plus tightening validation through
 //!   the schema dispatch.
 //! - `AddIndex` / `DropIndex` — snapshot edit plus index-ledger refresh from
@@ -34,6 +35,7 @@ use wasm_dbms_memory::prelude::{AccessControl, IndexLedger, MemoryProvider};
 use crate::database::WasmDbmsDatabase;
 use crate::database::migration::codec::{decode_record_by_snapshot, encode_record_by_snapshot};
 use crate::database::migration::widen::widen_value;
+use crate::transaction::journal::JournaledWriter;
 
 /// Applies `ops` to the database under the existing journal.
 ///
@@ -65,6 +67,11 @@ where
         Ok(())
     });
     db.ctx.set_migrating(false);
+    {
+        let mut mm = db.ctx.mm.borrow_mut();
+        let refreshed = wasm_dbms_memory::SchemaRegistry::load(&mut *mm)?;
+        *db.ctx.schema_registry.borrow_mut() = refreshed;
+    }
     result?;
 
     db.ctx.clear_drift();
@@ -128,7 +135,12 @@ where
 {
     let mut sr = db.ctx.schema_registry.borrow_mut();
     let mut mm = db.ctx.mm.borrow_mut();
-    sr.register_table_from_snapshot(schema, &mut *mm)?;
+    let mut journal_ref = db.ctx.journal.borrow_mut();
+    let journal = journal_ref
+        .as_mut()
+        .expect("journal must be active inside atomic");
+    let mut writer = JournaledWriter::new(&mut *mm, journal);
+    sr.register_table_from_snapshot(schema, &mut writer)?;
     Ok(())
 }
 
@@ -139,7 +151,12 @@ where
 {
     let mut sr = db.ctx.schema_registry.borrow_mut();
     let mut mm = db.ctx.mm.borrow_mut();
-    sr.unregister_table(name, &mut *mm)?;
+    let mut journal_ref = db.ctx.journal.borrow_mut();
+    let journal = journal_ref
+        .as_mut()
+        .expect("journal must be active inside atomic");
+    let mut writer = JournaledWriter::new(&mut *mm, journal);
+    sr.unregister_table(name, &mut writer)?;
     Ok(())
 }
 
@@ -595,7 +612,12 @@ where
     let pages = table_registry_pages(db, table)?;
     let raw_rows = load_raw_rows(db, table, old_snapshot)?;
     let mut mm = db.ctx.mm.borrow_mut();
-    let mut registry = TableRegistry::load(pages, &mut *mm)?;
+    let mut journal_ref = db.ctx.journal.borrow_mut();
+    let journal = journal_ref
+        .as_mut()
+        .expect("journal must be active inside atomic");
+    let mut writer = JournaledWriter::new(&mut *mm, journal);
+    let mut registry = TableRegistry::load(pages, &mut writer)?;
 
     let mut new_rows: Vec<(wasm_dbms_memory::RecordAddress, Vec<(String, Value)>)> = Vec::new();
     for row in raw_rows {
@@ -606,14 +628,14 @@ where
             row.address,
             row.bytes.len() as MSize,
             old_snapshot.alignment as u16,
-            &mut *mm,
+            &mut writer,
         )?;
         let new_address =
-            registry.insert_raw(&new_bytes, new_snapshot.alignment as u16, &mut *mm)?;
+            registry.insert_raw(&new_bytes, new_snapshot.alignment as u16, &mut writer)?;
         new_rows.push((new_address, projected));
     }
 
-    rebuild_indexes(&pages, new_snapshot, &new_rows, &mut *mm)?;
+    rebuild_indexes(&pages, new_snapshot, &new_rows, &mut writer)?;
     Ok(())
 }
 
@@ -631,7 +653,12 @@ where
     let pages = table_registry_pages(db, table)?;
     let rows = load_live_rows(db, table, snapshot)?;
     let mut mm = db.ctx.mm.borrow_mut();
-    rebuild_indexes(&pages, snapshot, &rows, &mut *mm)
+    let mut journal_ref = db.ctx.journal.borrow_mut();
+    let journal = journal_ref
+        .as_mut()
+        .expect("journal must be active inside atomic");
+    let mut writer = JournaledWriter::new(&mut *mm, journal);
+    rebuild_indexes(&pages, snapshot, &rows, &mut writer)
 }
 
 /// Re-initialise the table's index ledger and re-populate every surviving
@@ -855,11 +882,16 @@ where
 
     for (snapshot, pages) in pages_for {
         let mut mm = db.ctx.mm.borrow_mut();
-        let mut registry = TableRegistry::load(pages, &mut *mm)?;
+        let mut journal_ref = db.ctx.journal.borrow_mut();
+        let journal = journal_ref
+            .as_mut()
+            .expect("journal must be active inside atomic");
+        let mut writer = JournaledWriter::new(&mut *mm, journal);
+        let mut registry = TableRegistry::load(pages, &mut writer)?;
         registry.schema_snapshot_ledger_mut().write(
             pages.schema_snapshot_page,
             snapshot,
-            &mut *mm,
+            &mut writer,
         )?;
     }
     Ok(())
@@ -868,11 +900,11 @@ where
 #[cfg(test)]
 mod tests {
     use wasm_dbms_api::prelude::{
-        ColumnSnapshot, DataTypeSnapshot, IndexSnapshot, MigrationOp, MigrationPolicy,
-        TableSchemaSnapshot, Text, Uint32,
+        ColumnSnapshot, DataTypeSnapshot, Database, IndexSnapshot, MigrationOp, MigrationPolicy,
+        TableSchema, TableSchemaSnapshot, Text, Uint32,
     };
     use wasm_dbms_macros::{DatabaseSchema, Table};
-    use wasm_dbms_memory::prelude::HeapMemoryProvider;
+    use wasm_dbms_memory::prelude::{HeapMemoryProvider, SchemaRegistry};
 
     use super::*;
     use crate::context::DbmsContext;
@@ -916,6 +948,14 @@ mod tests {
         }
     }
 
+    fn persisted_snapshots(ctx: &DbmsContext<HeapMemoryProvider>) -> Vec<TableSchemaSnapshot> {
+        let mut mm = ctx.mm.borrow_mut();
+        let persisted = SchemaRegistry::load(&mut *mm).expect("load schema registry");
+        persisted
+            .stored_snapshots(&mut *mm)
+            .expect("load persisted snapshots")
+    }
+
     #[test]
     fn test_create_table_registers_a_new_table() {
         let ctx = fresh_db();
@@ -957,6 +997,95 @@ mod tests {
             .stored_snapshots(&mut *ctx.mm.borrow_mut())
             .unwrap();
         assert!(!snapshots.iter().any(|s| s.name == "users"));
+    }
+
+    #[test]
+    fn test_drop_table_returns_owned_pages_to_unclaimed_ledger() {
+        // Insert several rows to fan the page ledger out beyond a single
+        // metadata page, then drop the table and verify a fresh
+        // CreateTable reuses the released pages instead of bumping the
+        // high-water mark.
+        let ctx = fresh_db();
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+
+        for id in 0..50u32 {
+            insert_user(&db, id, &format!("user_{id}"));
+        }
+
+        let pages_after_inserts = ctx.mm.borrow().pages_count();
+
+        apply(
+            &db,
+            vec![MigrationOp::DropTable {
+                name: "users".to_string(),
+            }],
+        )
+        .expect("drop");
+
+        // Re-create the table from the same snapshot. Because
+        // `claim_page` consults the unclaimed-pages ledger first, the
+        // overall high-water mark should not exceed the pre-drop count.
+        apply(
+            &db,
+            vec![MigrationOp::CreateTable {
+                name: "users".to_string(),
+                schema: User::schema_snapshot(),
+            }],
+        )
+        .expect("recreate");
+
+        let pages_after_recreate = ctx.mm.borrow().pages_count();
+        assert!(
+            pages_after_recreate <= pages_after_inserts,
+            "drop+recreate should not grow memory: {pages_after_inserts} → {pages_after_recreate}"
+        );
+    }
+
+    #[test]
+    fn test_failed_drop_table_rolls_back_registry_and_persisted_pages() {
+        let ctx = fresh_db();
+        {
+            let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+            insert_user(&db, 1, "alice");
+        }
+
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        let result = apply(
+            &db,
+            vec![
+                MigrationOp::DropTable {
+                    name: "users".to_string(),
+                },
+                MigrationOp::AlterColumn {
+                    table: "users".to_string(),
+                    column: "missing".to_string(),
+                    changes: ColumnChanges {
+                        nullable: Some(true),
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(result.is_err(), "migration should fail after drop");
+
+        assert!(
+            ctx.schema_registry
+                .borrow()
+                .table_registry_page_by_name("users")
+                .is_some(),
+            "in-memory registry must roll back failed drop"
+        );
+
+        let snapshots = persisted_snapshots(&ctx);
+        assert!(
+            snapshots.iter().any(|snapshot| snapshot.name == "users"),
+            "persisted schema registry must retain the dropped table after rollback"
+        );
+
+        let rows = db
+            .select::<User>(Query::builder().build())
+            .expect("select after failed migration");
+        assert_eq!(rows.len(), 1, "table rows must survive failed drop");
     }
 
     #[test]

@@ -6,6 +6,7 @@
   - [Memory Model](#memory-model)
   - [Memory Provider](#memory-provider)
   - [Memory Manager and MemoryAccess](#memory-manager-and-memoryaccess)
+  - [Unclaimed Pages Ledger](#unclaimed-pages-ledger)
   - [Encode Trait](#encode-trait)
   - [Schema Registry](#schema-registry)
   - [ACL Storage](#acl-storage)
@@ -62,33 +63,36 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 │ Page 1: ACL Table (65 KiB)                       │
 │   - List of allowed principals                   │
 ├──────────────────────────────────────────────────┤
-│ Page 2: Table "users" Schema Snapshot            │
+│ Page 2: Unclaimed Pages Ledger (65 KiB)          │
+│   - Stack of pages released by destructive ops   │
 ├──────────────────────────────────────────────────┤
-│ Page 3: Table "users" Page Ledger                │
+│ Page 3: Table "users" Schema Snapshot            │
 ├──────────────────────────────────────────────────┤
-│ Page 4: Table "users" Free Segments Ledger       │
+│ Page 4: Table "users" Page Ledger                │
 ├──────────────────────────────────────────────────┤
-│ Page 5: Table "users" Index Ledger               │
+│ Page 5: Table "users" Free Segments Ledger       │
 ├──────────────────────────────────────────────────┤
-│ Page 6: Table "users" Autoincrement Ledger (*)   │
+│ Page 6: Table "users" Index Ledger               │
 ├──────────────────────────────────────────────────┤
-│ Page 7: Table "posts" Schema Snapshot            │
+│ Page 7: Table "users" Autoincrement Ledger (*)   │
 ├──────────────────────────────────────────────────┤
-│ Page 8: Table "posts" Page Ledger                │
+│ Page 8: Table "posts" Schema Snapshot            │
 ├──────────────────────────────────────────────────┤
-│ Page 9: Table "posts" Free Segments Ledger       │
+│ Page 9: Table "posts" Page Ledger                │
 ├──────────────────────────────────────────────────┤
-│ Page 10: Table "posts" Index Ledger              │
+│ Page 10: Table "posts" Free Segments Ledger      │
 ├──────────────────────────────────────────────────┤
-│ Page 11: Table "users" Records - Page 1          │
+│ Page 11: Table "posts" Index Ledger              │
 ├──────────────────────────────────────────────────┤
-│ Page 12: Table "users" Records - Page 2          │
+│ Page 12: Table "users" Records - Page 1          │
 ├──────────────────────────────────────────────────┤
-│ Page 13: B-Tree Node (index on users.id)         │
+│ Page 13: Table "users" Records - Page 2          │
 ├──────────────────────────────────────────────────┤
-│ Page 14: B-Tree Node (index on users.email)      │
+│ Page 14: B-Tree Node (index on users.id)         │
 ├──────────────────────────────────────────────────┤
-│ Page 15: Table "posts" Records - Page 1          │
+│ Page 15: B-Tree Node (index on users.email)      │
+├──────────────────────────────────────────────────┤
+│ Page 16: Table "posts" Records - Page 1          │
 ├──────────────────────────────────────────────────┤
 │ ...                                              │
 └──────────────────────────────────────────────────┘
@@ -97,11 +101,14 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 
 **Layout characteristics:**
 
-- Reserved pages (0-1) are allocated at initialization
+- Reserved pages (0-2) are allocated at initialization
 - Each table gets a Schema Snapshot, Page Ledger, Free Segments Ledger, and Index Ledger
 - Tables with `#[autoincrement]` columns also get an Autoincrement Ledger page
 - Record pages and B-tree node pages are allocated on demand
 - Pages can be interleaved between tables
+- Pages released by destructive ops (e.g. `DropTable`) are returned to the
+  Unclaimed Pages Ledger and reused by subsequent `claim_page` calls before
+  the high-water mark is bumped
 
 ---
 
@@ -186,13 +193,28 @@ to substitute a journaled writer for atomic transactions (see [Atomicity](./atom
 /// bytes before each write for rollback support.
 pub trait MemoryAccess {
     fn page_size(&self) -> u64;
-    fn allocate_page(&mut self) -> MemoryResult<Page>;
+    /// Hand out a page — pops from the unclaimed-pages ledger if one is
+    /// available, otherwise grows the underlying provider.
+    fn claim_page(&mut self) -> MemoryResult<Page>;
+    /// Return a page to the unclaimed-pages ledger after zeroing it.
+    fn unclaim_page(&mut self, page: Page) -> MemoryResult<()>;
+    /// Grow the provider by exactly one zero-initialized page (primitive).
+    fn grow_one_page(&mut self) -> MemoryResult<Page>;
+    /// Zero an entire allocated page (primitive).
+    fn zero_page(&mut self, page: Page) -> MemoryResult<()>;
     fn read_at<D: Encode>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>;
     fn write_at<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
     fn zero<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
     fn read_at_raw(&mut self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize>;
 }
 ```
+
+`claim_page` and `unclaim_page` ship as default trait methods built on
+top of the four primitives — every implementor automatically inherits the
+unclaimed-pages-aware allocation strategy. `JournaledWriter` overrides
+only `grow_one_page` (intentionally **not** journaled, since extending
+the high-water mark cannot be replayed in reverse) and `zero_page`
+(records the full pre-zero page contents so a rollback restores them).
 
 ```rust
 pub struct MemoryManager<P: MemoryProvider> {
@@ -225,6 +247,63 @@ impl<P: MemoryProvider> MemoryAccess for MemoryManager<P> { /* ... */ }
 All table-registry and ledger functions are generic over `impl MemoryAccess` rather than
 taking `&[mut] MemoryManager` directly. This makes it possible to intercept writes at the
 DBMS layer without modifying any memory-crate code.
+
+---
+
+## Unclaimed Pages Ledger
+
+The unclaimed-pages ledger lives on reserved page 2 (`UNCLAIMED_PAGES_PAGE`).
+It is a LIFO stack of [`Page`] numbers that destructive operations have
+released. `claim_page` consults this stack before bumping the high-water
+mark; `unclaim_page` zeroes the page and pushes it onto the stack.
+
+**Serialization format:**
+
+```txt
+Offset   Size   Field
+0        4      Number of unclaimed pages (u32, little-endian)
+4+       var    Sequence of page numbers (u32, little-endian) — newest last
+```
+
+The single reserved page can hold up to `UNCLAIMED_PAGES_CAPACITY = 16382`
+entries (the encoded ledger size must fit in `MSize` = `u16`). Pushing
+beyond capacity returns `MemoryError::UnclaimedPagesFull`. A future
+extension may chain additional pages once a real workload exhausts the
+single-page budget; for now the v1 limit is enough to absorb typical
+drop-and-recreate cycles.
+
+**Behavior:**
+
+- `claim_page` pops the most recently unclaimed page (LIFO ordering keeps
+  hot pages cache-warm). When the ledger is empty it grows the provider
+  by exactly one zero-initialized page.
+- `unclaim_page` zeroes the page in full before pushing — released pages
+  never leak residual record bytes. The zero is journaled when invoked
+  through `JournaledWriter`, so a rolled-back transaction restores the
+  page contents and the ledger update.
+- The default `MemoryAccess` impls of `claim_page` and `unclaim_page`
+  drive the ledger entirely through the trait's read/write methods, so
+  every interceptor (journal, future overlays) automatically participates.
+- `MigrationOp::DropTable` walks every page owned by the dropped table —
+  record pages, page-ledger / free-segments / index-ledger pages, every
+  B-tree node, schema-snapshot and (optional) autoincrement pages — and
+  hands each one to `unclaim_page` before clearing the table from the
+  schema registry.
+
+**Rollback semantics:**
+
+Inside an atomic block:
+
+- A successful `unclaim_page` whose surrounding transaction rolls back is
+  fully reversed: the page contents reappear and the ledger does not
+  contain the page.
+- A `claim_page` that hits the ledger pops a page; on rollback the ledger
+  is restored and the page is "back" in the unclaimed pool. Any data the
+  caller wrote into that page is also reverted by the journal.
+- A `claim_page` that grows the provider returns a page whose existence
+  is **not** journaled; on rollback the page stays grown but unreferenced
+  (it leaks until the next process lifetime). This matches the previous
+  behavior of `allocate_page` and is unchanged by this design.
 
 ---
 

@@ -142,7 +142,7 @@ mod tests {
 
     fn setup_ledger() -> (MemoryManager<HeapMemoryProvider>, IndexLedger) {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let ledger_page = mm.allocate_page().expect("failed to allocate page");
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
         IndexLedger::init(ledger_page, &[IndexDef(&["name"])], &mut mm).expect("init failed");
         let ledger = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
         (mm, ledger)

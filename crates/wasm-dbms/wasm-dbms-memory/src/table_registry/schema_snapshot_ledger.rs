@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn test_init_persists_schema_snapshot_to_page() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         SchemaSnapshotLedger::init::<User>(page, &mut mm).expect("init failed");
 
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn test_load_returns_snapshot_written_by_init() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         SchemaSnapshotLedger::init::<User>(page, &mut mm).expect("init failed");
         let ledger = SchemaSnapshotLedger::load(page, &mut mm).expect("load failed");
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn test_load_uninitialized_page_returns_error() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         let result = SchemaSnapshotLedger::load(page, &mut mm);
 
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn test_get_returns_cached_snapshot() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         SchemaSnapshotLedger::init::<User>(page, &mut mm).expect("init failed");
         let ledger = SchemaSnapshotLedger::load(page, &mut mm).expect("load failed");
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn test_write_updates_in_memory_cache() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         SchemaSnapshotLedger::init::<User>(page, &mut mm).expect("init failed");
         let mut ledger = SchemaSnapshotLedger::load(page, &mut mm).expect("load failed");
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn test_write_persists_new_snapshot_to_page() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         SchemaSnapshotLedger::init::<User>(page, &mut mm).expect("init failed");
         let mut ledger = SchemaSnapshotLedger::load(page, &mut mm).expect("load failed");
@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn test_write_can_overwrite_multiple_times() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         SchemaSnapshotLedger::init::<User>(page, &mut mm).expect("init failed");
         let mut ledger = SchemaSnapshotLedger::load(page, &mut mm).expect("load failed");
@@ -376,8 +376,8 @@ mod tests {
     #[test]
     fn test_init_isolates_pages_for_different_schemas() {
         let mut mm = make_mm();
-        let user_page = mm.allocate_page().expect("failed to allocate user page");
-        let other_page = mm.allocate_page().expect("failed to allocate other page");
+        let user_page = mm.claim_page().expect("failed to allocate user page");
+        let other_page = mm.claim_page().expect("failed to allocate other page");
 
         SchemaSnapshotLedger::init::<User>(user_page, &mut mm).expect("user init failed");
 

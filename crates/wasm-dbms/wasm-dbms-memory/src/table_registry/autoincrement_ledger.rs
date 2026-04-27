@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn test_init_single_autoincrement_column() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         let ledger = AutoincrementLedger::init::<SingleAutoincTable>(page, &mut mm)
             .expect("failed to init ledger");
@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn test_init_multiple_autoincrement_columns() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         let mut ledger = AutoincrementLedger::init::<MultiAutoincTable>(page, &mut mm)
             .expect("failed to init ledger");
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn test_init_no_autoincrement_columns() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         // should succeed but the registry is empty
         let ledger = AutoincrementLedger::init::<NoAutoincTable>(page, &mut mm)
@@ -544,7 +544,7 @@ mod tests {
     #[test]
     fn test_load_after_init() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         let mut ledger =
             AutoincrementLedger::init::<SingleAutoincTable>(page, &mut mm).expect("failed to init");
@@ -564,7 +564,7 @@ mod tests {
     #[test]
     fn test_next_returns_sequential_values() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         let mut ledger =
             AutoincrementLedger::init::<SingleAutoincTable>(page, &mut mm).expect("failed to init");
@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn test_next_persists_to_memory() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         let mut ledger =
             AutoincrementLedger::init::<SingleAutoincTable>(page, &mut mm).expect("failed to init");
@@ -599,7 +599,7 @@ mod tests {
     #[test]
     fn test_next_overflow_returns_error() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         // init with Uint8 to quickly reach max
         let mut ledger =
@@ -622,7 +622,7 @@ mod tests {
     #[test]
     fn test_multi_column_independence_across_reload() {
         let mut mm = make_mm();
-        let page = mm.allocate_page().expect("failed to allocate page");
+        let page = mm.claim_page().expect("failed to allocate page");
 
         let mut ledger =
             AutoincrementLedger::init::<MultiAutoincTable>(page, &mut mm).expect("failed to init");

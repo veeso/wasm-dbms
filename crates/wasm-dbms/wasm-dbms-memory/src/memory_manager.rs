@@ -1,4 +1,4 @@
-// Rust guideline compliant 2026-03-01
+// Rust guideline compliant 2026-04-27
 // X-WHERE-CLAUSE, M-CANONICAL-DOCS
 
 //! Memory manager for page-level memory operations.
@@ -14,6 +14,10 @@ use crate::provider::MemoryProvider;
 pub const SCHEMA_PAGE: Page = 0;
 /// ACL page (reserved page 1).
 pub const ACL_PAGE: Page = 1;
+/// Unclaimed-pages ledger page (reserved page 2).
+pub const UNCLAIMED_PAGES_PAGE: Page = 2;
+/// Number of reserved pages allocated at initialization.
+pub const RESERVED_PAGES: u64 = 3;
 
 /// The memory manager handles page-level memory operations on top of a
 /// [`MemoryProvider`].
@@ -37,13 +41,15 @@ where
     pub fn init(provider: P) -> Self {
         let mut manager = MemoryManager { provider };
 
-        // Check whether two pages are already allocated.
-        if manager.provider.pages() >= 2 {
+        // Check whether the reserved pages are already allocated.
+        let current_pages = manager.provider.pages();
+        if current_pages >= RESERVED_PAGES {
             return manager;
         }
 
-        // Request at least 2 pages for header and ACL.
-        if let Err(err) = manager.provider.grow(2) {
+        // Request the missing reserved pages (schema, ACL, unclaimed).
+        let missing = RESERVED_PAGES - current_pages;
+        if let Err(err) = manager.provider.grow(missing) {
             panic!("Failed to grow memory during initialization: {err}");
         }
 
@@ -60,12 +66,31 @@ where
         SCHEMA_PAGE
     }
 
+    /// Returns the unclaimed-pages ledger page.
+    pub const fn unclaimed_pages_page(&self) -> Page {
+        UNCLAIMED_PAGES_PAGE
+    }
+
+    /// Consumes the manager and returns the underlying provider.
+    ///
+    /// Test-only helper that enables reload simulations without going
+    /// through the full DBMS context.
+    #[cfg(test)]
+    pub(crate) fn into_provider(self) -> P {
+        self.provider
+    }
+
     /// Gets the last allocated page number.
-    fn last_page(&self) -> Option<Page> {
+    pub fn last_page(&self) -> Option<Page> {
         match self.provider.pages() {
             0 => None,
             n => Some(n as Page - 1),
         }
+    }
+
+    /// Returns the total number of pages currently backed by the provider.
+    pub fn pages_count(&self) -> u64 {
+        self.provider.pages()
     }
 
     /// Calculates the absolute offset in memory given a page number and an
@@ -117,7 +142,7 @@ where
         P::PAGE_SIZE
     }
 
-    fn allocate_page(&mut self) -> MemoryResult<Page> {
+    fn grow_one_page(&mut self) -> MemoryResult<Page> {
         self.provider.grow(1)?;
 
         // Zero the newly allocated page.
@@ -130,6 +155,21 @@ where
             Some(page) => Ok(page),
             None => Err(MemoryError::FailedToAllocatePage),
         }
+    }
+
+    fn zero_page(&mut self, page: Page) -> MemoryResult<()> {
+        if self.last_page().is_none_or(|last_page| page > last_page) {
+            return Err(MemoryError::SegmentationFault {
+                page,
+                offset: 0,
+                data_size: P::PAGE_SIZE,
+                page_size: P::PAGE_SIZE,
+            });
+        }
+
+        let absolute_offset = self.absolute_offset(page, 0);
+        let buffer = vec![0u8; P::PAGE_SIZE as usize];
+        self.provider.write(absolute_offset, &buffer)
     }
 
     fn read_at<D>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>
@@ -301,14 +341,14 @@ mod tests {
     #[test]
     fn test_should_init_memory_manager() {
         let mm = make_mm();
-        assert_eq!(mm.last_page(), Some(1));
+        assert_eq!(mm.last_page(), Some(2));
     }
 
     #[test]
     fn test_should_get_last_page() {
         let mm = make_mm();
         let last_page = mm.last_page();
-        assert_eq!(last_page, Some(1)); // header and ACL pages
+        assert_eq!(last_page, Some(2)); // schema, ACL, and unclaimed-pages pages
     }
 
     #[test]
@@ -473,13 +513,89 @@ mod tests {
     }
 
     #[test]
-    fn test_should_allocate_new_page() {
+    fn test_should_claim_new_page_by_growing() {
         let mut mm = make_mm();
         let initial_last_page = mm.last_page().unwrap();
-        let new_page = mm.allocate_page().expect("Failed to allocate new page");
+        let new_page = mm.claim_page().expect("Failed to claim new page");
         assert_eq!(new_page, initial_last_page + 1);
         let updated_last_page = mm.last_page().unwrap();
         assert_eq!(updated_last_page, new_page);
+    }
+
+    #[test]
+    fn test_unclaim_then_claim_returns_same_page() {
+        let mut mm = make_mm();
+        let first = mm.claim_page().expect("claim");
+        // Write a non-zero pattern so we can assert it's zeroed on unclaim.
+        mm.write_at_raw(first, 0, &[0xAB, 0xCD, 0xEF, 0x42])
+            .expect("write");
+
+        mm.unclaim_page(first).expect("unclaim");
+
+        // The reserved page should hand the same page back.
+        let reused = mm.claim_page().expect("claim again");
+        assert_eq!(reused, first);
+
+        // Page contents must be zeroed by unclaim.
+        let mut buf = [0u8; 4];
+        mm.read_at_raw(reused, 0, &mut buf).expect("read");
+        assert_eq!(buf, [0u8; 4]);
+    }
+
+    #[test]
+    fn test_claim_after_exhausting_unclaimed_grows_memory() {
+        let mut mm = make_mm();
+        let page_a = mm.claim_page().expect("claim a");
+        let page_b = mm.claim_page().expect("claim b");
+
+        mm.unclaim_page(page_a).expect("unclaim a");
+        mm.unclaim_page(page_b).expect("unclaim b");
+
+        // Pop both unclaimed pages. The third claim must grow.
+        let _ = mm.claim_page().expect("reuse 1");
+        let _ = mm.claim_page().expect("reuse 2");
+        let high_water_before = mm.last_page().unwrap();
+        let grown = mm.claim_page().expect("grow");
+        assert_eq!(grown, high_water_before + 1);
+    }
+
+    #[test]
+    fn test_unclaim_persists_across_reload() {
+        let mut provider = HeapMemoryProvider::default();
+        {
+            let mut mm = MemoryManager::init(provider);
+            let first = mm.claim_page().expect("claim");
+            mm.unclaim_page(first).expect("unclaim");
+            provider = mm.into_provider();
+        }
+        let mut mm = MemoryManager::init(provider);
+        let reused = mm.claim_page().expect("claim after reload");
+        assert_eq!(reused, RESERVED_PAGES as Page);
+    }
+
+    #[test]
+    fn test_zero_page_zeros_full_page_contents() {
+        let mut mm = make_mm();
+        let page = mm.claim_page().expect("claim");
+        // Write to several offsets across the page.
+        mm.write_at_raw(page, 0, &[1, 2, 3, 4]).expect("write 0");
+        mm.write_at_raw(page, 30_000, &[9, 9]).expect("write 30k");
+
+        mm.zero_page(page).expect("zero_page");
+
+        let mut buf = [0u8; 4];
+        mm.read_at_raw(page, 0, &mut buf).expect("read");
+        assert_eq!(buf, [0u8; 4]);
+        let mut buf = [0u8; 2];
+        mm.read_at_raw(page, 30_000, &mut buf).expect("read");
+        assert_eq!(buf, [0u8; 2]);
+    }
+
+    #[test]
+    fn test_zero_page_rejects_unallocated_page() {
+        let mut mm = make_mm();
+        let result = mm.zero_page(99);
+        assert!(matches!(result, Err(MemoryError::SegmentationFault { .. })));
     }
 
     #[test]

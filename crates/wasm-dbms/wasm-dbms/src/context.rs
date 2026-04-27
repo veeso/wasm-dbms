@@ -117,7 +117,7 @@ where
     ) -> DbmsResult<TableRegistryPage> {
         let mut sr = self.schema_registry.borrow_mut();
         let mut mm = self.mm.borrow_mut();
-        sr.register_table::<T>(&mut mm).map_err(Into::into)
+        sr.register_table::<T>(&mut *mm).map_err(Into::into)
     }
 
     /// Adds an identity to the access-control list.

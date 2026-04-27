@@ -220,6 +220,30 @@ impl FreeSegmentsLedger {
         table.remove(segment.segment, physical_size, mm)
     }
 
+    /// Releases every page owned by this ledger (chained free-segments
+    /// table pages plus the ledger page itself) back to the unclaimed-pages
+    /// ledger.
+    ///
+    /// Used by destructive migration ops (e.g. `MigrationOp::DropTable`).
+    /// After this call the ledger is logically dropped and must not be
+    /// accessed again.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any [`wasm_dbms_api::prelude::MemoryError`] surfaced by
+    /// [`MemoryAccess::unclaim_page`].
+    pub fn release_pages(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
+        for &page in self.tables.pages() {
+            mm.unclaim_page(page)?;
+        }
+        mm.unclaim_page(self.free_segments_page)
+    }
+
+    /// Returns how many pages dropping this ledger would release.
+    pub fn releasable_pages_count(&self) -> usize {
+        self.tables.pages().len() + 1
+    }
+
     /// Writes the current state of the free segments table back to memory.
     fn commit(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
         mm.write_at(self.free_segments_page, 0, &self.tables)
@@ -227,7 +251,7 @@ impl FreeSegmentsLedger {
 
     /// Creates a new page for storing additional [`FreeSegmentsTable`]s when needed.
     fn create_new_page(&mut self, mm: &mut impl MemoryAccess) -> MemoryResult<Page> {
-        let new_page = mm.allocate_page()?;
+        let new_page = mm.claim_page()?;
         self.tables.push(new_page);
         self.commit(mm).map(|_| new_page)
     }
@@ -252,7 +276,7 @@ mod tests {
     fn test_should_load_free_segments_ledger() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         // allocate new page
-        let page = mm.allocate_page().expect("Failed to allocate page");
+        let page = mm.claim_page().expect("Failed to allocate page");
 
         let ledger =
             FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
@@ -264,7 +288,7 @@ mod tests {
     fn test_should_insert_record() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         // allocate new page
-        let page = mm.allocate_page().expect("Failed to allocate page");
+        let page = mm.claim_page().expect("Failed to allocate page");
 
         let mut ledger =
             FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
@@ -279,7 +303,7 @@ mod tests {
     #[test]
     fn test_should_find_suitable_reusable_space() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let page = mm.allocate_page().expect("Failed to allocate page");
+        let page = mm.claim_page().expect("Failed to allocate page");
 
         let mut ledger =
             FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
@@ -308,7 +332,7 @@ mod tests {
     #[test]
     fn test_should_not_find_suitable_reusable_space() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let page = mm.allocate_page().expect("Failed to allocate page");
+        let page = mm.claim_page().expect("Failed to allocate page");
 
         let mut ledger =
             FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
@@ -330,7 +354,7 @@ mod tests {
     #[test]
     fn test_should_commit_reused_space_without_creating_a_new_record() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let page = mm.allocate_page().expect("Failed to allocate page");
+        let page = mm.claim_page().expect("Failed to allocate page");
 
         let mut ledger =
             FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
@@ -365,7 +389,7 @@ mod tests {
     #[test]
     fn test_should_commit_reused_space_creating_a_new_record() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let page = mm.allocate_page().expect("Failed to allocate page");
+        let page = mm.claim_page().expect("Failed to allocate page");
         let mut ledger =
             FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
@@ -393,7 +417,7 @@ mod tests {
     #[test]
     fn test_should_commit_also_padding_with_dynamic_records() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let page = mm.allocate_page().expect("Failed to allocate page");
+        let page = mm.claim_page().expect("Failed to allocate page");
         let mut ledger =
             FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 
@@ -430,7 +454,7 @@ mod tests {
         let mut offset = 0;
 
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let page = mm.allocate_page().expect("Failed to allocate page");
+        let page = mm.claim_page().expect("Failed to allocate page");
         let mut ledger =
             FreeSegmentsLedger::load(page, &mut mm).expect("Failed to load DeletedRecordsLedger");
 

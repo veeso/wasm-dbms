@@ -8,8 +8,9 @@ use wasm_dbms_api::prelude::{
     TableSchema, TableSchemaSnapshot, fingerprint_for_name,
 };
 
+use crate::memory_manager::{SCHEMA_PAGE, UNCLAIMED_PAGES_PAGE};
 use crate::table_registry::{AutoincrementLedger, IndexLedger, SchemaSnapshotLedger};
-use crate::{MemoryAccess, MemoryManager, MemoryProvider};
+use crate::{MemoryAccess, TableRegistry, UnclaimedPages};
 
 /// The dictionary of tables, mapping the table schema fingerprint to the pages where the table data and metadata are stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,9 +36,8 @@ pub struct SchemaRegistry {
 
 impl SchemaRegistry {
     /// Load the schema registry from memory.
-    pub fn load(mm: &mut MemoryManager<impl MemoryProvider>) -> MemoryResult<Self> {
-        let page = mm.schema_page();
-        let registry: Self = mm.read_at(page, 0)?;
+    pub fn load(mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
+        let registry: Self = mm.read_at(SCHEMA_PAGE, 0)?;
         Ok(registry)
     }
 
@@ -57,7 +57,7 @@ impl SchemaRegistry {
     ///   write-back.
     pub fn register_table<TS>(
         &mut self,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<TableRegistryPage>
     where
         TS: TableSchema,
@@ -77,14 +77,14 @@ impl SchemaRegistry {
         }
 
         // allocate table registry page
-        let schema_snapshot_page = mm.allocate_page()?;
-        let pages_list_page = mm.allocate_page()?;
-        let free_segments_page = mm.allocate_page()?;
-        let index_registry_page = mm.allocate_page()?;
+        let schema_snapshot_page = mm.claim_page()?;
+        let pages_list_page = mm.claim_page()?;
+        let free_segments_page = mm.claim_page()?;
+        let index_registry_page = mm.claim_page()?;
         // allocate autoincrement registry page if needed
         let has_autoincrement = TS::columns().iter().any(|col| col.auto_increment);
         let autoincrement_registry_page = if has_autoincrement {
-            Some(mm.allocate_page()?)
+            Some(mm.claim_page()?)
         } else {
             None
         };
@@ -100,9 +100,8 @@ impl SchemaRegistry {
         self.tables.insert(fingerprint, pages);
 
         // get schema page
-        let page = mm.schema_page();
         // write self to schema page
-        mm.write_at(page, 0, self)?;
+        mm.write_at(SCHEMA_PAGE, 0, self)?;
 
         // init snapshot ledger for this table
         SchemaSnapshotLedger::init::<TS>(pages.schema_snapshot_page, mm)?;
@@ -117,9 +116,8 @@ impl SchemaRegistry {
     }
 
     /// Save the schema registry to memory.
-    pub fn save(&self, mm: &mut MemoryManager<impl MemoryProvider>) -> MemoryResult<()> {
-        let page = mm.schema_page();
-        mm.write_at(page, 0, self)
+    pub fn save(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
+        mm.write_at(SCHEMA_PAGE, 0, self)
     }
 
     /// Returns the table registry page for a given table schema.
@@ -153,7 +151,7 @@ impl SchemaRegistry {
     pub fn register_table_from_snapshot(
         &mut self,
         snapshot: &TableSchemaSnapshot,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<TableRegistryPage> {
         let fingerprint = fingerprint_for_name(&snapshot.name);
         let candidate_name = snapshot.name.as_str();
@@ -168,13 +166,13 @@ impl SchemaRegistry {
             return Ok(pages);
         }
 
-        let schema_snapshot_page = mm.allocate_page()?;
-        let pages_list_page = mm.allocate_page()?;
-        let free_segments_page = mm.allocate_page()?;
-        let index_registry_page = mm.allocate_page()?;
+        let schema_snapshot_page = mm.claim_page()?;
+        let pages_list_page = mm.claim_page()?;
+        let free_segments_page = mm.claim_page()?;
+        let index_registry_page = mm.claim_page()?;
         let has_autoincrement = snapshot.columns.iter().any(|col| col.auto_increment);
         let autoincrement_registry_page = if has_autoincrement {
-            Some(mm.allocate_page()?)
+            Some(mm.claim_page()?)
         } else {
             None
         };
@@ -188,8 +186,7 @@ impl SchemaRegistry {
         };
         self.tables.insert(fingerprint, pages);
 
-        let page = mm.schema_page();
-        mm.write_at(page, 0, self)?;
+        mm.write_at(SCHEMA_PAGE, 0, self)?;
 
         mm.write_at(pages.schema_snapshot_page, 0, snapshot)?;
         IndexLedger::init_from_keys(
@@ -201,31 +198,46 @@ impl SchemaRegistry {
         Ok(pages)
     }
 
-    /// Removes the table identified by `name` from the registry and persists
-    /// the change.
+    /// Removes the table identified by `name` from the registry, releases
+    /// every page it owned back to the unclaimed-pages ledger, and persists
+    /// the updated registry.
     ///
     /// Used by the migration engine when applying a `MigrationOp::DropTable`.
-    /// The pages owned by the dropped table are leaked in v1 (issue #90 tracks
-    /// page reclamation).
     ///
     /// Returns the [`TableRegistryPage`] previously associated with the table,
     /// or `None` if no such table was registered.
     ///
     /// # Errors
     ///
-    /// Returns a [`MemoryError`] if persisting the updated registry fails.
+    /// Returns a [`MemoryError`] if loading the table registry, releasing
+    /// its pages, or persisting the updated schema registry fails.
     pub fn unregister_table(
         &mut self,
         name: &str,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<Option<TableRegistryPage>> {
         let fingerprint = fingerprint_for_name(name);
-        let removed = self.tables.remove(&fingerprint);
-        if removed.is_some() {
-            let page = mm.schema_page();
-            mm.write_at(page, 0, self)?;
+        let pages = self.tables.get(&fingerprint).copied();
+        if let Some(pages) = pages {
+            // Release every page owned by the dropped table before persisting
+            // the updated schema registry — once the schema page is rewritten
+            // there is no way back to the table's `TableRegistryPage`.
+            let registry = TableRegistry::load(pages, mm)?;
+            let pages_to_release = registry.releasable_pages_count(pages, mm)?;
+            let ledger: UnclaimedPages = mm.read_at(UNCLAIMED_PAGES_PAGE, 0)?;
+            if ledger.remaining_capacity() < pages_to_release as u32 {
+                return Err(MemoryError::UnclaimedPagesFull {
+                    capacity: crate::UNCLAIMED_PAGES_CAPACITY,
+                });
+            }
+
+            let removed = self.tables.remove(&fingerprint);
+            debug_assert_eq!(removed, Some(pages));
+            registry.release_pages(pages, mm)?;
+            mm.write_at(SCHEMA_PAGE, 0, self)?;
+            return Ok(removed);
         }
-        Ok(removed)
+        Ok(None)
     }
 
     /// Returns the persisted [`TableSchemaSnapshot`] for every registered table.
@@ -239,7 +251,7 @@ impl SchemaRegistry {
     /// snapshot page.
     pub fn stored_snapshots(
         &self,
-        mm: &mut MemoryManager<impl MemoryProvider>,
+        mm: &mut impl MemoryAccess,
     ) -> MemoryResult<Vec<TableSchemaSnapshot>> {
         self.tables
             .values()
@@ -358,7 +370,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::{HeapMemoryProvider, RecordAddress};
+    use crate::{
+        HeapMemoryProvider, MemoryAccess, MemoryManager, RecordAddress, UNCLAIMED_PAGES_CAPACITY,
+        UnclaimedPages,
+    };
 
     fn make_mm() -> MemoryManager<HeapMemoryProvider> {
         MemoryManager::init(HeapMemoryProvider::default())
@@ -1157,5 +1172,71 @@ mod tests {
             .unregister_table("missing", &mut mm)
             .expect("unregister");
         assert!(removed.is_none());
+    }
+
+    #[test]
+    fn test_unregister_table_releases_pages_for_reuse() {
+        // Registering a table allocates 4 metadata pages (no autoincrement on
+        // `User`) plus an index B-tree root. Unregistering must hand each
+        // back to the unclaimed-pages ledger so subsequent claims pop them
+        // before bumping the high-water mark.
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+
+        let pages = registry.register_table::<User>(&mut mm).expect("register");
+
+        let last_page_before_drop = mm.last_page().expect("at least one page");
+
+        registry
+            .unregister_table("users", &mut mm)
+            .expect("unregister")
+            .expect("expected returned pages");
+
+        // Re-claim every previously-owned page; none of these should bump
+        // the high-water mark.
+        let mut reclaimed = Vec::new();
+        for _ in 0..5 {
+            let page = mm.claim_page().expect("claim");
+            assert!(
+                page <= last_page_before_drop,
+                "expected reclaimed page <= {last_page_before_drop}, got {page}"
+            );
+            reclaimed.push(page);
+        }
+        // Pages handed out must include every TableRegistryPage page.
+        assert!(reclaimed.contains(&pages.schema_snapshot_page));
+        assert!(reclaimed.contains(&pages.pages_list_page));
+        assert!(reclaimed.contains(&pages.free_segments_page));
+        assert!(reclaimed.contains(&pages.index_registry_page));
+    }
+
+    #[test]
+    fn test_unregister_table_rejects_release_when_unclaimed_ledger_is_full() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let pages = registry.register_table::<User>(&mut mm).expect("register");
+
+        let mut ledger = UnclaimedPages::new();
+        for page in 0..(UNCLAIMED_PAGES_CAPACITY - 1) {
+            ledger.push(page).expect("fill ledger");
+        }
+        mm.write_at(mm.unclaimed_pages_page(), 0, &ledger)
+            .expect("persist ledger");
+
+        let err = registry
+            .unregister_table("users", &mut mm)
+            .expect_err("drop must fail before partially releasing pages");
+        assert!(matches!(err, MemoryError::UnclaimedPagesFull { .. }));
+
+        assert!(
+            registry.table_registry_page_by_name("users").is_some(),
+            "registry entry must remain when release is rejected"
+        );
+
+        let snapshot = SchemaSnapshotLedger::load(pages.schema_snapshot_page, &mut mm)
+            .expect("load snapshot ledger")
+            .get()
+            .clone();
+        assert_eq!(snapshot.name, "users");
     }
 }

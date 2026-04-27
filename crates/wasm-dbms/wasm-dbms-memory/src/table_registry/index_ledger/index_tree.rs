@@ -18,6 +18,74 @@ use crate::{MemoryAccess, RecordAddress};
 const NODE_TYPE_INTERNAL: u8 = 0;
 /// Node type discriminator stored in page byte 0.
 const NODE_TYPE_LEAF: u8 = 1;
+
+/// Collects every node page reachable from `root`.
+///
+/// Generic over no key type — the walker reads only the entry-count and
+/// child-pointer fields needed to descend the tree, skipping past keys via
+/// their length prefixes.
+///
+/// # Errors
+///
+/// Propagates any [`MemoryError`] surfaced while reading nodes.
+pub(super) fn index_tree_pages(root: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Vec<Page>> {
+    let page_size = mm.page_size() as usize;
+    let mut pages: Vec<Page> = Vec::new();
+    let mut stack: Vec<Page> = vec![root];
+    let mut buf = vec![0u8; page_size];
+
+    while let Some(page) = stack.pop() {
+        // Read the full node page so we can iterate its entries.
+        mm.read_at_raw(page, 0, &mut buf)?;
+        let node_type = buf[0];
+        match node_type {
+            NODE_TYPE_INTERNAL => {
+                let num_entries = u16::from_le_bytes(buf[5..7].try_into()?) as usize;
+                let rightmost_child = u32::from_le_bytes(buf[7..11].try_into()?);
+                stack.push(rightmost_child);
+
+                let mut offset = INTERNAL_HEADER_SIZE;
+                for _ in 0..num_entries {
+                    let key_size = u16::from_le_bytes(buf[offset..offset + 2].try_into()?) as usize;
+                    offset += 2 + key_size;
+                    let child = u32::from_le_bytes(buf[offset..offset + 4].try_into()?);
+                    stack.push(child);
+                    offset += 4;
+                }
+            }
+            NODE_TYPE_LEAF => {}
+            other => {
+                return Err(MemoryError::DecodeError(DecodeError::InvalidDiscriminant(
+                    other,
+                )));
+            }
+        }
+        pages.push(page);
+    }
+
+    Ok(pages)
+}
+
+/// Walks every node page reachable from `root` and returns each page to the
+/// unclaimed-pages ledger.
+///
+/// Used by `IndexLedger::release_pages` when a destructive op (e.g.
+/// `MigrationOp::DropTable`) drops the table.
+///
+/// # Errors
+///
+/// Propagates any [`MemoryError`] surfaced while reading nodes or
+/// releasing pages.
+pub(super) fn release_index_tree_pages(root: Page, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
+    let to_release = index_tree_pages(root, mm)?;
+
+    // Release nodes after the traversal so we never read a freshly-zeroed
+    // page during descent.
+    for page in to_release {
+        mm.unclaim_page(page)?;
+    }
+    Ok(())
+}
 /// Sentinel page value used for missing parent/leaf links.
 const NO_PAGE_SENTINEL: u32 = u32::MAX;
 /// Internal node header size in bytes.
@@ -394,7 +462,7 @@ where
 {
     /// Initializes a new empty tree with a single root leaf page.
     pub fn init(mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
-        let root_page = mm.allocate_page()?;
+        let root_page = mm.claim_page()?;
         let mut root = BTreeNode::<K>::new_leaf(root_page, None);
         root.flush(mm)?;
         Ok(Self::load(root_page))
@@ -452,7 +520,7 @@ where
             {
                 Self::promote_into_internal(parent, promotion);
             } else {
-                let new_root_page = mm.allocate_page()?;
+                let new_root_page = mm.claim_page()?;
                 path[current_index].header.parent_page = Some(new_root_page);
                 path[current_index].dirty = true;
 
@@ -713,7 +781,7 @@ where
                     .first()
                     .map(|entry| entry.key.clone())
                     .expect("overflowing leaf must contain entries");
-                let right_page = mm.allocate_page()?;
+                let right_page = mm.claim_page()?;
 
                 let old_next = leaf.next_leaf;
                 let mut right_leaf = BTreeNode {
@@ -765,7 +833,7 @@ where
                 let old_rightmost_child = internal.rightmost_child;
                 internal.rightmost_child = left_rightmost_child;
 
-                let right_page = mm.allocate_page()?;
+                let right_page = mm.claim_page()?;
                 let mut right_node = BTreeNode {
                     page: right_page,
                     header: NodeHeader {

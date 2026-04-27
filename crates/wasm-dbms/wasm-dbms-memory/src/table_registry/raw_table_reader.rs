@@ -156,10 +156,10 @@ mod tests {
     #[test]
     fn test_insert_raw_round_trips_through_raw_reader() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let schema_snapshot_page = mm.allocate_page().unwrap();
-        let pages_list_page = mm.allocate_page().unwrap();
-        let free_segments_page = mm.allocate_page().unwrap();
-        let index_registry_page = mm.allocate_page().unwrap();
+        let schema_snapshot_page = mm.claim_page().unwrap();
+        let pages_list_page = mm.claim_page().unwrap();
+        let free_segments_page = mm.claim_page().unwrap();
+        let index_registry_page = mm.claim_page().unwrap();
         write_dummy_schema_snapshot(schema_snapshot_page, &mut mm);
 
         let mut registry = TableRegistry::load(
@@ -189,10 +189,10 @@ mod tests {
     #[test]
     fn test_delete_raw_frees_segment() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let schema_snapshot_page = mm.allocate_page().unwrap();
-        let pages_list_page = mm.allocate_page().unwrap();
-        let free_segments_page = mm.allocate_page().unwrap();
-        let index_registry_page = mm.allocate_page().unwrap();
+        let schema_snapshot_page = mm.claim_page().unwrap();
+        let pages_list_page = mm.claim_page().unwrap();
+        let free_segments_page = mm.claim_page().unwrap();
+        let index_registry_page = mm.claim_page().unwrap();
         write_dummy_schema_snapshot(schema_snapshot_page, &mut mm);
 
         let mut registry = TableRegistry::load(
@@ -223,10 +223,10 @@ mod tests {
         use wasm_dbms_api::prelude::Encode;
 
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let schema_snapshot_page = mm.allocate_page().unwrap();
-        let pages_list_page = mm.allocate_page().unwrap();
-        let free_segments_page = mm.allocate_page().unwrap();
-        let index_registry_page = mm.allocate_page().unwrap();
+        let schema_snapshot_page = mm.claim_page().unwrap();
+        let pages_list_page = mm.claim_page().unwrap();
+        let free_segments_page = mm.claim_page().unwrap();
+        let index_registry_page = mm.claim_page().unwrap();
         write_dummy_schema_snapshot(schema_snapshot_page, &mut mm);
 
         let mut registry = TableRegistry::load(

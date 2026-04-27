@@ -62,7 +62,7 @@ impl PageLedger {
         }
 
         // otherwise allocate a new one
-        let new_page = mm.allocate_page()?;
+        let new_page = mm.claim_page()?;
         // add to ledger
         self.pages.pages.push(PageRecord {
             page: new_page,
@@ -130,7 +130,7 @@ impl PageLedger {
             return Ok((page_record.page, offset));
         }
 
-        let new_page = mm.allocate_page()?;
+        let new_page = mm.claim_page()?;
         self.pages.pages.push(PageRecord {
             page: new_page,
             free: page_size,
@@ -174,6 +174,29 @@ impl PageLedger {
         &self.pages.pages
     }
 
+    /// Returns how many pages dropping this ledger would release.
+    pub fn releasable_pages_count(&self) -> usize {
+        self.pages.pages.len() + 1
+    }
+
+    /// Releases every record page tracked by this ledger plus the ledger
+    /// page itself back to the unclaimed-pages ledger.
+    ///
+    /// Used by destructive migration ops (e.g. `MigrationOp::DropTable`).
+    /// After this call the ledger is logically dropped and must not be
+    /// accessed again.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any [`wasm_dbms_api::prelude::MemoryError`] surfaced by
+    /// [`MemoryAccess::unclaim_page`].
+    pub fn release_pages(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
+        for record in &self.pages.pages {
+            mm.unclaim_page(record.page)?;
+        }
+        mm.unclaim_page(self.ledger_page)
+    }
+
     /// Write the page ledger to memory.
     fn write(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
         mm.write_at(self.ledger_page, 0, &self.pages)
@@ -192,7 +215,7 @@ mod tests {
     #[test]
     fn test_should_store_pages_and_load_back() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
-        let page = mm.allocate_page().unwrap();
+        let page = mm.claim_page().unwrap();
         let page_ledger = PageLedger {
             pages: PageTable {
                 pages: vec![
@@ -223,7 +246,7 @@ mod tests {
     fn test_should_get_page_for_record() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         // allocate page
-        let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
+        let ledger_page = mm.claim_page().expect("failed to allocate ledger page");
         let mut page_ledger =
             PageLedger::load(ledger_page, &mut mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());
@@ -260,7 +283,7 @@ mod tests {
     fn test_should_get_page_with_offset() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         // allocate page
-        let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
+        let ledger_page = mm.claim_page().expect("failed to allocate ledger page");
         let mut page_ledger =
             PageLedger::load(ledger_page, &mut mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());
@@ -309,7 +332,7 @@ mod tests {
     fn test_should_account_for_padding_on_commit() {
         let mut mm = MemoryManager::init(HeapMemoryProvider::default());
         // allocate page
-        let ledger_page = mm.allocate_page().expect("failed to allocate ledger page");
+        let ledger_page = mm.claim_page().expect("failed to allocate ledger page");
         let mut page_ledger =
             PageLedger::load(ledger_page, &mut mm).expect("failed to load page ledger");
         assert!(page_ledger.pages.pages.is_empty());

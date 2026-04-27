@@ -24,6 +24,12 @@ pub enum MemoryError {
     /// Error when failing to allocate a new page.
     #[error("Failed to allocate a new page")]
     FailedToAllocatePage,
+    /// Error when the unclaimed-pages ledger has no room for another entry.
+    #[error("Unclaimed pages ledger is full ({capacity} entries)")]
+    UnclaimedPagesFull {
+        /// Maximum number of pages the ledger can hold.
+        capacity: u32,
+    },
     /// Error when no index exists for the requested columns.
     #[error("Index not found for columns: {0:?}")]
     IndexNotFound(Vec<String>),

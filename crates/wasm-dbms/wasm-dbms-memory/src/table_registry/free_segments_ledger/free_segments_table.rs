@@ -573,7 +573,7 @@ mod tests {
         max_records: usize,
     ) -> FreeSegmentsTable {
         // create a page
-        let page = mm.allocate_page().expect("alloc failed");
+        let page = mm.claim_page().expect("alloc failed");
         FreeSegmentsTable {
             records: FreeSegmentsList::default(),
             max_records,
