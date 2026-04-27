@@ -87,7 +87,13 @@ pub enum DataTypeKind {
     Uint32,
     Uint64,
     Uuid,
-    Custom(&'static str),
+    /// A user-defined custom type. Carries the stable [`CustomDataType::TYPE_TAG`]
+    /// and a [`crate::dbms::table::WireSize`] descriptor so the migration codec
+    /// can slice column bytes without invoking the user's `Encode::decode`.
+    Custom {
+        tag: &'static str,
+        wire_size: crate::dbms::table::WireSize,
+    },
 }
 
 #[cfg(test)]
@@ -196,22 +202,46 @@ mod test {
 
     #[test]
     fn test_should_create_custom_data_type_kind() {
-        let kind = DataTypeKind::Custom("role");
-        assert_eq!(kind, DataTypeKind::Custom("role"));
-        assert_ne!(kind, DataTypeKind::Custom("status"));
+        use crate::dbms::table::WireSize;
+        let kind = DataTypeKind::Custom {
+            tag: "role",
+            wire_size: WireSize::Fixed(1),
+        };
+        assert_eq!(
+            kind,
+            DataTypeKind::Custom {
+                tag: "role",
+                wire_size: WireSize::Fixed(1)
+            }
+        );
+        assert_ne!(
+            kind,
+            DataTypeKind::Custom {
+                tag: "status",
+                wire_size: WireSize::Fixed(1)
+            }
+        );
         assert_ne!(kind, DataTypeKind::Text);
     }
 
     #[test]
     fn test_should_copy_custom_data_type_kind() {
-        let kind = DataTypeKind::Custom("role");
+        use crate::dbms::table::WireSize;
+        let kind = DataTypeKind::Custom {
+            tag: "role",
+            wire_size: WireSize::LengthPrefixed,
+        };
         let copied = kind;
         assert_eq!(kind, copied);
     }
 
     #[test]
     fn test_should_debug_custom_data_type_kind() {
-        let kind = DataTypeKind::Custom("role");
+        use crate::dbms::table::WireSize;
+        let kind = DataTypeKind::Custom {
+            tag: "role",
+            wire_size: WireSize::Fixed(1),
+        };
         let debug = format!("{kind:?}");
         assert!(debug.contains("Custom"));
         assert!(debug.contains("role"));

@@ -149,7 +149,7 @@ impl Migrate for Event {
 }
 ```
 
-Returning `None` here falls back to the `#[default]` attribute. Returning `None` from both produces `MigrationError::MissingDefault`.
+Returning `None` here falls back to the `#[default]` attribute. Returning `None` from both produces `MigrationError::DefaultMissing`.
 
 > **Note:** without `#[migrate]`, the `Table` macro emits an empty `impl Migrate for T {}` for you. Adding a hand-written impl on top of it would be a duplicate.
 
@@ -388,7 +388,7 @@ A failed `migrate()` call rolls back every page touched in the journal session. 
 
 Recovery is iterative:
 
-1. Read the error variant. `IncompatibleType`, `MissingDefault`, `ConstraintViolation`, `DestructiveOpDenied`, and `TransformAborted` each call out the offending table/column/reason.
+1. Read the error variant. `IncompatibleType`, `DefaultMissing`, `ConstraintViolation`, `DestructiveOpDenied`, and `TransformAborted` each call out the offending table/column/reason.
 2. Fix the cause: add `#[default]`, write a `transform_column` arm, clean offending rows via ACL-allowed admin endpoints, or relax the policy.
 3. Redeploy the binary (or just retry `migrate` if the fix is data-side, not schema-side).
 
@@ -433,7 +433,7 @@ Round-trip the snapshots through `Encode::encode` / `Encode::decode` to confirm 
 ## Common Pitfalls
 
 - **Renaming without `#[renamed_from]`.** The planner has no way to know your intent; it will emit `DropColumn` + `AddColumn` and silently lose data the moment `allow_destructive: true` is set.
-- **Adding a non-nullable column without a default.** Pre-flight will reject the plan with `MissingDefault`. Either provide `#[default]`, override `Migrate::default_value`, or make the column `Nullable<T>`.
+- **Adding a non-nullable column without a default.** Pre-flight will reject the plan with `DefaultMissing`. Either provide `#[default]`, override `Migrate::default_value`, or make the column `Nullable<T>`.
 - **Tightening on dirty data.** A `nullable: false` flip after a release that allowed nulls will fail unless every row already satisfies the constraint. Backfill in a prior release.
 - **Reordering `DataTypeSnapshot` discriminants.** The on-disk format depends on the exact tag bytes. Treat the enum as frozen — new variants take fresh tags, removed ones leave a reserved hole.
 - **Bumping `#[alignment = N]`.** This changes the on-disk record layout for the table. Until `WidenColumn` is generalised to handle alignment changes, this requires a manual rewrite. Avoid unless absolutely necessary.

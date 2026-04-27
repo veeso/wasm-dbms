@@ -693,9 +693,12 @@ fn get_fields(
         ) = if custom_type {
             let custom_ident = field_type_ident.clone();
             let dtk: syn::Expr = syn::parse_quote! {
-                ::wasm_dbms_api::prelude::DataTypeKind::Custom(
-                    <#custom_ident as ::wasm_dbms_api::prelude::CustomDataType>::TYPE_TAG
-                )
+                ::wasm_dbms_api::prelude::DataTypeKind::Custom {
+                    tag: <#custom_ident as ::wasm_dbms_api::prelude::CustomDataType>::TYPE_TAG,
+                    wire_size: ::wasm_dbms_api::prelude::WireSize::from_data_size(
+                        <#custom_ident as ::wasm_dbms_api::prelude::Encode>::SIZE,
+                    ),
+                }
             };
             (dtk, None, Some(custom_ident))
         } else {

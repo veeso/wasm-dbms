@@ -223,6 +223,30 @@ where
         self.provider.write(absolute_offset, buffer.as_ref())
     }
 
+    fn zero_raw(&mut self, page: Page, offset: PageOffset, len: PageOffset) -> MemoryResult<()> {
+        if self.last_page().is_none_or(|last_page| page > last_page) {
+            return Err(MemoryError::SegmentationFault {
+                page,
+                offset,
+                data_size: len as u64,
+                page_size: P::PAGE_SIZE,
+            });
+        }
+
+        if offset as u64 + len as u64 > P::PAGE_SIZE {
+            return Err(MemoryError::SegmentationFault {
+                page,
+                offset,
+                data_size: len as u64,
+                page_size: P::PAGE_SIZE,
+            });
+        }
+
+        let absolute_offset = self.absolute_offset(page, offset);
+        let buffer = vec![0u8; len as usize];
+        self.provider.write(absolute_offset, buffer.as_ref())
+    }
+
     fn read_at_raw(
         &mut self,
         page: Page,

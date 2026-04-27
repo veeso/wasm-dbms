@@ -11,6 +11,8 @@
 //! design context.
 
 pub(crate) mod apply;
+pub(crate) mod codec;
 pub(crate) mod diff;
 pub(crate) mod plan;
 pub(crate) mod snapshots;
+pub(crate) mod widen;

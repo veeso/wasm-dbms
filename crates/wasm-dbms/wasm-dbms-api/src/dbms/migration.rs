@@ -38,7 +38,7 @@ where
     ///
     /// Returning `None` falls back to the static `#[default = ...]` attribute
     /// declared on the column. If neither produces a value, migration aborts
-    /// with [`MigrationError::MissingDefault`].
+    /// with [`MigrationError::DefaultMissing`].
     fn default_value(_column: &str) -> Option<Value> {
         None
     }
@@ -217,7 +217,7 @@ pub enum MigrationError {
     /// `AddColumn` on a non-nullable column has neither a `#[default]`
     /// attribute nor a [`Migrate::default_value`] override.
     #[error("Missing default for non-nullable new column `{column}` in table `{table}`")]
-    MissingDefault {
+    DefaultMissing {
         /// Table the column belongs to.
         table: String,
         /// Name of the offending column.
@@ -251,14 +251,45 @@ pub enum MigrationError {
         /// Reason propagated from the user transform.
         reason: String,
     },
-    /// Column-mutating op (`AddColumn`, `DropColumn`, `RenameColumn`,
-    /// `WidenColumn`, `TransformColumn`) requires a snapshot-driven record
-    /// (de)serializer that is tracked separately and not yet wired into the
-    /// apply pipeline.
-    #[error("Migration op `{op}` requires snapshot-driven record rewrite (see issue #91)")]
-    DataRewriteUnsupported {
-        /// Short tag for the offending op kind.
-        op: String,
+    /// Type change is outside the widening whitelist
+    /// (`IntN→IntM`, `UintN→UintM`, `UintN→IntM`, `Float32→Float64`) and no
+    /// `Migrate::transform_column` impl handled it.
+    #[error(
+        "No widening rule for column `{column}` in table `{table}`: {old_type:?} -> {new_type:?}"
+    )]
+    WideningIncompatible {
+        /// Table the column belongs to.
+        table: String,
+        /// Name of the offending column.
+        column: String,
+        /// Stored data type before widening.
+        old_type: DataTypeSnapshot,
+        /// Compiled data type after widening.
+        new_type: DataTypeSnapshot,
+    },
+    /// User `Migrate::transform_column` returned `Ok(None)` while a transform
+    /// was required (no widening rule available).
+    #[error("Migrate::transform_column returned None for column `{column}` in table `{table}`")]
+    TransformReturnedNone {
+        /// Table the column belongs to.
+        table: String,
+        /// Name of the column being transformed.
+        column: String,
+    },
+    /// Add-FK tightening found a row whose value is absent from the target
+    /// table's referenced column.
+    #[error(
+        "Foreign key violation on column `{column}` in table `{table}`: value `{value}` not present in `{target_table}`"
+    )]
+    ForeignKeyViolation {
+        /// Source table that holds the foreign key column.
+        table: String,
+        /// Source column carrying the foreign key.
+        column: String,
+        /// Target table the FK references.
+        target_table: String,
+        /// Stringified value that failed the lookup.
+        value: String,
     },
 }
 
@@ -301,7 +332,7 @@ mod test {
         };
         assert!(err.to_string().contains("Incompatible type change"));
 
-        let err = MigrationError::MissingDefault {
+        let err = MigrationError::DefaultMissing {
             table: "users".into(),
             column: "email".into(),
         };
@@ -363,5 +394,37 @@ mod test {
         let encoded = candid::encode_one(&err).expect("failed to encode");
         let decoded: MigrationError = candid::decode_one(&encoded).expect("failed to decode");
         assert_eq!(err, decoded);
+    }
+
+    #[cfg(feature = "candid")]
+    #[test]
+    fn test_should_candid_roundtrip_new_migration_error_variants() {
+        let cases = vec![
+            MigrationError::DefaultMissing {
+                table: "users".into(),
+                column: "email".into(),
+            },
+            MigrationError::WideningIncompatible {
+                table: "users".into(),
+                column: "id".into(),
+                old_type: DataTypeSnapshot::Int32,
+                new_type: DataTypeSnapshot::Uint8,
+            },
+            MigrationError::TransformReturnedNone {
+                table: "users".into(),
+                column: "id".into(),
+            },
+            MigrationError::ForeignKeyViolation {
+                table: "posts".into(),
+                column: "owner".into(),
+                target_table: "users".into(),
+                value: "Uint32(99)".into(),
+            },
+        ];
+        for err in cases {
+            let encoded = candid::encode_one(&err).expect("failed to encode");
+            let decoded: MigrationError = candid::decode_one(&encoded).expect("failed to decode");
+            assert_eq!(err, decoded);
+        }
     }
 }

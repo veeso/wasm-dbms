@@ -3,8 +3,8 @@ pub mod snapshot;
 use xxhash_rust::xxh3::xxh3_64;
 
 pub use self::snapshot::{
-    ColumnSnapshot, DataTypeSnapshot, ForeignKeySnapshot, IndexSnapshot, OnDeleteSnapshot,
-    TableSchemaSnapshot,
+    ColumnSnapshot, CustomDataTypeSnapshot, DataTypeSnapshot, ForeignKeySnapshot, IndexSnapshot,
+    OnDeleteSnapshot, TableSchemaSnapshot, WireSize,
 };
 use crate::dbms::foreign_fetcher::ForeignFetcher;
 use crate::dbms::table::column_def::{ColumnDef, IndexDef};
@@ -35,7 +35,12 @@ fn data_type_to_snapshot(kind: &DataTypeKind) -> DataTypeSnapshot {
         DataTypeKind::Uint32 => DataTypeSnapshot::Uint32,
         DataTypeKind::Uint64 => DataTypeSnapshot::Uint64,
         DataTypeKind::Uuid => DataTypeSnapshot::Uuid,
-        DataTypeKind::Custom(tag) => DataTypeSnapshot::Custom((*tag).to_string()),
+        DataTypeKind::Custom { tag, wire_size } => {
+            DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+                tag: (*tag).to_string(),
+                wire_size: *wire_size,
+            }))
+        }
     }
 }
 

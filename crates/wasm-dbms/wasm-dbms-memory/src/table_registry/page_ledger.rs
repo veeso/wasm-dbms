@@ -105,6 +105,70 @@ impl PageLedger {
         Err(wasm_dbms_api::prelude::MemoryError::OutOfBounds)
     }
 
+    /// Find page + offset for a record of `physical_size` bytes (header
+    /// included, padded to alignment). Used by the migration apply pipeline,
+    /// which knows record size only at runtime via the stored snapshot.
+    pub fn get_page_and_offset_raw(
+        &mut self,
+        physical_size: u64,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<(Page, PageOffset)> {
+        let page_size = mm.page_size();
+        if physical_size > page_size {
+            return Err(wasm_dbms_api::prelude::MemoryError::DataTooLarge {
+                page_size,
+                requested: physical_size,
+            });
+        }
+
+        let next_page = self.pages.pages.iter().find(|page_record| {
+            let taken = page_size.saturating_sub(page_record.free);
+            taken + physical_size <= page_size
+        });
+        if let Some(page_record) = next_page {
+            let offset = page_size.saturating_sub(page_record.free) as PageOffset;
+            return Ok((page_record.page, offset));
+        }
+
+        let new_page = mm.allocate_page()?;
+        self.pages.pages.push(PageRecord {
+            page: new_page,
+            free: page_size,
+        });
+
+        Ok((new_page, 0))
+    }
+
+    /// Commit a raw allocation of `record_size` bytes (header included),
+    /// padded to `alignment`. Sibling to [`Self::commit`] for the migration
+    /// apply pipeline.
+    pub fn commit_raw(
+        &mut self,
+        page: Page,
+        record_size: u64,
+        alignment: PageOffset,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<()> {
+        if let Some(page_record) = self.pages.pages.iter_mut().find(|pr| pr.page == page) {
+            if page_record.free < record_size {
+                return Err(wasm_dbms_api::prelude::MemoryError::DataTooLarge {
+                    page_size: page_record.free,
+                    requested: record_size,
+                });
+            }
+            let alignment = alignment as u64;
+            let padded = if alignment == 0 {
+                record_size
+            } else {
+                record_size.div_ceil(alignment) * alignment
+            };
+            page_record.free = page_record.free.saturating_sub(padded);
+            self.write(mm)?;
+            return Ok(());
+        }
+        Err(wasm_dbms_api::prelude::MemoryError::OutOfBounds)
+    }
+
     /// Returns the list of pages in the ledger.
     pub fn pages(&self) -> &[PageRecord] {
         &self.pages.pages

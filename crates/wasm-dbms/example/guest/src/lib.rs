@@ -379,7 +379,17 @@ fn data_type_to_wit(t: DataTypeSnapshot) -> wit::DataTypeSnapshot {
         DataTypeSnapshot::Text => wit::DataTypeSnapshot::Text,
         DataTypeSnapshot::Uuid => wit::DataTypeSnapshot::Uuid,
         DataTypeSnapshot::Json => wit::DataTypeSnapshot::Json,
-        DataTypeSnapshot::Custom(name) => wit::DataTypeSnapshot::Custom(name),
+        DataTypeSnapshot::Custom(meta) => {
+            wit::DataTypeSnapshot::Custom(wit::CustomDataTypeSnapshot {
+                tag: meta.tag.clone(),
+                wire_size: match meta.wire_size {
+                    wasm_dbms_api::prelude::WireSize::Fixed(n) => wit::WireSize::Fixed(n),
+                    wasm_dbms_api::prelude::WireSize::LengthPrefixed => {
+                        wit::WireSize::LengthPrefixed
+                    }
+                },
+            })
+        }
     }
 }
 

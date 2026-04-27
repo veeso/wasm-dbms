@@ -116,9 +116,20 @@ pub enum DataTypeSnapshot {
     Date = 0x40, Datetime = 0x41,
     Blob = 0x50, Text = 0x51, Uuid = 0x52,
     Json = 0x60,
-    Custom(String) = 0xF0,              // name-keyed
+    Custom { tag: String, wire_size: WireSize } = 0xF0,
+}
+
+pub enum WireSize {
+    Fixed(u32),       // column occupies exactly N bytes
+    LengthPrefixed,   // body preceded by 2-byte LE length prefix
 }
 ```
+
+`WireSize` is derived at compile time from the custom type's `Encode::SIZE`:
+`DataSize::Fixed(n)` → `WireSize::Fixed(n)`, `DataSize::Dynamic` →
+`WireSize::LengthPrefixed`. The migration codec uses it to slice column
+bytes during a snapshot-driven rewrite without invoking the user's
+`Encode::decode` impl.
 
 **Stability rules:**
 
@@ -156,7 +167,7 @@ For each compiled column:
    - Types differ and neither applies → `MigrationError::IncompatibleType`.
    - Any constraint flag changed → `AlterColumn { changes }`.
 
-Stored columns not matched by any compiled column (directly or via `renamed_from`) → `DropColumn`. Compiled columns not matched → `AddColumn`. If non-nullable, the planner requires either `#[default = ...]` or `Migrate::default_value` returning `Some`, otherwise `MigrationError::MissingDefault`.
+Stored columns not matched by any compiled column (directly or via `renamed_from`) → `DropColumn`. Compiled columns not matched → `AddColumn`. If non-nullable, the planner requires either `#[default = ...]` or `Migrate::default_value` returning `Some`, otherwise `MigrationError::DefaultMissing`.
 
 **Index diff:**
 
@@ -298,7 +309,7 @@ where
 {
     /// Dynamic default for AddColumn on a non-nullable column.
     /// `None` falls back to the static `#[default]` attribute, else
-    /// MissingDefault.
+    /// DefaultMissing.
     fn default_value(_column: &str) -> Option<Value> { None }
 
     /// Transform a stored value during an incompatible type change.
@@ -345,14 +356,17 @@ dbms.migrate(MigrationPolicy { allow_destructive: true })?;
 
 `DbmsError::Migration(MigrationError)` covers the full migration pipeline:
 
-| Variant               | When                                                                                   |
-| --------------------- | -------------------------------------------------------------------------------------- |
-| `SchemaDrift`         | CRUD called while `drift == true`. Call `migrate(policy)` first.                       |
-| `IncompatibleType`    | Type change is neither in the widening whitelist nor handled by `transform_column`.    |
-| `MissingDefault`      | `AddColumn` on a non-nullable column without `#[default]` or `default_value` override. |
-| `ConstraintViolation` | Tightening op found data that violates the new constraint.                             |
-| `DestructiveOpDenied` | Planner emitted `DropTable` / `DropColumn` while `allow_destructive` is `false`.       |
-| `TransformAborted`    | User `transform_column` impl returned `Err`.                                           |
+| Variant                  | When                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| `SchemaDrift`            | CRUD called while `drift == true`. Call `migrate(policy)` first.                                  |
+| `IncompatibleType`       | Type change is neither in the widening whitelist nor handled by `transform_column`.               |
+| `DefaultMissing`         | `AddColumn` on a non-nullable column without `#[default]` or `default_value` override.            |
+| `ConstraintViolation`    | Tightening op found data that violates the new constraint.                                        |
+| `DestructiveOpDenied`    | Planner emitted `DropTable` / `DropColumn` while `allow_destructive` is `false`.                  |
+| `TransformAborted`       | User `transform_column` impl returned `Err`.                                                      |
+| `WideningIncompatible`   | `WidenColumn` op falls outside the widening whitelist (and no `transform_column` impl handled it). |
+| `TransformReturnedNone`  | `Migrate::transform_column` returned `Ok(None)` while a transform was required.                   |
+| `ForeignKeyViolation`    | Add-FK tightening found a row whose value is absent from the target table's column.               |
 
 See the [Migration Errors section in the errors reference](./errors.md#migration-errors) for matching examples and remediation.
 

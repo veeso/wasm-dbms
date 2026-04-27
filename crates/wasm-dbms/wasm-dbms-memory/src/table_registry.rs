@@ -5,18 +5,20 @@ mod free_segments_ledger;
 mod index_ledger;
 mod page_ledger;
 mod raw_record;
+mod raw_table_reader;
 mod record_address;
 mod schema_snapshot_ledger;
 mod table_reader;
 mod write_at;
 
-use wasm_dbms_api::prelude::{Encode, MemoryResult, PageOffset, Value};
+use wasm_dbms_api::prelude::{Encode, MSize, MemoryResult, PageOffset, Value};
 
 pub use self::autoincrement_ledger::AutoincrementLedger;
 use self::free_segments_ledger::FreeSegmentsLedger;
 pub use self::index_ledger::{IndexLedger, IndexTreeWalker};
 use self::page_ledger::PageLedger;
 use self::raw_record::RawRecord;
+pub use self::raw_table_reader::{RawRecordBytes, RawTableReader};
 pub use self::record_address::RecordAddress;
 pub use self::schema_snapshot_ledger::SchemaSnapshotLedger;
 pub use self::table_reader::{NextRecord, TableReader};
@@ -154,6 +156,113 @@ impl TableRegistry {
         }
     }
 
+    /// Iterate the table's records as raw bytes under the given alignment.
+    ///
+    /// Used by the migration apply pipeline to read records under the stored
+    /// snapshot. `alignment` must match the on-disk layout (i.e. the
+    /// `TableSchemaSnapshot::alignment` of the snapshot the records were
+    /// inserted under).
+    pub fn iter_raw<'a, MA>(
+        &'a self,
+        alignment: PageOffset,
+        mm: &'a mut MA,
+    ) -> RawTableReader<'a, MA>
+    where
+        MA: MemoryAccess,
+    {
+        RawTableReader::new(&self.page_ledger, alignment, mm)
+    }
+
+    /// Insert pre-encoded record bytes under the given alignment.
+    ///
+    /// Used by the migration apply pipeline. `bytes` is the body of the
+    /// record (without the 2-byte length header — the registry writes the
+    /// header). `alignment` comes from the target snapshot.
+    pub fn insert_raw(
+        &mut self,
+        bytes: &[u8],
+        alignment: PageOffset,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<RecordAddress> {
+        use self::raw_record::RAW_RECORD_HEADER_SIZE;
+
+        let length = bytes.len() as MSize;
+        let total = (RAW_RECORD_HEADER_SIZE + length) as u64;
+        let physical_size_msize = align_up_msize(RAW_RECORD_HEADER_SIZE + length, alignment);
+        let physical_size_u64 = physical_size_msize as u64;
+
+        // Reuse a free segment if one fits.
+        let (page, offset) = if let Some(segment) = self
+            .free_segments_ledger
+            .find_reusable_segment_raw(length, mm)?
+        {
+            let page = segment.segment.page;
+            let offset = segment.segment.offset;
+            self.free_segments_ledger
+                .commit_reused_space_raw(physical_size_msize, segment, mm)?;
+            (page, offset)
+        } else {
+            let (page, offset) = self
+                .page_ledger
+                .get_page_and_offset_raw(physical_size_u64, mm)?;
+            self.page_ledger.commit_raw(page, total, alignment, mm)?;
+            (page, offset)
+        };
+
+        let aligned_offset = align_up_msize(offset, alignment);
+        let mut full = Vec::with_capacity(total as usize);
+        full.extend_from_slice(&length.to_le_bytes());
+        full.extend_from_slice(bytes);
+        mm.write_at_raw(page, aligned_offset, &full)?;
+
+        Ok(RecordAddress {
+            page,
+            offset: aligned_offset,
+        })
+    }
+
+    /// Read raw record bytes at the given address (header stripped).
+    pub fn read_raw_at(
+        &self,
+        address: RecordAddress,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<Vec<u8>> {
+        use self::raw_record::RAW_RECORD_HEADER_SIZE;
+
+        let mut header = [0u8; RAW_RECORD_HEADER_SIZE as usize];
+        mm.read_at_raw(address.page, address.offset, &mut header)?;
+        let length = u16::from_le_bytes(header) as usize;
+        let mut body = vec![0u8; length];
+        mm.read_at_raw(
+            address.page,
+            address.offset + RAW_RECORD_HEADER_SIZE,
+            &mut body,
+        )?;
+        Ok(body)
+    }
+
+    /// Delete a raw record at the given address. Mirrors [`Self::delete`]
+    /// but parameterises size + alignment rather than reading them from a
+    /// compile-time `Encode` impl.
+    pub fn delete_raw(
+        &mut self,
+        address: RecordAddress,
+        body_len: MSize,
+        alignment: PageOffset,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<()> {
+        use self::raw_record::RAW_RECORD_HEADER_SIZE;
+
+        let physical_size = align_up_msize(RAW_RECORD_HEADER_SIZE + body_len, alignment);
+        mm.zero_raw(address.page, address.offset, physical_size)?;
+        self.free_segments_ledger.insert_free_segment_raw(
+            address.page,
+            address.offset,
+            physical_size,
+            mm,
+        )
+    }
+
     /// Get a reference to the index ledger, allowing to read the indexes.
     pub fn index_ledger(&self) -> &IndexLedger {
         &self.index_ledger
@@ -271,6 +380,16 @@ impl TableRegistry {
             }
         }
     }
+}
+
+/// Round `value` up to the next multiple of `alignment`. Runtime sibling
+/// to the const [`align_up`](crate::align_up) helper. Used by the raw
+/// insert/delete path where alignment comes from a stored snapshot.
+fn align_up_msize(value: MSize, alignment: PageOffset) -> MSize {
+    if alignment == 0 {
+        return value;
+    }
+    value.div_ceil(alignment) * alignment
 }
 
 /// Test utilities shared across the table_registry submodules.

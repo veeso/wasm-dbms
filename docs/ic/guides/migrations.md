@@ -297,15 +297,17 @@ upgrade and the operator action receives a clear, structured error.
 Migration errors propagate through `IcDbmsError::Migration(MigrationError)`.
 The variants worth handling explicitly on the client:
 
-| Variant                  | Meaning                                                             | Caller action                                                                   |
-| ------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `SchemaDrift`            | CRUD called while drift is set.                                     | Call `migrate`.                                                                 |
-| `IncompatibleType`       | Column type changed without a widening or transform.                | Add a `transform_column` arm or a release that widens via an intermediate type. |
-| `MissingDefault`         | New non-nullable column with no `#[default]` or `default_value`.    | Add the default; redeploy.                                                      |
-| `ConstraintViolation`    | Tightening rejected an existing row.                                | Backfill the offending rows in a prior release.                                 |
-| `DestructiveOpDenied`    | Plan contained `DropTable` / `DropColumn` and policy disallowed it. | Re-run with `allow_destructive: true` after operator review.                    |
-| `TransformAborted`       | User `transform_column` returned `Err`.                             | Fix the transform; redeploy.                                                    |
-| `DataRewriteUnsupported` | Column-mutating op against snapshot-driven rewrite (issue #91).     | Track upstream; out of scope for v1.                                            |
+| Variant                 | Meaning                                                                          | Caller action                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `SchemaDrift`           | CRUD called while drift is set.                                                  | Call `migrate`.                                                                 |
+| `IncompatibleType`      | Column type changed without a widening or transform.                             | Add a `transform_column` arm or a release that widens via an intermediate type. |
+| `DefaultMissing`        | New non-nullable column with no `#[default]` or `default_value`.                 | Add the default; redeploy.                                                      |
+| `ConstraintViolation`   | Tightening rejected an existing row.                                             | Backfill the offending rows in a prior release.                                 |
+| `DestructiveOpDenied`   | Plan contained `DropTable` / `DropColumn` and policy disallowed it.              | Re-run with `allow_destructive: true` after operator review.                    |
+| `TransformAborted`      | User `transform_column` returned `Err`.                                          | Fix the transform; redeploy.                                                    |
+| `WideningIncompatible`  | `WidenColumn` outside the widening whitelist with no `transform_column` handler. | Provide a `transform_column` impl or split the change across multiple releases. |
+| `TransformReturnedNone` | `Migrate::transform_column` returned `Ok(None)` for a column that needs one.     | Implement the transform branch.                                                 |
+| `ForeignKeyViolation`   | Add-FK tightening found a row referencing a missing target.                      | Clean up orphan rows in a prior release.                                        |
 
 Tip: never `unwrap` `migrate` in a `post_upgrade` hook — a panic there bricks
 the canister. Trap with a descriptive message instead, or fall back to the

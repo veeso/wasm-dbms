@@ -26,7 +26,7 @@ use crate::schema::DatabaseSchema;
 ///
 /// - [`MigrationError::IncompatibleType`] when a column's data type changes to
 ///   one neither in the widening whitelist nor presumed transformable.
-/// - [`MigrationError::MissingDefault`] when a non-nullable column is added
+/// - [`MigrationError::DefaultMissing`] when a non-nullable column is added
 ///   with no `#[default]` and no `Migrate::default_value` override.
 pub(crate) fn diff<M, A>(
     stored: &[TableSchemaSnapshot],
@@ -128,7 +128,7 @@ where
                 .migrate_default_dyn(&compiled.name, &compiled_col.name)
                 .is_none()
         {
-            return Err(DbmsError::Migration(MigrationError::MissingDefault {
+            return Err(DbmsError::Migration(MigrationError::DefaultMissing {
                 table: compiled.name.clone(),
                 column: compiled_col.name.clone(),
             }));
@@ -408,7 +408,7 @@ mod tests {
         let result = diff(&stored, &compiled, &schema());
         assert!(matches!(
             result,
-            Err(DbmsError::Migration(MigrationError::MissingDefault { ref table, ref column }))
+            Err(DbmsError::Migration(MigrationError::DefaultMissing { ref table, ref column }))
                 if table == "users" && column == "email"
         ));
     }

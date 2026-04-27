@@ -58,6 +58,50 @@ pub struct ColumnSnapshot {
     pub default: Option<Value>,
 }
 
+/// On-disk wire layout descriptor for a custom-typed column.
+///
+/// Tells the snapshot-driven record codec how many bytes a custom column
+/// occupies in a stored record, without needing access to the user's
+/// concrete `Encode` impl. Derived from `<T as Encode>::SIZE` at the time
+/// the snapshot is built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "candid", derive(candid::CandidType))]
+pub enum WireSize {
+    /// Column occupies exactly N bytes per record (`Encode::SIZE = Fixed(N)`).
+    Fixed(u32),
+    /// Column body is preceded by a 2-byte little-endian length prefix
+    /// (the convention used by `Text`, `Blob`, `Json`, and any custom
+    /// dynamic-size type — `Encode::SIZE = Dynamic`).
+    LengthPrefixed,
+}
+
+/// User-defined custom-type metadata carried inside
+/// [`DataTypeSnapshot::Custom`]. Boxed in the parent enum so the discriminant
+/// stays compact (the migration error variants embed two `DataTypeSnapshot`s
+/// each, and an inline `String` + `WireSize` would bloat
+/// [`crate::error::DbmsError`] past clippy's `result_large_err` threshold).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "candid", derive(candid::CandidType))]
+pub struct CustomDataTypeSnapshot {
+    /// Stable type identifier (`CustomDataType::TYPE_TAG`).
+    pub tag: String,
+    /// On-disk wire layout used by the snapshot codec.
+    pub wire_size: WireSize,
+}
+
+impl WireSize {
+    /// Derive the on-disk wire layout from a custom type's [`DataSize`].
+    ///
+    /// `const fn` so generated code can use it inside `&[ColumnDef]`
+    /// promotable array literals.
+    pub const fn from_data_size(size: DataSize) -> Self {
+        match size {
+            DataSize::Fixed(n) => Self::Fixed(n as u32),
+            DataSize::Dynamic => Self::LengthPrefixed,
+        }
+    }
+}
+
 /// Stable, tag-keyed encoding of a column data type.
 ///
 /// The discriminants are part of the on-disk format and must not be reused or reordered; new variants must take a fresh tag.
@@ -69,8 +113,8 @@ pub enum DataTypeSnapshot {
     Blob = 0x50,
     /// Boolean value.
     Boolean = 0x30,
-    /// User-defined custom data type, identified by name.
-    Custom(String) = 0xF0, // name-keyed
+    /// User-defined custom data type, identified by name + on-disk wire layout.
+    Custom(Box<CustomDataTypeSnapshot>) = 0xF0,
     /// Calendar date with no time component.
     Date = 0x40,
     /// Date and time.
@@ -283,8 +327,16 @@ impl Encode for DataTypeSnapshot {
 
     fn size(&self) -> crate::prelude::MSize {
         match self {
-            // 1 tag + 1 name_len + name bytes
-            DataTypeSnapshot::Custom(name) => 1 + 1 + name.len() as crate::prelude::MSize,
+            // 1 tag + wire_size header + 1 name_len + name bytes
+            DataTypeSnapshot::Custom(meta) => {
+                let ws_bytes: crate::prelude::MSize = match meta.wire_size {
+                    // 1 ws_tag + 4 (u32 LE)
+                    WireSize::Fixed(_) => 1 + 4,
+                    // 1 ws_tag
+                    WireSize::LengthPrefixed => 1,
+                };
+                1 + ws_bytes + 1 + meta.tag.len() as crate::prelude::MSize
+            }
             // single tag byte
             _ => 1,
         }
@@ -314,11 +366,20 @@ impl Encode for DataTypeSnapshot {
         };
 
         match self {
-            DataTypeSnapshot::Custom(name) => {
-                let mut bytes = Vec::with_capacity(2 + name.len());
+            DataTypeSnapshot::Custom(meta) => {
+                let mut bytes = Vec::with_capacity(self.size() as usize);
                 bytes.push(tag);
-                bytes.push(name.len() as u8);
-                bytes.extend_from_slice(name.as_bytes());
+                match meta.wire_size {
+                    WireSize::Fixed(n) => {
+                        bytes.push(0x01u8);
+                        bytes.extend_from_slice(&n.to_le_bytes());
+                    }
+                    WireSize::LengthPrefixed => {
+                        bytes.push(0x02u8);
+                    }
+                }
+                bytes.push(meta.tag.len() as u8);
+                bytes.extend_from_slice(meta.tag.as_bytes());
                 std::borrow::Cow::Owned(bytes)
             }
             _ => std::borrow::Cow::Owned(vec![tag]),
@@ -357,12 +418,34 @@ impl Encode for DataTypeSnapshot {
                 if data.len() < 2 {
                     return Err(MemoryError::DecodeError(DecodeError::TooShort));
                 }
-                let name_len = data[1] as usize;
-                if data.len() < 2 + name_len {
+                let (wire_size, header_len) = match data[1] {
+                    0x01 => {
+                        if data.len() < 6 {
+                            return Err(MemoryError::DecodeError(DecodeError::TooShort));
+                        }
+                        let n = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
+                        (WireSize::Fixed(n), 6)
+                    }
+                    0x02 => (WireSize::LengthPrefixed, 2),
+                    v => {
+                        return Err(MemoryError::DecodeError(DecodeError::IdentityDecodeError(
+                            format!("Unknown WireSize tag: {v:#x}"),
+                        )));
+                    }
+                };
+                if data.len() < header_len + 1 {
                     return Err(MemoryError::DecodeError(DecodeError::TooShort));
                 }
-                let name = String::from_utf8(data[2..2 + name_len].to_vec())?;
-                Ok(DataTypeSnapshot::Custom(name))
+                let name_len = data[header_len] as usize;
+                let name_off = header_len + 1;
+                if data.len() < name_off + name_len {
+                    return Err(MemoryError::DecodeError(DecodeError::TooShort));
+                }
+                let tag = String::from_utf8(data[name_off..name_off + name_len].to_vec())?;
+                Ok(DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+                    tag,
+                    wire_size,
+                })))
             }
             value => Err(MemoryError::DecodeError(DecodeError::IdentityDecodeError(
                 format!("Unknown `DataTypeSnapshot` tag: {value:#x}"),
@@ -470,7 +553,19 @@ impl Encode for ColumnSnapshot {
             if data.len() < offset + 2 {
                 return Err(MemoryError::DecodeError(DecodeError::TooShort));
             }
-            2 + data[offset + 1] as usize
+            let header = match data[offset + 1] {
+                0x01 => 6,
+                0x02 => 2,
+                v => {
+                    return Err(MemoryError::DecodeError(DecodeError::IdentityDecodeError(
+                        format!("Unknown WireSize tag: {v:#x}"),
+                    )));
+                }
+            };
+            if data.len() < offset + header + 1 {
+                return Err(MemoryError::DecodeError(DecodeError::TooShort));
+            }
+            header + 1 + data[offset + header] as usize
         } else {
             1
         };
@@ -798,12 +893,36 @@ mod tests {
             DataTypeSnapshot::Uint32,
             DataTypeSnapshot::Uint64,
             DataTypeSnapshot::Uuid,
-            DataTypeSnapshot::Custom("Money".to_string()),
-            DataTypeSnapshot::Custom(String::new()),
+            DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+                tag: "Money".to_string(),
+                wire_size: WireSize::Fixed(16),
+            })),
+            DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+                tag: String::new(),
+                wire_size: WireSize::LengthPrefixed,
+            })),
         ];
         for dt in cases {
             assert_eq!(roundtrip(dt.clone()), dt);
         }
+    }
+
+    #[test]
+    fn test_custom_wire_size_fixed_roundtrip() {
+        let dt = DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+            tag: "Money".to_string(),
+            wire_size: WireSize::Fixed(8),
+        }));
+        assert_eq!(roundtrip(dt.clone()), dt);
+    }
+
+    #[test]
+    fn test_custom_wire_size_length_prefixed_roundtrip() {
+        let dt = DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+            tag: "Json".to_string(),
+            wire_size: WireSize::LengthPrefixed,
+        }));
+        assert_eq!(roundtrip(dt.clone()), dt);
     }
 
     #[test]
@@ -845,7 +964,14 @@ mod tests {
         assert_eq!(DataTypeSnapshot::Text.encode()[0], 0x51);
         assert_eq!(DataTypeSnapshot::Uuid.encode()[0], 0x52);
         assert_eq!(DataTypeSnapshot::Json.encode()[0], 0x60);
-        assert_eq!(DataTypeSnapshot::Custom("x".into()).encode()[0], 0xF0);
+        assert_eq!(
+            DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+                tag: "x".into(),
+                wire_size: WireSize::Fixed(0),
+            }))
+            .encode()[0],
+            0xF0
+        );
     }
 
     fn sample_column(name: &str) -> ColumnSnapshot {
@@ -921,7 +1047,10 @@ mod tests {
     fn test_column_snapshot_with_custom_data_type_roundtrip() {
         let col = ColumnSnapshot {
             name: "amount".to_string(),
-            data_type: DataTypeSnapshot::Custom("Money".to_string()),
+            data_type: DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+                tag: "Money".to_string(),
+                wire_size: WireSize::Fixed(16),
+            })),
             nullable: false,
             auto_increment: false,
             unique: false,

@@ -320,7 +320,9 @@ mod custom_type_tests {
     use std::fmt;
 
     use crate::dbms::custom_value::CustomValue;
-    use crate::dbms::table::{ColumnDef, TableColumns, TableRecord, TableSchema, ValuesSource};
+    use crate::dbms::table::{
+        ColumnDef, TableColumns, TableRecord, TableSchema, ValuesSource, WireSize,
+    };
     use crate::dbms::types::{CustomDataType, DataTypeKind, Nullable, Text, Uint32};
     use crate::dbms::value::Value;
     use crate::memory::{DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, PageOffset};
@@ -424,7 +426,13 @@ mod custom_type_tests {
         assert_eq!(columns[0].name, "id");
         assert_eq!(columns[0].data_type, DataTypeKind::Uint32);
         assert_eq!(columns[1].name, "priority");
-        assert_eq!(columns[1].data_type, DataTypeKind::Custom("priority"));
+        assert_eq!(
+            columns[1].data_type,
+            DataTypeKind::Custom {
+                tag: "priority",
+                wire_size: WireSize::Fixed(1),
+            }
+        );
     }
 
     #[test]

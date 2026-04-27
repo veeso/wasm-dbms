@@ -357,8 +357,11 @@ pub trait Database {
     ///
     /// - [`MigrationError::DestructiveOpDenied`](crate::prelude::MigrationError::DestructiveOpDenied)
     ///   when the planner emits a destructive op disallowed by `policy`.
-    /// - [`MigrationError::DataRewriteUnsupported`](crate::prelude::MigrationError::DataRewriteUnsupported)
-    ///   for column-mutating ops not yet implemented (see issue #91).
+    /// - [`MigrationError::DefaultMissing`](crate::prelude::MigrationError::DefaultMissing)
+    ///   when an `AddColumn` op cannot resolve a default for a non-nullable
+    ///   column.
+    /// - [`MigrationError::WideningIncompatible`](crate::prelude::MigrationError::WideningIncompatible)
+    ///   when a `WidenColumn` op falls outside the widening whitelist.
     /// - Any other [`MigrationError`](crate::prelude::MigrationError) variant
     ///   raised by the diff or apply pipeline.
     fn migrate(&mut self, policy: MigrationPolicy) -> DbmsResult<()>;

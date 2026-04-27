@@ -112,6 +112,18 @@ interface types {
     // `wasm_dbms_api::dbms::table::schema::snapshot`. Used by the
     // `has-drift`, `pending-migrations`, and `migrate` entry points.
 
+    /// On-disk wire layout descriptor for a custom-typed column.
+    variant wire-size {
+        fixed(u32),
+        length-prefixed,
+    }
+
+    /// User-defined custom data type identifier + wire layout.
+    record custom-data-type-snapshot {
+        tag: string,
+        wire-size: wire-size,
+    }
+
     /// Stable, tag-keyed encoding of a column data type. Discriminants are
     /// part of the on-disk format and must not be reused or reordered.
     variant data-type-snapshot {
@@ -133,7 +145,7 @@ interface types {
         text,
         uuid,
         json,
-        custom(string),
+        custom(custom-data-type-snapshot),
     }
 
     /// `ON DELETE` referential action.

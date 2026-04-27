@@ -146,6 +146,11 @@ where
         self.mm.zero(page, offset, data)
     }
 
+    fn zero_raw(&mut self, page: Page, offset: PageOffset, len: PageOffset) -> MemoryResult<()> {
+        self.journal.record(self.mm, page, offset, len as usize)?;
+        self.mm.zero_raw(page, offset, len)
+    }
+
     fn read_at_raw(
         &mut self,
         page: Page,

@@ -7,10 +7,13 @@
   - [Migration Errors](#migration-errors)
     - [SchemaDrift](#schemadrift)
     - [IncompatibleType](#incompatibletype)
-    - [MissingDefault](#missingdefault)
+    - [DefaultMissing](#defaultmissing)
     - [ConstraintViolation](#constraintviolation)
     - [DestructiveOpDenied](#destructiveopdenied)
     - [TransformAborted](#transformaborted)
+    - [WideningIncompatible](#wideningincompatible)
+    - [TransformReturnedNone](#transformreturnednone)
+    - [ForeignKeyViolation](#foreignkeyviolation)
   - [Query Errors](#query-errors)
     - [PrimaryKeyConflict](#primarykeyconflict)
     - [UniqueConstraintViolation](#uniqueconstraintviolation)
@@ -66,10 +69,13 @@ DbmsError
 ├── Migration(MigrationError)
 │   ├── SchemaDrift
 │   ├── IncompatibleType { table, column, old, new }
-│   ├── MissingDefault { table, column }
+│   ├── DefaultMissing { table, column }
 │   ├── ConstraintViolation { table, column, reason }
 │   ├── DestructiveOpDenied { op }
-│   └── TransformAborted { table, column, reason }
+│   ├── TransformAborted { table, column, reason }
+│   ├── WideningIncompatible { table, column, old_type, new_type }
+│   ├── TransformReturnedNone { table, column }
+│   └── ForeignKeyViolation { table, column, target_table, value }
 └── Table(TableError)
 ```
 
@@ -140,10 +146,23 @@ pub enum MigrationError {
         old: DataTypeSnapshot,
         new: DataTypeSnapshot,
     },
-    MissingDefault { table: String, column: String },
+    DefaultMissing { table: String, column: String },
     ConstraintViolation { table: String, column: String, reason: String },
     DestructiveOpDenied { op: String },
     TransformAborted { table: String, column: String, reason: String },
+    WideningIncompatible {
+        table: String,
+        column: String,
+        old_type: DataTypeSnapshot,
+        new_type: DataTypeSnapshot,
+    },
+    TransformReturnedNone { table: String, column: String },
+    ForeignKeyViolation {
+        table: String,
+        column: String,
+        target_table: String,
+        value: String,
+    },
 }
 ```
 
@@ -174,7 +193,7 @@ match database.insert::<User>(req) {
 - If the change is conceptually a widen, double-check the from/to types match the whitelist.
 - Otherwise mark the table with `#[migrate]` and provide a `transform_column` impl that maps the old `Value` to the new type.
 
-### MissingDefault
+### DefaultMissing
 
 **Cause:** Planning an `AddColumn` op for a non-nullable column that has neither a `#[default = ...]` attribute nor a `Migrate::default_value` override.
 
@@ -210,6 +229,34 @@ match database.insert::<User>(req) {
 
 - Inspect the embedded `reason` string to see which row failed.
 - Fix the offending data manually (or via a helper canister method) before retrying `migrate`.
+
+### WideningIncompatible
+
+**Cause:** A `WidenColumn` op named a `(old_type, new_type)` pair that is **not** in the [widening whitelist](./migrations.md#compatible-widening-whitelist), and the table did not provide a `Migrate::transform_column` impl that handled it. The journaled session rolls back; stored data and `schema_hash` are unchanged.
+
+**Solutions:**
+
+- Pick a target type that fits the whitelist (e.g. `Uint32 → Uint64` rather than `Uint32 → Uint8`).
+- Mark the table `#[migrate]` and provide a `transform_column` arm that maps the old `Value` into the new type.
+- Stage the change across two releases: convert via a transform first, then narrow as a separate widening with valid bounds.
+
+### TransformReturnedNone
+
+**Cause:** `Migrate::transform_column` returned `Ok(None)` for a column that needed a transform (no widening rule applied). The migration aborts and rolls back.
+
+**Solutions:**
+
+- Implement a concrete `Ok(Some(_))` arm for the column in the table's `Migrate` impl.
+- Or pick a target type that fits the widening whitelist so the framework converts automatically.
+
+### ForeignKeyViolation
+
+**Cause:** An add-FK tightening (`AlterColumn` with `foreign_key: Some(Some(_))`) found a row whose value is absent from the target table's referenced column. The journaled session rolls back; stored data and `schema_hash` are unchanged.
+
+**Solutions:**
+
+- Clean up the orphan rows in a prior release before adding the FK.
+- Inspect `value` in the error to identify the offending record(s).
 
 ---
 

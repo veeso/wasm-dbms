@@ -14,8 +14,9 @@ pub use self::record::{
     InsertRecord, TableColumns, TableRecord, UpdateRecord, ValuesSource, flatten_table_columns,
 };
 pub use self::schema::{
-    ColumnSnapshot, DataTypeSnapshot, ForeignKeySnapshot, IndexSnapshot, OnDeleteSnapshot,
-    TableFingerprint, TableSchema, TableSchemaSnapshot, fingerprint_for_name,
+    ColumnSnapshot, CustomDataTypeSnapshot, DataTypeSnapshot, ForeignKeySnapshot, IndexSnapshot,
+    OnDeleteSnapshot, TableFingerprint, TableSchema, TableSchemaSnapshot, WireSize,
+    fingerprint_for_name,
 };
 
 /// Table related errors

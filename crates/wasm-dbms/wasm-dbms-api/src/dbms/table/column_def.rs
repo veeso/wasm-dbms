@@ -33,7 +33,7 @@ pub struct ColumnDef {
     /// Populated by the `#[default = ...]` attribute on a `#[derive(Table)]`
     /// field. Consumed by the migration planner when adding a non-nullable
     /// column to satisfy the
-    /// [`MissingDefault`](crate::dbms::migration::MigrationError::MissingDefault)
+    /// [`DefaultMissing`](crate::dbms::migration::MigrationError::DefaultMissing)
     /// check.
     pub default: Option<DefaultValueFn>,
     /// Previous names this column was known by, in chronological order.
@@ -129,7 +129,7 @@ impl From<DataTypeKind> for CandidDataTypeKind {
             DataTypeKind::Uint32 => Self::Uint32,
             DataTypeKind::Uint64 => Self::Uint64,
             DataTypeKind::Uuid => Self::Uuid,
-            DataTypeKind::Custom(s) => Self::Custom(s.to_string()),
+            DataTypeKind::Custom { tag, .. } => Self::Custom(tag.to_string()),
         }
     }
 }
@@ -394,7 +394,11 @@ mod test {
 
     #[test]
     fn test_should_convert_custom_data_type_kind_to_candid() {
-        let kind = DataTypeKind::Custom("role");
+        use crate::dbms::table::WireSize;
+        let kind = DataTypeKind::Custom {
+            tag: "role",
+            wire_size: WireSize::Fixed(1),
+        };
         let candid_kind = CandidDataTypeKind::from(kind);
         assert_eq!(candid_kind, CandidDataTypeKind::Custom("role".to_string()));
     }
@@ -408,9 +412,13 @@ mod test {
 
     #[test]
     fn test_should_create_candid_column_def_with_custom_type() {
+        use crate::dbms::table::WireSize;
         let col = ColumnDef {
             name: "role",
-            data_type: DataTypeKind::Custom("role"),
+            data_type: DataTypeKind::Custom {
+                tag: "role",
+                wire_size: WireSize::Fixed(1),
+            },
             auto_increment: false,
             nullable: false,
             primary_key: false,

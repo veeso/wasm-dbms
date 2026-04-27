@@ -23,14 +23,14 @@ pub(crate) fn order_ops(ops: &mut [MigrationOp]) {
 /// Validates the planned ops against `policy` before any memory mutation.
 ///
 /// Defense-in-depth: catches destructive ops the diff layer can produce, plus
-/// re-checks `MissingDefault` for `AddColumn` ops in case the diff was
+/// re-checks `DefaultMissing` for `AddColumn` ops in case the diff was
 /// short-circuited (e.g. by a future caller bypassing the diff entry point).
 ///
 /// # Errors
 ///
 /// - [`MigrationError::DestructiveOpDenied`] when `policy.allow_destructive`
 ///   is `false` and the plan includes a `DropTable` or `DropColumn`.
-/// - [`MigrationError::MissingDefault`] when a non-nullable `AddColumn` op
+/// - [`MigrationError::DefaultMissing`] when a non-nullable `AddColumn` op
 ///   lacks a static `#[default]` (the dispatch fallback is verified later, at
 ///   apply time, since it requires a schema reference).
 pub(crate) fn validate(ops: &[MigrationOp], policy: MigrationPolicy) -> DbmsResult<()> {
@@ -49,7 +49,7 @@ pub(crate) fn validate(ops: &[MigrationOp], policy: MigrationPolicy) -> DbmsResu
             MigrationOp::AddColumn { table, column }
                 if !column.nullable && column.default.is_none() =>
             {
-                return Err(DbmsError::Migration(MigrationError::MissingDefault {
+                return Err(DbmsError::Migration(MigrationError::DefaultMissing {
                     table: table.clone(),
                     column: column.name.clone(),
                 }));
@@ -287,7 +287,7 @@ mod tests {
         let result = validate(&ops, MigrationPolicy::default());
         assert!(matches!(
             result,
-            Err(DbmsError::Migration(MigrationError::MissingDefault { ref column, .. })) if column == "email"
+            Err(DbmsError::Migration(MigrationError::DefaultMissing { ref column, .. })) if column == "email"
         ));
     }
 

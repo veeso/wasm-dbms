@@ -42,6 +42,12 @@ pub trait MemoryAccess {
     where
         E: Encode;
 
+    /// Zeros out `len` raw bytes at the specified page and offset.
+    ///
+    /// Used by the migration apply pipeline when scrubbing a record whose
+    /// size is known only at runtime (from a stored snapshot).
+    fn zero_raw(&mut self, page: Page, offset: PageOffset, len: PageOffset) -> MemoryResult<()>;
+
     /// Reads raw bytes into `buf` at the specified page and offset.
     ///
     /// Returns the number of bytes actually read.

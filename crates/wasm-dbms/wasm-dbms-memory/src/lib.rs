@@ -29,7 +29,8 @@ pub use self::memory_manager::{MemoryManager, align_up};
 pub use self::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
 pub use self::schema_registry::{SchemaRegistry, TableRegistryPage};
 pub use self::table_registry::{
-    IndexLedger, IndexTreeWalker, NextRecord, RecordAddress, TableReader, TableRegistry,
+    IndexLedger, IndexTreeWalker, NextRecord, RawRecordBytes, RawTableReader, RecordAddress,
+    TableReader, TableRegistry,
 };
 
 /// Prelude re-exports for convenient use.
@@ -40,7 +41,7 @@ pub mod prelude {
     pub use super::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
     pub use super::schema_registry::{SchemaRegistry, TableRegistryPage};
     pub use super::table_registry::{
-        AutoincrementLedger, IndexLedger, IndexTreeWalker, NextRecord, RecordAddress, TableReader,
-        TableRegistry,
+        AutoincrementLedger, IndexLedger, IndexTreeWalker, NextRecord, RawRecordBytes,
+        RawTableReader, RecordAddress, TableReader, TableRegistry,
     };
 }

@@ -155,6 +155,71 @@ impl FreeSegmentsLedger {
         table.remove(segment.segment, physical_size, mm)
     }
 
+    /// Inserts a free segment with a runtime-known physical size.
+    ///
+    /// Sibling to [`Self::insert_free_segment`], used by the migration apply
+    /// pipeline when releasing a record whose alignment came from a stored
+    /// snapshot rather than a compile-time `Encode` impl.
+    pub fn insert_free_segment_raw(
+        &mut self,
+        page: Page,
+        offset: PageOffset,
+        physical_size: MSize,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<()> {
+        for table in self.tables(mm) {
+            let mut table = table?;
+            if !table.is_full() {
+                return table.insert_free_segment(page, offset, physical_size, mm);
+            }
+        }
+
+        let new_page = self.create_new_page(mm)?;
+        let mut table = FreeSegmentsTable::load(new_page, mm)?;
+        table.insert_free_segment(page, offset, physical_size, mm)
+    }
+
+    /// Find a reusable free segment for a record of `required_size` bytes.
+    /// Sibling to [`Self::find_reusable_segment`].
+    pub fn find_reusable_segment_raw(
+        &self,
+        required_size: MSize,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<Option<FreeSegmentTicket>> {
+        for table in self.tables(mm) {
+            let table = table?;
+            if let Some(segment) = table.find(|r| r.size >= required_size) {
+                return Ok(Some(FreeSegmentTicket {
+                    segment,
+                    table: table.page(),
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Commit a reused segment with a runtime-known physical size.
+    /// Sibling to [`Self::commit_reused_space`].
+    pub fn commit_reused_space_raw(
+        &mut self,
+        physical_size: MSize,
+        segment: FreeSegmentTicket,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<()> {
+        let mut table = None;
+        for i_table in self.tables(mm) {
+            let i_table = i_table?;
+            if i_table.page() == segment.table {
+                table = Some(i_table);
+                break;
+            }
+        }
+        let Some(mut table) = table else {
+            return Err(MemoryError::OutOfBounds);
+        };
+        table.remove(segment.segment, physical_size, mm)
+    }
+
     /// Writes the current state of the free segments table back to memory.
     fn commit(&self, mm: &mut impl MemoryAccess) -> MemoryResult<()> {
         mm.write_at(self.free_segments_page, 0, &self.tables)

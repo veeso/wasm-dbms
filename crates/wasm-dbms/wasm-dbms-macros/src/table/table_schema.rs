@@ -112,7 +112,10 @@ fn column_def(metadata: &TableMetadata) -> syn::Result<TokenStream2> {
     }
 
     Ok(quote::quote! {
-        &[#(#columns),*]
+        {
+            const COLUMNS: &[::wasm_dbms_api::prelude::ColumnDef] = &[#(#columns),*];
+            COLUMNS
+        }
     })
 }
 
