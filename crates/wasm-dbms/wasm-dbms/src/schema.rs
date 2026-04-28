@@ -41,9 +41,7 @@ where
         crate::join::JoinEngine::new(self).join(dbms, from_table, query)
     }
 
-    /// Performs an aggregate query for the given table name, dispatching to
-    /// the typed [`crate::WasmDbmsDatabase::aggregate`] for the matching
-    /// table.
+    /// Performs an aggregate query for the given table name
     fn aggregate(
         &self,
         dbms: &WasmDbmsDatabase<'_, M, A>,

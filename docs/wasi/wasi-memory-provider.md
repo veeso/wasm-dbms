@@ -1,15 +1,16 @@
 # WASI Memory Provider
 
-- [Overview](#overview)
-- [Installation](#installation)
-- [Usage](#usage)
-  - [Creating a Provider](#creating-a-provider)
-  - [Using with DbmsContext](#using-with-dbmscontext)
-  - [TryFrom Conversions](#tryfrom-conversions)
-- [File Layout and Portability](#file-layout-and-portability)
-- [Error Handling](#error-handling)
-- [Concurrency](#concurrency)
-- [Comparison with Other Providers](#comparison-with-other-providers)
+- [WASI Memory Provider](#wasi-memory-provider)
+  - [Overview](#overview)
+  - [Installation](#installation)
+  - [Usage](#usage)
+    - [Creating a Provider](#creating-a-provider)
+    - [Using with DbmsContext](#using-with-dbmscontext)
+    - [TryFrom Conversions](#tryfrom-conversions)
+  - [File Layout and Portability](#file-layout-and-portability)
+  - [Error Handling](#error-handling)
+  - [Concurrency](#concurrency)
+  - [Comparison with Other Providers](#comparison-with-other-providers)
 
 ---
 
@@ -31,7 +32,7 @@ Add `wasi-dbms-memory` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-wasi-dbms-memory = "0.8"
+wasi-dbms-memory = "0.9"
 ```
 
 The crate depends on `wasm-dbms-api` and `wasm-dbms-memory` (pulled in transitively).

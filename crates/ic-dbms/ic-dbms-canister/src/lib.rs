@@ -18,8 +18,8 @@
 //! [dependencies]
 //! candid = { version = "0.10", features = ["value"] }
 //! ic-cdk = "0.19"
-//! ic-dbms-api = "0.1"
-//! ic-dbms-canister = "0.1"
+//! ic-dbms-api = "0.9"
+//! ic-dbms-canister = "0.9"
 //! serde = "1"
 //! ```
 //!

@@ -4,23 +4,24 @@
 > the generic wasm-dbms getting started guide (schema definition, core concepts), see
 > the [generic get-started guide](../../guides/get-started.md).
 
-- [Prerequisites](#prerequisites)
-- [Project Setup](#project-setup)
-  - [Workspace Structure](#workspace-structure)
-  - [Cargo Configuration](#cargo-configuration)
-- [Define Your Schema](#define-your-schema)
-  - [Create the Schema Crate](#create-the-schema-crate)
-  - [Define Tables](#define-tables)
-- [Create the DBMS Canister](#create-the-dbms-canister)
-  - [Canister Dependencies](#canister-dependencies)
-  - [Generate the Canister API](#generate-the-canister-api)
-  - [Build the Canister](#build-the-canister)
-- [Deploy the Canister](#deploy-the-canister)
-  - [Canister Init Arguments](#canister-init-arguments)
-  - [Deploy with dfx](#deploy-with-dfx)
-- [Quick Example: Complete Workflow](#quick-example-complete-workflow)
-- [Integration Testing](#integration-testing)
-- [Next Steps](#next-steps)
+- [Get Started with IC-DBMS (IC)](#get-started-with-ic-dbms-ic)
+  - [Prerequisites](#prerequisites)
+  - [Project Setup](#project-setup)
+    - [Workspace Structure](#workspace-structure)
+    - [Cargo Configuration](#cargo-configuration)
+  - [Define Your Schema](#define-your-schema)
+    - [Create the Schema Crate](#create-the-schema-crate)
+    - [Define Tables](#define-tables)
+  - [Create the DBMS Canister](#create-the-dbms-canister)
+    - [Canister Dependencies](#canister-dependencies)
+    - [Generate the Canister API](#generate-the-canister-api)
+    - [Build the Canister](#build-the-canister)
+  - [Deploy the Canister](#deploy-the-canister)
+    - [Canister Init Arguments](#canister-init-arguments)
+    - [Deploy with dfx](#deploy-with-dfx)
+  - [Quick Example: Complete Workflow](#quick-example-complete-workflow)
+  - [Integration Testing](#integration-testing)
+  - [Next Steps](#next-steps)
 
 This guide walks you through setting up a complete database canister on the Internet Computer using ic-dbms. The ic-dbms
 framework is built on top of the [wasm-dbms](https://github.com/veeso/wasm-dbms) core engine, adding IC-specific
@@ -344,7 +345,7 @@ For integration tests using PocketIC, add `ic-dbms-client` with the `pocket-ic` 
 
 ```toml
 [dev-dependencies]
-ic-dbms-client = { version = "0.8", features = ["pocket-ic"] }
+ic-dbms-client = { version = "0.9", features = ["pocket-ic"] }
 pocket-ic = "9"
 ```
 

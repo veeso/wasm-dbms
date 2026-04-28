@@ -14,7 +14,7 @@
 //! - `DbmsCanister`: Automatically implements the API for the ic-dbms-canister.
 //!
 //! All other derive macros (`Encode`, `Table`, `DatabaseSchema`, `CustomDataType`)
-//! are provided by [`wasm-dbms-macros`] and re-exported through the
+//! are provided by `wasm-dbms-macros` and re-exported through the
 //! `ic-dbms-api` and `ic-dbms-canister` preludes.
 
 #![doc(html_playground_url = "https://play.rust-lang.org")]

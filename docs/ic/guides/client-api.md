@@ -14,11 +14,12 @@
   - [Operations](#operations)
     - [Insert](#insert)
     - [Select](#select)
+    - [Aggregate](#aggregate)
     - [Update](#update)
     - [Delete](#delete)
     - [Transactions](#transactions)
-    - [ACL Management](#acl-management)
     - [Schema Migrations](#schema-migrations)
+    - [ACL Management](#acl-management)
   - [Error Handling](#error-handling)
   - [Examples](#examples)
     - [Inter-Canister Communication](#inter-canister-communication)
@@ -130,14 +131,14 @@ ic-dbms-client = "0.6"
 
 ```toml
 [dependencies]
-ic-dbms-client = { version = "0.8", features = ["ic-agent"] }
+ic-dbms-client = { version = "0.9", features = ["ic-agent"] }
 ```
 
 **For integration tests:**
 
 ```toml
 [dev-dependencies]
-ic-dbms-client = { version = "0.8", features = ["pocket-ic"] }
+ic-dbms-client = { version = "0.9", features = ["pocket-ic"] }
 ```
 
 ---

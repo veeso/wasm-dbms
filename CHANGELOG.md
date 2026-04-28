@@ -1,5 +1,287 @@
 # Changelog
 
+## 0.9.0
+
+Released on 2026-04-28
+
+### ⚠ Breaking Changes
+
+- **acl:** granular per-identity permissions (closes #87)
+  > granular per-identity permissions (closes #87)
+
+### Added
+
+- **query:** add DISTINCT support to query API
+  > Adds `distinct_by` field on `Query` and `.distinct(&[..])` builder method.
+  > The select pipeline deduplicates rows by the listed columns before applying
+  > ORDER BY / OFFSET / LIMIT, matching standard SQL semantics. Closes #85.
+- **query:** add aggregates, GROUP BY, and HAVING (#86)
+  > Introduce `Database::aggregate` with COUNT/SUM/AVG/MIN/MAX, GROUP BY,
+  > HAVING, and aggregate-aware ORDER BY/LIMIT/OFFSET. Expose the new flow
+  > through the IC canister macro (`aggregate_<table>`) and the
+  > `ic-dbms-client` Client trait + all three client impls.
+  >
+  > - AggregateFunction / AggregatedRow / AggregatedValue types in
+  >   wasm-dbms-api; HAVING / ORDER BY reference aggregate outputs by
+  >   synthetic agg{N} names.
+  > - Plan-time validation: SUM/AVG numeric, unknown col/agg, LIKE/JSON
+  >   rejected in HAVING, joins/eager relations rejected in aggregate.
+  > - Reject group_by/having on non-aggregate select paths via new
+  >   QueryError::AggregateClauseInSelect (mirrors JoinInsideTypedSelect).
+  > - Fix Query candid serialization order after group_by/having insertion
+  >   (idl_hash-sorted: eager_relations, distinct_by, joins, offset, limit,
+  >   filter, group_by, having, order_by, columns).
+  > - Tests: 29 unit tests, 3 select-guard tests, 6 pocket-ic integration
+  >   tests including round-trip via wrapper canister.
+  > - Docs: guides/querying.md aggregations section, reference/query.md
+  >   Aggregate Types + Errors, ic/reference/schema.md endpoint listing,
+  >   ic/guides/client-api.md client.aggregate example, errors.md updates.
+  > - Database trait method docs rewritten with proper Errors sections.
+- **migrations:** add schema snapshot, Migrate trait, and macro support (#34)
+  > Lay the groundwork for schema migrations:
+  >
+  > - Snapshot types (`TableSchemaSnapshot`, `ColumnSnapshot`, `IndexSnapshot`,
+  >   `ForeignKeySnapshot`, `OnDeleteSnapshot`, `DataTypeSnapshot`) with
+  >   versioned binary `Encode`/`Decode`, `Serialize`/`Deserialize`, and
+  >   feature-gated `CandidType` derives.
+  > - `TableSchema::schema_snapshot()` with default impl assembling from
+  >   `table_name` / `primary_key` / `columns` / `indexes` and
+  >   `Encode::ALIGNMENT`.
+  > - `dbms::migration` module: `Migrate` trait, `MigrationOp`, `ColumnChanges`,
+  >   `MigrationPolicy`, `MigrationError`, plus `DbmsError::Migration` and
+  >   prelude re-exports.
+  > - `ColumnDef` gains `default: Option<fn() -> Value>` (kept fn-pointer to
+  >   preserve `Copy`) and `renamed_from: &'static [&'static str]`.
+  > - `#[derive(Table)]` parses `#[default = ...]`, `#[renamed_from(...)]`, and
+  >   `#[migrate]`; emits `impl Migrate for T {}` unless `#[migrate]` is set.
+  > - `DatabaseSchema` trait and `#[derive(DatabaseSchema)]` gain
+  >   `migrate_default`, `migrate_transform`, `compiled_snapshots` dispatch
+  >   methods (object-safe via `Self: Sized`).
+  > - WIT: new `migration-error(string)` variant; guest maps
+  >   `DbmsError::Migration`.
+  > - Docs: schema reference covers the three new attributes; new
+  >   `docs/reference/migrations.md` and `docs/guides/migrations.md`; errors
+  >   reference lists every `MigrationError` variant.
+  > - Tests: 13 new macro tests cover `#[default]`, `#[renamed_from]`,
+  >   `#[migrate]`, dispatch fall-through, unknown-table behaviour, and
+  >   multi-table snapshot ordering.
+  >
+  > Memory layer integration, the migration engine, `Database` wiring, IC
+  > endpoints, client surface, integration tests, and full WIT migrate APIs
+  > are tracked in the issue checklist.
+- **migrations:** name-hash fingerprint + schema snapshot ledger
+  > Switch `TableSchema::fingerprint` to hash `table_name()` instead of
+  > `TypeId` so table identity stays stable across rebuilds and schema
+  > evolution. `SchemaRegistry::register_table` now detects name-hash
+  > collisions eagerly: when the fingerprint slot is occupied, it loads the
+  > persisted snapshot and compares names, returning the new
+  > `MemoryError::NameCollision` variant on mismatch.
+  >
+  > Wire `SchemaSnapshotLedger` into the registry: `register_table`
+  > initializes the snapshot on the dedicated page, and the encode/decode of
+  > `SchemaRegistry` now persists `schema_snapshot_page`. Add full module-,
+  > struct-, and method-level docs to `SchemaSnapshotLedger` plus coverage
+  > tests for init/load/write/get and page isolation.
+  >
+  > Update `docs/technical/memory.md` with the new per-table snapshot page,
+  > the name-hash fingerprint semantics, the collision-detection flow, the
+  > ledger API, and the `TableSchemaSnapshot` serialization layout.
+- **migrations:** engine + Database wiring for schema migrations
+  > Wire the migration engine into the generic `wasm-dbms` crate so callers
+  > can detect drift, plan migrations, and apply structural ops through the
+  > existing `Database` trait surface.
+  >
+  > Engine layer (`crates/wasm-dbms/wasm-dbms/src/database/migration/`):
+  >
+  > - `snapshots`: drift hash via `xxh3` (`xxhash-rust`), seeded with
+  >   `TableSchemaSnapshot::latest_version()`. `compute_drift` compares
+  >   persisted snapshots (loaded through `SchemaRegistry::stored_snapshots`)
+  >   with `S::compiled_snapshots()` reachable through the boxed schema.
+  > - `diff`: pure stored-vs-compiled diff producing `Vec<MigrationOp>`.
+  >   Renames resolved via the new `DatabaseSchema::renamed_from_dyn`
+  >   dispatch, type changes routed through the widening whitelist or
+  >   `MigrationOp::TransformColumn`.
+  > - `plan`: deterministic op ordering plus policy-driven validation
+  >   (destructive-op gate, defense-in-depth missing-default check).
+  > - `apply`: journaled execution of structural ops (`CreateTable`,
+  >   `DropTable`, `AlterColumn`, `AddIndex`, `DropIndex`); tightening
+  >   validation (`nullable: false`, `unique: true`) scans existing rows
+  >   through schema dispatch. Column-mutating ops (`AddColumn`,
+  >   `DropColumn`, `RenameColumn`, `WidenColumn`, `TransformColumn`) return
+  >   the new `MigrationError::DataRewriteUnsupported` until the
+  >   snapshot-driven (de)serializer (issue #91) lands. `DropTable` leaks
+  >   pages (issue #90).
+  >
+  > Database wiring:
+  >
+  > - `DbmsContext` gains `Cell<Option<bool>> drift` (lazy cache) and
+  >   `Cell<bool> migrating` (apply-in-progress guard so internal reads
+  >   bypass the gate).
+  > - `WasmDbmsDatabase::ensure_no_drift` is called as the first line of
+  >   every `Database` method except `rollback`. ACL methods on
+  >   `DbmsContext` continue to bypass.
+  > - `Database` trait gains `has_drift`, `pending_migrations` (renamed
+  >   from the previous `plan_migration`), and `migrate(policy)`. The IC
+  >   adapter and any other `Database` implementor must now implement them;
+  >   the test mock in `wasm-dbms-api` is updated.
+  >
+  > API additions (`wasm-dbms-api`):
+  >
+  > - `fingerprint_for_name(&str) -> u64` (`xxh3_64`), so the engine can
+  >   derive a registry key for tables it knows only by name.
+  > - `MigrationError::DataRewriteUnsupported { op }`.
+  > - `xxhash-rust` workspace dependency.
+  >
+  > Memory layer (`wasm-dbms-memory`):
+  >
+  > - `SchemaRegistry::{stored_snapshots, register_table_from_snapshot,
+  >   unregister_table, table_registry_page_by_name}`.
+  > - `IndexLedger::init_from_keys` for snapshot-keyed init paths.
+  > - `test_utils::write_dummy_schema_snapshot` so the table-registry unit
+  >   tests (which allocate raw pages and call `TableRegistry::load`) can
+  >   satisfy the snapshot-ledger decode that landed in #34's prior commit.
+  >
+  > Macro additions (`wasm-dbms-macros`):
+  >
+  > - Emit `compiled_snapshots_dyn`, `migrate_default_dyn`,
+  >   `migrate_transform_dyn`, and `renamed_from_dyn` as object-safe
+  >   siblings of the existing `Sized` dispatch methods.
+  >
+  > Benches (`ic-dbms-canister`):
+  >
+  > - Replace hand-written `DatabaseSchema` impls in `eager_relation` and
+  >   `read_table` with `#[derive(DatabaseSchema)]`. ~330 LOC of boilerplate
+  >   removed; the derive macro covers the same dispatch.
+- **migrations:** IC layer endpoints for schema migrations
+  > Wires the migration surface through the IC layer: `has_drift` and
+  > `pending_migrations` as queries, `migrate` as an update, all admin-gated
+  > via the existing ACL check. Adds matching `Client` trait methods with
+  > implementations for `IcDbmsCanisterClient`, `IcDbmsAgentClient`, and
+  > `IcDbmsPocketIcClient`, plus wrapper-canister bindings and PocketIC
+  > coverage exercising both the direct client and wrapper paths on a
+  > fresh canister (no drift, empty plan, migrate is a no-op).
+- **migrations:** WIT surface and IC migration docs
+  > Add has-drift / pending-migrations / migrate to wit/dbms.wit plus the
+  > supporting snapshot, op, and policy records. Wire them through the
+  > example guest and host so the round-trip is exercised end-to-end.
+  >
+  > Document the IC migration flow: new docs/ic/guides/migrations.md, full
+  > Candid signatures in docs/ic/reference/schema.md, and a Schema
+  > Migrations section in docs/ic/guides/client-api.md.
+- **migrations:** snapshot-driven record codec for column-mutating ops
+- **memory:** page reclamation via unclaimed-pages ledger (closes #90)
+  > Reserve page 2 for an LIFO ledger of pages released by destructive ops.
+  > Rename `MemoryAccess::allocate_page` to `claim_page` and add `unclaim_page`,
+  > both built on new `grow_one_page` / `zero_page` primitives. `claim_page`
+  > pops the ledger before bumping the high-water mark; `unclaim_page` zeros
+  > the page and pushes it. JournaledWriter records the full pre-zero page so
+  > rollback restores ledger state and contents.
+  >
+  > Wire MigrationOp::DropTable to walk every page owned by a dropped table —
+  > record pages, page/free-segments/index ledgers (incl. every B-tree node
+  > across each index), schema-snapshot, autoincrement — and return them all
+  > to the unclaimed-pages ledger. Add `release_pages` on each ledger and on
+  > TableRegistry; SchemaRegistry::unregister_table drives the full release.
+- 💥 **acl:** granular per-identity permissions (closes #87)
+  > Replaces the flat allow-list ACL with a granular permission model.
+  > Each identity carries `admin` / `manage_acl` / `migrate` flags plus
+  > `TablePerms` (READ/INSERT/UPDATE/DELETE) scoped to all tables or to
+  > specific tables. CRUD endpoints generated by `#[derive(DbmsCanister)]`
+  > gate per-operation; migration endpoints gate on `migrate`.
+  >
+  > Breaking changes:
+  > - ACL page layout bumped to v2 (no migration from 0.8.x).
+  > - `IcDbmsCanisterInitArgs.allowed_principals` is `Option<Vec<Principal>>`;
+  >   `None`/empty bootstraps the deployer as full admin.
+  > - Canister endpoints `acl_add_principal` / `acl_remove_principal` /
+  >   `acl_allowed_principals` removed; replaced by `grant_admin`,
+  >   `revoke_admin`, `grant_manage_acl`, `revoke_manage_acl`,
+  >   `grant_migrate`, `revoke_migrate`, `grant_all_tables_perms`,
+  >   `revoke_all_tables_perms`, `grant_table_perms`, `revoke_table_perms`,
+  >   `remove_identity`, `list_identities`, `my_perms`.
+  > - New `DbmsError::AccessDenied { table, required }` returned in lieu
+  >   of trapping for unauthorized CRUD/ACL/migrate calls.
+  > - New `MemoryError::AclLayoutUnsupported`.
+
+### CI
+
+- split doc tests into parallel job
+  > Run cargo test --doc in dedicated job alongside unit-test instead of
+  > sequentially after llvm-cov. Uses separate cache key to avoid contention
+  > with coverage-instrumented build artifacts.
+- **bench:** bump rust to 1.95.0
+
+### Documentation
+
+- **claude:** require updating wit + ic-dbms-macros + ic-dbms-client when API changes
+  > Every prior drift bug in this repo (wit/dbms.wit out-of-date,
+  > ic-dbms-client missing aggregate, dbms-canister-client-integration
+  > missing the wrapper) traces to the Database API changing without the
+  > downstream surfaces being updated in the same PR.
+  >
+  > Add a "Database API Surface (keep in sync)" checklist to CLAUDE.md so
+  > future changes to the Database trait or DatabaseSchema dispatch must
+  > propagate to:
+  >
+  > - wit/dbms.wit (+ guest/host examples rebuild)
+  > - ic-dbms-canister api.rs
+  > - ic-dbms-macros DbmsCanister generator
+  > - ic-dbms-client Client trait + ic/agent/pocket-ic impls
+  > - dbms-canister-client-integration wrapper
+  > - pocket-ic integration tests
+  > - relevant `docs/*` and `docs/ic/*` pages
+- add CONTRIBUTING.md
+
+### Fixed
+
+- **query:** correct candid field hash order for Query serialization
+  > distinct_by hash places it between eager_relations and joins, not between
+  > filter and order_by. Roundtrip test passed because both ends used same
+  > wrong order; cross-canister decode failed with integer/usize mismatch.
+- **wit:** realign dbms.wit with current Database trait
+  > Rewrite the WIT interface to match the current `wasm-dbms-api`:
+  >
+  > - value: drop f32/f64 (no Value variants); add decimal/date/datetime/json/
+  >   uuid (string-encoded) and custom (record).
+  > - query: replace single order-by/dir with list<order-key>; add distinct-by,
+  >   eager-relations, joins, group-by, having (JSON-encoded Filter).
+  > - delete: take new delete-behavior enum (restrict/cascade).
+  > - update: take optional filter (JSON-encoded Filter).
+  > - aggregate: new endpoint computing aggregate-function list per group,
+  >   returning aggregated-row entries.
+  > - dbms-error: split into structured variants mirroring DbmsError /
+  >   QueryError (PrimaryKeyConflict, UniqueConstraintViolation,
+  >   AggregateClauseInSelect, JoinInsideTypedSelect, etc.).
+  >
+  > Threads the aggregate dispatch through `DatabaseSchema` (trait + macro)
+  > and updates the wasmtime/wasi guest + host examples accordingly.
+  > End-to-end demo verified.
+- **bench:** add aggregate to DatabaseSchema impls and CI bench-build job
+- migration drift caching and rewrite handling
+
+### Miscellaneous
+
+- centralize all dependencies via workspace inheritance
+  > Move shared dependencies (including examples, benches, integration tests)
+  > to [workspace.dependencies] and switch member crates to workspace = true.
+- format md tables
+- remove weird cargo.toml file
+
+### Build
+
+- **integration-tests:** use pocket-ic-harness crate
+  > Replace in-tree pocket-ic-tests-macro and PocketIcTestEnv wrapper with
+  > the external pocket-ic-harness crate.
+  >
+  > - Remove pocket-ic-tests-macro crate (replaced by pocket_ic_harness::test).
+  > - Remove src/pocket_ic.rs, src/actor.rs, src/wasm.rs and the TestEnv trait.
+  > - Implement Canister for TestCanister and CanisterSetup for TestCanisterSetup.
+  > - Add TestEnvExt trait providing env.dbms_canister() and
+  >   env.dbms_canister_client_integration() helpers.
+  > - Resolve wasm paths via CARGO_MANIFEST_DIR so loading is cwd-independent.
+- bump rust 1.95.0
+- bump MSRV to 1.92.0
+
 ## 0.8.2
 
 Released on 2026-04-21
