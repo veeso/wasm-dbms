@@ -682,4 +682,4 @@ fn handle_db_error(error: DbmsError) -> String {
 }
 ```
 
-> For IC client-specific error handling (double result pattern with `CallError`), see the [IC Errors Reference](../ic/reference/errors.md).
+> For IC client-specific error handling (double result pattern with `CallError`), see the [IC Errors Reference](https://ic.wasm-dbms.cc/reference/errors.html).

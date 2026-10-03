@@ -10,6 +10,4 @@ bench_compare:
 
 [group('bench')]
 bench_all:
-    just bench "read_table"
-    just bench "eager_relation"
     just bench_compare

@@ -34,17 +34,3 @@
 # WASI
 
 - [WASI Memory Provider](wasi/wasi-memory-provider.md)
-
-# IC-DBMS
-
-- [Overview](ic/index.md)
-- [Guides]()
-  - [Get Started](ic/guides/get-started.md)
-  - [CRUD Operations](ic/guides/crud-operations.md)
-  - [Access Control](ic/guides/access-control.md)
-  - [Client API](ic/guides/client-api.md)
-  - [Migrations](ic/guides/migrations.md)
-- [Reference]()
-  - [Schema](ic/reference/schema.md)
-  - [Data Types](ic/reference/data-types.md)
-  - [Errors](ic/reference/errors.md)

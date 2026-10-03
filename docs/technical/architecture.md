@@ -33,7 +33,7 @@
 
 ## Overview
 
-wasm-dbms is built as a layered architecture where each layer has specific responsibilities and builds upon the layer below. The core DBMS engine is runtime-agnostic (`wasm-dbms-*` crates), while the IC-specific adapter layer (`ic-dbms-*` crates) provides Internet Computer integration.
+wasm-dbms is built as a layered architecture where each layer has specific responsibilities and builds upon the layer below. The core DBMS engine is runtime-agnostic (`wasm-dbms-*` crates), while the IC-specific adapter layer (`ic-dbms-*` crates, maintained in the separate [ic-dbms](https://github.com/veeso/ic-dbms) repository) provides Internet Computer integration.
 
 This design provides:
 
@@ -215,15 +215,10 @@ wasm-dbms/
 │   │   ├── wasm-dbms/              # Core DBMS engine
 │   │   └── wasm-dbms-macros/       # Procedural macros (Encode, Table, CustomDataType, DatabaseSchema)
 │   │
-│   └── ic-dbms/                    # IC-specific crates
-│       ├── ic-dbms-api/            # IC-specific types (re-exports wasm-dbms-api)
-│       ├── ic-dbms-canister/       # Core IC canister implementation
-│       ├── ic-dbms-macros/         # IC-specific macros (DatabaseSchema, DbmsCanister)
-│       ├── ic-dbms-client/         # Client libraries
-│       ├── example/                # Reference implementation
-│       └── integration-tests/      # PocketIC integration tests
+│   └── wasi-dbms/                  # WASI-specific crates
+│       └── wasi-dbms-memory/       # File-backed memory provider for WASI runtimes
 │
-└── .artifact/                      # Build outputs (.wasm, .did, .wasm.gz)
+└── .artifact/                      # Build outputs (.wasm)
 ```
 
 ### Dependency Graph
@@ -294,6 +289,9 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 - `#[derive(DatabaseSchema)]` - Generates `DatabaseSchema<M>` trait implementation for schema dispatch
 
 ### IC Layer (ic-dbms)
+
+The IC adapter crates are maintained in the separate [ic-dbms](https://github.com/veeso/ic-dbms) repository and documented at
+<https://ic.wasm-dbms.cc>. They are summarized here because they implement Layer 3 on top of this engine.
 
 #### ic-dbms-api
 

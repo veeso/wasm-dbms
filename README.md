@@ -12,16 +12,15 @@
 [![coveralls](https://coveralls.io/repos/github/veeso/wasm-dbms/badge.svg)](https://coveralls.io/github/veeso/wasm-dbms)
 [![docs](https://docs.rs/wasm-dbms/badge.svg?logo=rust)](https://docs.rs/wasm-dbms)
 
-An embeddable relational database engine written in Rust, designed to run inside WASM runtimes, with first-class support
-for Internet Computer canisters.
+An embeddable relational database engine written in Rust, designed to run inside WASM runtimes. Internet Computer
+canisters are supported through the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) project.
 
 ## Overview
 
-This repository contains three crate families:
+This repository contains two crate families:
 
 - **wasi-dbms**: Crates for building a DBMS on any WASM runtime that supports WASI (Wasmtime, Wasmer, WasmEdge)
 - **wasm-dbms** - A runtime-agnostic DBMS engine that runs on any WASM runtime (Wasmtime, Wasmer, WasmEdge, IC)
-- **ic-dbms** - A thin IC-specific adapter that provides Internet Computer canister integration
 
 ### Crate Architecture
 
@@ -32,10 +31,6 @@ This repository contains three crate families:
 | `wasm-dbms`        | Core DBMS engine with transactions, joins, integrity checks |
 | `wasm-dbms-macros` | Procedural macros: `Encode`, `Table`, `CustomDataType`      |
 | `wasi-dbms-memory` | Memory provider implementations for WASI runtimes           |
-| `ic-dbms-api`      | IC-specific types (re-exports `wasm-dbms-api`)              |
-| `ic-dbms-canister` | IC canister DBMS implementation                             |
-| `ic-dbms-macros`   | IC-specific macro: `DbmsCanister`                           |
-| `ic-dbms-client`   | Client libraries for canister interaction                   |
 
 ## Quick Start (Generic)
 
@@ -94,109 +89,17 @@ interface (`/wit/dbms.wit`), making it accessible from any Component Model host 
 language with Component Model tooling. See the [Wasmtime example](https://wasm-dbms.cc/guides/wasmtime-example.html)
 and the reference implementation in `crates/wasm-dbms/example/`.
 
-## Quick Start (IC Canister)
+## Internet Computer
 
-Define your database schema using Rust structs:
+Internet Computer support lives in the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) repository. It provides the
+`ic-dbms-api`, `ic-dbms-canister`, `ic-dbms-macros`, and `ic-dbms-client` crates, which turn a wasm-dbms schema into a
+complete database canister with a generated Candid API, access control, and client libraries.
 
-```rust
-use candid::CandidType;
-use ic_dbms_api::prelude::{Text, Uint32};
-use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister, Table};
-use serde::Deserialize;
-
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
-#[table = "users"]
-pub struct User {
-    #[primary_key]
-    id: Uint64,
-    #[sanitizer(ic_dbms_api::prelude::TrimSanitizer)]
-    #[validate(ic_dbms_api::prelude::MaxStrlenValidator(20))]
-    name: Text,
-    #[validate(ic_dbms_api::prelude::EmailValidator)]
-    email: Text,
-    age: Nullable<Uint32>,
-}
-```
-
-Define relationships between tables:
-
-```rust
-#[derive(Debug, Table, CandidType, Deserialize, Clone, PartialEq, Eq)]
-#[table = "posts"]
-pub struct Post {
-    #[primary_key]
-    id: Uint32,
-    title: Text,
-    content: Text,
-    #[foreign_key(entity = "User", table = "users", column = "id")]
-    author: Uint32,
-}
-```
-
-> [!NOTE]
-> Deriving `CandidType`, `Deserialize` and `Clone` is required for IC canister tables.
-
-Instantiate the database canister:
-
-```rust
-#[derive(DatabaseSchema, DbmsCanister)]
-#[tables(User = "users", Post = "posts")]
-pub struct IcDbmsCanisterGenerator;
-```
-
-This generates a fully functional database canister with all CRUD operations.
-
-## Generated Canister API
-
-```candid
-service : (IcDbmsCanisterArgs) -> {
-  acl_add_principal : (principal) -> (Result);
-  acl_allowed_principals : () -> (vec principal) query;
-  acl_remove_principal : (principal) -> (Result);
-  begin_transaction : () -> (nat);
-  commit : (nat) -> (Result);
-  delete_posts : (DeleteBehavior, opt Filter_1, opt nat) -> (Result_1);
-  delete_users : (DeleteBehavior, opt Filter_1, opt nat) -> (Result_1);
-  insert_posts : (PostInsertRequest, opt nat) -> (Result);
-  insert_users : (UserInsertRequest, opt nat) -> (Result);
-  rollback : (nat) -> (Result);
-  select_posts : (Query, opt nat) -> (Result_2) query;
-  select_users : (Query_1, opt nat) -> (Result_3) query;
-  update_posts : (PostUpdateRequest, opt nat) -> (Result_1);
-  update_users : (UserUpdateRequest, opt nat) -> (Result_1);
-}
-```
-
-### ACL Management
-
-- `acl_add_principal(principal)`: Adds a principal to the ACL.
-- `acl_allowed_principals()`: Returns the list of principals in the ACL.
-- `acl_remove_principal(principal)`: Removes a principal from the ACL.
-
-### Transaction Management
-
-- `begin_transaction()`: Starts a new transaction and returns its ID.
-- `commit(transaction_id)`: Commits the transaction with the given ID.
-- `rollback(transaction_id)`: Rolls back the transaction with the given ID.
-
-### Data Manipulation
-
-For each table defined in the schema:
-
-- `insert_<table_name>(records, transaction_id)`: Inserts records into the specified table.
-- `select_<table_name>(query, transaction_id)`: Selects records from the specified table.
-- `update_<table_name>(updates, transaction_id)`: Updates records in the specified table.
-- `delete_<table_name>(delete_behavior, filter, transaction_id)`: Deletes records from the specified table.
+Read the ic-dbms documentation at <https://ic.wasm-dbms.cc>.
 
 ## Getting Started
 
-See the [Getting Started Guide](https://wasm-dbms.cc/guides/get-started.html) for more information on how to setup and
-deploy the DBMS canister.
-
-## Interacting with the Canister
-
-See the [ic-dbms-client](./crates/ic-dbms/ic-dbms-client/README.md) for more information on how to interact with the
-canister.
+See the [Getting Started Guide](https://wasm-dbms.cc/guides/get-started.html) to set up your first wasm-dbms database.
 
 ## Features
 

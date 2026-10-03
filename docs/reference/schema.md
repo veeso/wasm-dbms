@@ -80,7 +80,7 @@ pub struct User {
 | `Debug`           | Recommended | Useful for debugging                     |
 | `PartialEq`, `Eq` | Recommended | Useful for comparisons in tests          |
 
-> **Note:** For IC canister usage, also add `CandidType` and `Deserialize` derives plus the `#[candid]` attribute. See the [IC Schema Reference](../ic/reference/schema.md).
+> **Note:** For IC canister usage, also add `CandidType` and `Deserialize` derives plus the `#[candid]` attribute. See the [IC Schema Reference](https://ic.wasm-dbms.cc/reference/schema.html).
 
 ### Table Attribute
 
@@ -442,7 +442,7 @@ When the `#[candid]` attribute is present, the `Table` macro adds `candid::Candi
 
 > **Note:** The `#[candid]` attribute only affects the types _generated_ by the `Table` macro. You still need to derive `CandidType` and `Deserialize` on the table struct itself.
 
-See the [IC Schema Reference](../ic/reference/schema.md) for full IC integration details.
+See the [IC Schema Reference](https://ic.wasm-dbms.cc/reference/schema.html) for full IC integration details.
 
 ### Alignment
 
@@ -757,7 +757,7 @@ pub struct Comment {
 }
 ```
 
-> For generating a complete IC canister API from this schema, see the [IC Schema Reference](../ic/reference/schema.md).
+> For generating a complete IC canister API from this schema, see the [IC Schema Reference](https://ic.wasm-dbms.cc/reference/schema.html).
 
 ---
 

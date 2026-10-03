@@ -10,7 +10,7 @@ package_list args="":
 
 # Publish all crates in dependency order
 [group('publish')]
-publish_all: publish_wasm_dbms_all publish_wasi_dbms_all publish_ic_dbms_all
+publish_all: publish_wasm_dbms_all publish_wasi_dbms_all
 
 # Publish all wasm-dbms crates in dependency order
 [group('publish')]
@@ -34,22 +34,6 @@ publish_wasi_dbms_all: publish_wasi_dbms_memory
 
 [group('publish')]
 publish_wasi_dbms_memory: (_publish "wasi-dbms-memory")
-
-# Publish all IC-specific crates in dependency order
-[group('publish')]
-publish_ic_dbms_all: publish_ic_dbms_macros publish_ic_dbms_api publish_ic_dbms_canister publish_ic_dbms_client
-
-[group('publish')]
-publish_ic_dbms_macros: (_publish "ic-dbms-macros")
-
-[group('publish')]
-publish_ic_dbms_api: (_publish "ic-dbms-api")
-
-[group('publish')]
-publish_ic_dbms_canister: (_publish "ic-dbms-canister")
-
-[group('publish')]
-publish_ic_dbms_client: (_publish "ic-dbms-client")
 
 # Publish a crate with retry logic to handle registry lag
 [private]
