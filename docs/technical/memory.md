@@ -2,7 +2,7 @@
 
 - [Memory Management](#memory-management)
   - [Overview](#overview)
-  - [How Internet Computer Memory Works](#how-internet-computer-memory-works)
+  - [How WASM Memory Works](#how-wasm-memory-works)
   - [Memory Model](#memory-model)
   - [Memory Provider](#memory-provider)
   - [Memory Manager and MemoryAccess](#memory-manager-and-memoryaccess)
@@ -39,16 +39,15 @@ This document provides the technical details of memory management in wasm-dbms, 
 
 ---
 
-## How Internet Computer Memory Works
+## How WASM Memory Works
 
-On the Internet Computer, canisters have access to stable memory that persists across upgrades. Key characteristics:
+A WASM module addresses memory in 64 KiB (65,536 bytes) pages. wasm-dbms uses the same page size for its own storage, regardless of where the bytes live. Key characteristics:
 
-- **Page-based**: Memory is divided into 64 KiB (65,536 bytes) pages
-- **Growable**: Canisters start small and can allocate additional pages
-- **Persistent**: Survives canister upgrades
-- **Limited**: Subject to subnet memory limits
+- **Page-based**: Memory is divided into 64 KiB pages
+- **Growable**: Storage starts small and allocates additional pages on demand
+- **Provider-defined persistence**: Whether the bytes survive a restart depends on the `MemoryProvider` in use (a file for WASI, the heap for tests)
 
-wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
+wasm-dbms never assumes a specific host. It reads and writes through the `MemoryProvider` trait, so the host decides where the data is stored. Runtime-specific providers, such as the one for the Internet Computer in [ic-dbms](https://ic.wasm-dbms.cc), live in their own projects.
 
 ---
 
@@ -114,7 +113,7 @@ The `MemoryProvider` trait abstracts memory access:
 
 ```rust
 pub trait MemoryProvider {
-    /// Size of a memory page in bytes (64 KiB for IC)
+    /// Size of a memory page in bytes (64 KiB)
     const PAGE_SIZE: u64;
 
     /// Current memory size in bytes
@@ -139,33 +138,10 @@ pub trait MemoryProvider {
 
 | Implementation       | Use Case                                        |
 | -------------------- | ----------------------------------------------- |
-| `IcMemoryProvider`   | IC production (uses `ic_cdk::stable::*`)        |
 | `WasiMemoryProvider` | WASI production (file-backed, single flat file) |
 | `HeapMemoryProvider` | Testing (uses `Vec<u8>`)                        |
 
 ```rust
-// Production: Uses IC stable memory APIs
-pub struct IcMemoryProvider;
-
-#[cfg(target_family = "wasm")]
-impl MemoryProvider for IcMemoryProvider {
-    const PAGE_SIZE: u64 = ic_cdk::stable::WASM_PAGE_SIZE_IN_BYTES;
-
-    fn grow(&mut self, new_pages: u64) -> MemoryResult<u64> {
-        ic_cdk::stable::stable_grow(new_pages).map_err(MemoryError::ProviderError)
-    }
-
-    fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
-        ic_cdk::stable::stable_read(offset, buf);
-        Ok(())
-    }
-
-    fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()> {
-        ic_cdk::stable::stable_write(offset, buf);
-        Ok(())
-    }
-}
-
 // Testing: Uses heap memory
 pub struct HeapMemoryProvider {
     memory: Vec<u8>,
@@ -222,12 +198,8 @@ pub struct MemoryManager<P: MemoryProvider> {
     provider: P,
 }
 
-// Global instance (thread-local for IC)
-// All state is consolidated in a single DbmsContext:
-thread_local! {
-    pub static DBMS_CONTEXT: DbmsContext<IcMemoryProvider> =
-        DbmsContext::new(IcMemoryProvider::default());
-}
+// All mutable state is consolidated in a single DbmsContext:
+let ctx = DbmsContext::new(HeapMemoryProvider::default());
 
 impl<P: MemoryProvider> MemoryManager<P> {
     /// Initialize and allocate reserved pages
@@ -381,7 +353,7 @@ field is `None`, avoiding unnecessary page allocation.
 
 - Hash of `TableSchema::table_name()` — stable across rebuilds and schema evolution
 - Used as the key into the schema registry's `HashMap`
-- Enables multiple tables in one canister
+- Enables multiple tables in one memory instance
 
 **Name collision detection:**
 

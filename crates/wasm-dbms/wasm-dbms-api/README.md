@@ -15,7 +15,7 @@
 Runtime-agnostic API types and traits for the wasm-dbms DBMS engine.
 
 This crate provides all shared types, traits, and abstractions needed to interact with
-a wasm-dbms instance. It is independent of any specific WASM runtime (IC, WASI, Wasmtime, etc.).
+a wasm-dbms instance. It is independent of any specific WASM runtime (WASI, Wasmtime, etc.).
 
 Import all useful types and traits via the prelude:
 

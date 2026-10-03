@@ -391,4 +391,4 @@ match result {
 
 See the [Errors Reference](../reference/errors.md) for complete error documentation.
 
-> For IC canister client usage with the `IcDbmsCanisterClient`, see the [IC CRUD Guide](https://ic.wasm-dbms.cc/guides/crud-operations.html).
+> For the Internet Computer, see the [ic-dbms CRUD Guide](https://ic.wasm-dbms.cc/guides/crud-operations.html).

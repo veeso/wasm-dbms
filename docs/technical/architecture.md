@@ -2,10 +2,11 @@
 
 - [Architecture](#architecture)
   - [Overview](#overview)
-  - [Three-Layer Architecture](#three-layer-architecture)
+  - [Layered Architecture](#layered-architecture)
     - [Layer 1: Memory Layer](#layer-1-memory-layer)
     - [Layer 2: DBMS Layer](#layer-2-dbms-layer)
     - [Layer 3: API Layer](#layer-3-api-layer)
+    - [Layer 4: Application Layer](#layer-4-application-layer)
   - [Crate Organization](#crate-organization)
     - [Dependency Graph](#dependency-graph)
     - [Generic Layer (wasm-dbms)](#generic-layer-wasm-dbms)
@@ -13,11 +14,6 @@
       - [wasm-dbms-memory](#wasm-dbms-memory)
       - [wasm-dbms](#wasm-dbms)
       - [wasm-dbms-macros](#wasm-dbms-macros)
-    - [IC Layer (ic-dbms)](#ic-layer-ic-dbms)
-      - [ic-dbms-api](#ic-dbms-api)
-      - [ic-dbms-canister](#ic-dbms-canister)
-      - [ic-dbms-macros](#ic-dbms-macros)
-      - [ic-dbms-client](#ic-dbms-client)
   - [Data Flow](#data-flow)
     - [Insert Operation](#insert-operation)
     - [Select Operation](#select-operation)
@@ -33,7 +29,7 @@
 
 ## Overview
 
-wasm-dbms is built as a layered architecture where each layer has specific responsibilities and builds upon the layer below. The core DBMS engine is runtime-agnostic (`wasm-dbms-*` crates), while the IC-specific adapter layer (`ic-dbms-*` crates, maintained in the separate [ic-dbms](https://github.com/veeso/ic-dbms) repository) provides Internet Computer integration.
+wasm-dbms is built as a layered architecture where each layer has specific responsibilities and builds upon the layer below. The core DBMS engine (layers 1 to 3) is runtime-agnostic and lives in the `wasm-dbms-*` crates. On top of it sits an application layer, which is not part of this repository: it is written by whoever embeds wasm-dbms, such as the Internet Computer adapter [ic-dbms](https://github.com/veeso/ic-dbms).
 
 This design provides:
 
@@ -44,30 +40,36 @@ This design provides:
 
 ---
 
-## Three-Layer Architecture
+## Layered Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Layer 3: API Layer                       │
-│  Canister endpoints, Candid interface                        │
-│  (DbmsCanister macro, request/response types)                │
-├─────────────────────────────────────────────────────────────┤
-│                     Layer 2: DBMS Layer                      │
-│  Tables, CRUD operations, transactions, foreign keys         │
-│  (TableRegistry, TransactionManager, query execution)        │
-├─────────────────────────────────────────────────────────────┤
-│                    Layer 1: Memory Layer                     │
-│  Stable memory management, encoding/decoding, page allocation│
-│  (MemoryProvider, MemoryManager, Encode trait)               │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│               Layer 4: Application Layer                      │
+│  Final database interface, permissions, ACL, custom logic     │
+│  (user-owned, NOT part of wasm-dbms)                          │
+╞══════════════════════════════════════════════════════════════╡
+│                     Layer 3: API Layer                        │
+│  Database trait, request/response types                       │
+│  (Query, Filter, InsertRequest, UpdateRequest, Record)        │
+├──────────────────────────────────────────────────────────────┤
+│                     Layer 2: DBMS Layer                       │
+│  Tables, CRUD operations, transactions, foreign keys          │
+│  (TableRegistry, TransactionManager, query execution)         │
+├──────────────────────────────────────────────────────────────┤
+│                    Layer 1: Memory Layer                      │
+│  Memory management, encoding/decoding, page allocation        │
+│  (MemoryProvider, MemoryManager, Encode trait)                │
+└──────────────────────────────────────────────────────────────┘
                               │
                               ▼
-                    ┌─────────────────┐
-                    │  IC Stable      │
-                    │    Memory       │
-                    │   (or Heap)     │
-                    └─────────────────┘
+                    ┌──────────────────┐
+                    │ Memory Provider  │
+                    │ (file, host, or  │
+                    │  heap memory)    │
+                    └──────────────────┘
 ```
+
+Layers 1 to 3 are the wasm-dbms engine. Layer 4 belongs to the application.
 
 ### Layer 1: Memory Layer
 
@@ -75,10 +77,10 @@ This design provides:
 
 **Responsibilities:**
 
-- Manage stable memory allocation (64 KiB pages)
+- Manage memory allocation (64 KiB pages)
 - Encode/decode data to/from binary format
 - Track free space and handle fragmentation
-- Provide abstraction for testing (heap vs stable memory)
+- Provide abstraction for testing (heap vs persistent memory)
 
 **Key components:**
 
@@ -162,40 +164,37 @@ Transactions use an overlay pattern:
 
 ### Layer 3: API Layer
 
-**Crate:** `ic-dbms-canister` (IC-specific)
+**Crate:** `wasm-dbms-api`
 
 **Responsibilities:**
 
-- Expose Candid interface
-- Handle request/response encoding
-- Route requests to DBMS layer
-- Generate table-specific endpoints
+- Define the `Database` trait, the entry point for all operations
+- Define request and response types
+- Define shared data types, errors, sanitizers, and validators
 
 **Key components:**
 
-| Component            | Purpose                                   |
-| -------------------- | ----------------------------------------- |
-| `DbmsCanister` macro | Generates canister API from schema        |
-| Request types        | `InsertRequest`, `UpdateRequest`, `Query` |
-| Response types       | `Record`, error handling                  |
+| Component      | Purpose                                               |
+| -------------- | ----------------------------------------------------- |
+| `Database`     | Trait for CRUD, queries, transactions, and migrations |
+| Request types  | `InsertRequest`, `UpdateRequest`, `Query`, `Filter`   |
+| Response types | `Record`, `DbmsError`, `DbmsResult`                   |
 
-**Generated API structure:**
+### Layer 4: Application Layer
 
-```rust
-// For each table "users":
-insert_users(UserInsertRequest, Option<TxId>) -> Result<()>
-select_users(Query, Option<TxId>) -> Result<Vec<UserRecord>>
-update_users(UserUpdateRequest, Option<TxId>) -> Result<u64>
-delete_users(DeleteBehavior, Option<Filter>, Option<TxId>) -> Result<u64>
+**Crate:** none. This layer is written by the user of wasm-dbms.
 
-// Untyped select (supports joins):
-select(table: String, Query, Option<TxId>) -> Result<Vec<Vec<(JoinColumnDef, Value)>>>
+The engine does not authenticate callers, check permissions, or decide how the database is exposed. The application layer wraps the `Database` trait and provides the interface that the final database presents to its clients.
 
-// Global operations:
-begin_transaction() -> TxId
-commit(TxId) -> Result<()>
-rollback(TxId) -> Result<()>
-```
+**Typical responsibilities:**
+
+- Expose the database to the outside world (host functions, WIT interface, RPC endpoints, CLI, and so on)
+- Identify callers and enforce permissions or access control lists (ACL) before calling the engine
+- Map transaction owners to caller identities
+- Add business rules that go beyond sanitizers and validators
+- Provide the `MemoryProvider` for the target runtime and own the `DbmsContext`
+
+For example, [ic-dbms](https://github.com/veeso/ic-dbms) is an application layer for the Internet Computer. It exposes canister endpoints, checks access control, and ships client libraries. Read its documentation at <https://ic.wasm-dbms.cc>.
 
 ---
 
@@ -220,11 +219,9 @@ wasm-dbms/
 
 ```
 wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms
-                                                                 ^
-ic-dbms-macros <── ic-dbms-canister ─────────────────────────────┘
-                        ^
-                   ic-dbms-client
 ```
+
+Application layers, such as [ic-dbms](https://github.com/veeso/ic-dbms), depend on these crates from separate repositories.
 
 ### Generic Layer (wasm-dbms)
 
@@ -242,7 +239,7 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 - `CustomDataType` trait and `CustomValue`
 - Error types (`DbmsError`, `DbmsResult`)
 
-**Dependencies:** Minimal (serde, thiserror). Candid support via optional `candid` feature.
+**Dependencies:** Minimal (serde, thiserror).
 
 #### wasm-dbms-memory
 
@@ -280,53 +277,6 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 - `#[derive(CustomDataType)]` - Custom data type bridge
 - `#[derive(DatabaseSchema)]` - Generates `DatabaseSchema<M>` trait implementation for schema dispatch
 
-### IC Layer (ic-dbms)
-
-The IC adapter crates are maintained in the separate [ic-dbms](https://github.com/veeso/ic-dbms) repository and documented at
-<https://ic.wasm-dbms.cc>. They are summarized here because they implement Layer 3 on top of this engine.
-
-#### ic-dbms-api
-
-**Purpose:** IC-specific types, re-exports generic API
-
-**Contents:**
-
-- Re-exports all types from `wasm-dbms-api`
-- `Principal` custom data type (wraps `candid::Principal`)
-- `IcDbmsCanisterArgs` init/upgrade arguments
-- `IcDbmsError` / `IcDbmsResult` type aliases
-
-#### ic-dbms-canister
-
-**Purpose:** Thin IC adapter over `wasm-dbms`
-
-**Contents:**
-
-- `IcMemoryProvider` (IC stable memory)
-- `DBMS_CONTEXT` thread-local wrapping `DbmsContext<IcMemoryProvider>`
-- Canister API layer
-
-**Dependencies:** ic-dbms-api, ic-dbms-macros, wasm-dbms, wasm-dbms-memory, ic-cdk
-
-#### ic-dbms-macros
-
-**Purpose:** IC-specific code generation
-
-**Macros:**
-
-- `#[derive(DatabaseSchema)]` - Generates `DatabaseSchema<M>` trait implementation (IC-specific paths)
-- `#[derive(DbmsCanister)]` - Generates complete canister API
-
-#### ic-dbms-client
-
-**Purpose:** Client libraries for canister interaction
-
-**Implementations:**
-
-- `IcDbmsCanisterClient` - Inter-canister calls
-- `IcDbmsAgentClient` - External via ic-agent (feature-gated)
-- `IcDbmsPocketIcClient` - Testing with PocketIC (feature-gated)
-
 ---
 
 ## Data Flow
@@ -334,9 +284,9 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
 ### Insert Operation
 
 ```
-1. Client calls insert_users(request, tx_id)
+1. Caller invokes Database::insert::<User>(request)
               │
-2. API layer deserializes request
+2. Database session receives the request
               │
 3. DBMS layer:
    a. Apply sanitizers to values
@@ -350,19 +300,19 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
 4. Memory layer:
    a. Encode record to bytes
    b. Find space (free segment or new page)
-   c. Write to stable memory
+   c. Write to memory
    d. Update all indexes with the new
       key → RecordAddress mapping
               │
-5. Return Result<()>
+5. Return DbmsResult<()>
 ```
 
 ### Select Operation
 
 ```
-1. Client calls select_users(query, tx_id)
+1. Caller invokes Database::select::<User>(query)
               │
-2. API layer deserializes query
+2. Database session receives the query
               │
 3. DBMS layer:
    a. Parse filters
@@ -384,15 +334,15 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
    a. Read pages
    b. Decode records
               │
-5. Return Result<Vec<Record>>
+5. Return DbmsResult<Vec<Record>>
 ```
 
 ### Select with Join
 
 ```
-1. Client calls select(table, query_with_joins, tx_id)
+1. Caller invokes Database::select_join(table, query_with_joins)
               │
-2. API layer checks query.has_joins()
+2. Database session checks query.has_joins()
               │ (true)
 3. JoinEngine:
    a. Read all rows from FROM table
@@ -405,7 +355,7 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
    e. Apply offset/limit
    f. Flatten to output with JoinColumnDef
               │
-4. Return Result<Vec<Vec<(JoinColumnDef, Value)>>>
+4. Return DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>>
 ```
 
 See [Join Engine](./join-engine.md) for implementation details.
@@ -413,35 +363,32 @@ See [Join Engine](./join-engine.md) for implementation details.
 ### Transaction Flow
 
 ```
-begin_transaction():
+DbmsContext::begin_transaction(owner):
   1. Generate transaction ID
   2. Create empty overlay
-  3. Record owner (caller identity)
+  3. Record the owner identity (opaque bytes chosen by the caller)
   4. Return transaction ID
 
-Operation with tx_id:
-  1. Verify caller owns transaction
-  2. Read from: overlay first, then committed
-  3. Write to: overlay only
+Operation within a transaction (WasmDbmsDatabase::from_transaction):
+  1. Read from: overlay first, then committed
+  2. Write to: overlay only
 
-commit(tx_id):
-  1. Verify caller owns transaction
-  2. For each change in overlay:
-     - Write to committed data (stable memory)
-  3. Delete overlay
-  4. Transaction ID becomes invalid
-
-rollback(tx_id):
-  1. Verify caller owns transaction
-  2. Delete overlay (discard all changes)
+commit():
+  1. For each change in overlay:
+     - Write to committed data
+  2. Delete overlay
   3. Transaction ID becomes invalid
+
+rollback():
+  1. Delete overlay (discard all changes)
+  2. Transaction ID becomes invalid
 ```
 
 ---
 
 ## Extension Points
 
-ic-dbms provides several extension points for customization:
+wasm-dbms provides several extension points for customization:
 
 ### Custom Sanitizers
 
@@ -493,6 +440,7 @@ pub trait MemoryProvider {
 
 Built-in providers:
 
-- `IcMemoryProvider` - Uses IC stable memory (IC production)
 - `WasiMemoryProvider` - Uses a single flat file (WASI production)
 - `HeapMemoryProvider` - Uses heap memory (testing)
+
+Other runtimes ship their own provider. For the Internet Computer, see [ic-dbms](https://ic.wasm-dbms.cc).

@@ -269,7 +269,7 @@ fn test_insert_and_select() {
 }
 ```
 
-> For deploying on the Internet Computer as a canister, see the [IC Getting Started Guide](https://ic.wasm-dbms.cc/guides/get-started.html).
+> For the Internet Computer, see the [ic-dbms Getting Started Guide](https://ic.wasm-dbms.cc/guides/get-started.html).
 
 ---
 

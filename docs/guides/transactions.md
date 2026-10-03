@@ -182,7 +182,7 @@ assert!(users.iter().any(|u| u.id == new_user.id));
 
 ### Durability
 
-Committed transactions persist in storage. When using stable memory providers (e.g., on the Internet Computer), data survives across upgrades.
+Committed transactions persist in storage. When using a persistent memory provider (e.g., the WASI file-backed provider), data survives restarts.
 
 ---
 

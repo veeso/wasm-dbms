@@ -175,8 +175,7 @@ ties from earlier keys.
 ## Aggregate Types
 
 Types used to describe and return aggregated query results. All three are
-re-exported from the `wasm-dbms-api`, `ic-dbms-api`, and `ic-dbms-client`
-preludes.
+re-exported from the `wasm-dbms-api` prelude.
 
 ### `AggregateFunction`
 

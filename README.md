@@ -20,7 +20,7 @@ canisters are supported through the dedicated [ic-dbms](https://github.com/veeso
 This repository contains two crate families:
 
 - **wasi-dbms**: Crates for building a DBMS on any WASM runtime that supports WASI (Wasmtime, Wasmer, WasmEdge)
-- **wasm-dbms** - A runtime-agnostic DBMS engine that runs on any WASM runtime (Wasmtime, Wasmer, WasmEdge, IC)
+- **wasm-dbms** - A runtime-agnostic DBMS engine that runs on any WASM runtime (Wasmtime, Wasmer, WasmEdge)
 
 ### Crate Architecture
 
@@ -91,10 +91,7 @@ and the reference implementation in `crates/wasm-dbms/example/`.
 
 ## Internet Computer
 
-Internet Computer support lives in the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) repository. It provides the
-`ic-dbms-api`, `ic-dbms-canister`, `ic-dbms-macros`, and `ic-dbms-client` crates, which turn a wasm-dbms schema into a
-complete database canister with a generated Candid API and client libraries.
-
+Internet Computer support lives in the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) repository.
 Read the ic-dbms documentation at <https://ic.wasm-dbms.cc>.
 
 ## Getting Started

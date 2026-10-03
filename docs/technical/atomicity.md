@@ -37,7 +37,7 @@ where
 }
 ```
 
-On the Internet Computer, a panic (trap) automatically reverts all stable-memory writes made during that call. This gave IC canisters free atomicity. However, on **non-IC WASM runtimes** (e.g., Wasmtime, Wasmer, browser WASM), a panic does **not** revert memory. The host simply sees the guest abort, and any writes already flushed to linear memory remain. This made `wasm-dbms` effectively IC-only for write operations.
+Some runtimes, such as the Internet Computer, automatically revert all memory writes made by a call that panics. On **other WASM runtimes** (e.g., Wasmtime, Wasmer, browser WASM), a panic does **not** revert memory. The host simply sees the guest abort, and any writes already flushed to linear memory remain. Without extra protection, this would make `wasm-dbms` safe for write operations only on runtimes that revert on panic.
 
 ---
 

@@ -25,7 +25,7 @@ data persistence.
 
 ## How It Works
 
-The backing file is byte-for-byte equivalent to IC stable memory: a contiguous
+The backing file is a contiguous
 sequence of 64 KiB pages, zero-filled on allocation. This means database
 snapshots are portable across different `MemoryProvider` implementations.
 
