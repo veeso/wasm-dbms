@@ -1,6 +1,6 @@
-# Run all unit tests and integration tests
+# Run all unit tests and the WIT example
 [group('test')]
-test_all: test integration_test test_wasm_dbms_example
+test_all: test test_wasm_dbms_example
 
 [group('test')]
 test test_name="":
@@ -12,11 +12,6 @@ test test_name="":
 test_wasm_dbms test_name="":
   cargo test --lib {{test_name}} -p wasm-dbms-api -p wasm-dbms-memory -p wasm-dbms
 
-[group('test')]
-integration_test test_name="":
-  echo "Running integration tests..."
-  cargo test {{test_name}} -p pocket-ic-tests
-
 # Generate an LCOV coverage report with the CI exclusions.
 [group('test')]
 coverage output="lcov.info" args="":
@@ -26,19 +21,7 @@ coverage output="lcov.info" args="":
     --lib \
     --lcov \
     --output-path {{ output }} \
-    --ignore-filename-regex '.*(client|macros|example|pocket-ic-tests).*' \
-    --exclude "ic-dbms-client" \
-    --exclude "ic-dbms-macros" \
-    --exclude "pocket-ic-tests" \
-    --exclude "dbms-canister-client-integration" \
-    --exclude "pocket-ic-tests-macro" \
-    --exclude "example" \
-    --exclude-from-report "ic-dbms-client" \
-    --exclude-from-report "ic-dbms-macros" \
-    --exclude-from-report "pocket-ic-tests" \
-    --exclude-from-report "pocket-ic-tests-macro" \
-    --exclude-from-report "dbms-canister-client-integration" \
-    --exclude-from-report "example" \
+    --ignore-filename-regex '.*(macros|example).*' \
     {{ args }}
 
 # Run the WIT Component Model example (end-to-end test)

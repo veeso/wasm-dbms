@@ -13,10 +13,8 @@ By participating in this project you agree to abide by the [Code of Conduct](./C
   - [Repository Layout](#repository-layout)
   - [Development Environment](#development-environment)
     - [Required Tooling](#required-tooling)
-    - [Optional Tooling (IC work only)](#optional-tooling-ic-work-only)
     - [First-Time Setup](#first-time-setup)
-  - [Working on `wasm-dbms` Only (no IC toolchain)](#working-on-wasm-dbms-only-no-ic-toolchain)
-  - [Working on `ic-dbms`](#working-on-ic-dbms)
+  - [Local Checks](#local-checks)
   - [Common Commands](#common-commands)
   - [Workflow](#workflow)
   - [Conventions](#conventions)
@@ -46,14 +44,14 @@ If you are unsure whether a change is welcome, open a GitHub issue and ask befor
 
 ## Repository Layout
 
-The workspace is split into two crate families. Detailed architecture lives in
+The workspace is split into two crate families. The Internet Computer adapter lives in the separate
+[ic-dbms](https://github.com/veeso/ic-dbms) repository. Detailed architecture lives in
 [`docs/technical/architecture.md`](./docs/technical/architecture.md); the short version:
 
 | Path                | Purpose                                                                |
 | ------------------- | ---------------------------------------------------------------------- |
 | `crates/wasm-dbms/` | Runtime-agnostic DBMS engine and procedural macros (no IC dependency). |
 | `crates/wasi-dbms/` | Memory providers and examples for WASI runtimes (Wasmtime, etc.).      |
-| `crates/ic-dbms/`   | Internet Computer adapter, client libraries, and integration tests.    |
 | `wit/`              | WIT interface definitions for the WASI Component Model bindings.       |
 | `docs/`             | mdBook-style documentation.                                            |
 | `just/`             | Modular `Justfile` recipes for build, test, quality, and release work. |
@@ -78,23 +76,6 @@ The workspace is split into two crate families. Detailed architecture lives in
 - [`zizmor`](https://woodruffw.github.io/zizmor/) — GitHub Actions security checks.
 - [`TruffleHog`](https://github.com/trufflesecurity/trufflehog) — secret scanning.
 
-### Optional Tooling (IC work only)
-
-You only need these when changing crates under `crates/ic-dbms/` or running the IC integration tests locally. If you
-work exclusively on the generic `wasm-dbms-*` or `wasi-dbms-*` crates, you can skip them and rely on CI to validate
-the IC side.
-
-- [`ic-wasm`](https://github.com/dfinity/ic-wasm) — shrinks canister WASM artifacts.
-- [`candid-extractor`](https://crates.io/crates/candid-extractor) — extracts `.did` files from built canisters.
-- [`pocket-ic`](https://github.com/dfinity/pocketic) — local IC replica used by the integration test suite. The
-  binary is downloaded automatically by the test harness on first run; ensure your platform is supported.
-
-Install the Cargo-based tools with:
-
-```sh
-cargo install ic-wasm candid-extractor
-```
-
 ### First-Time Setup
 
 ```sh
@@ -108,27 +89,17 @@ cargo check --workspace
 just check
 ```
 
-## Working on `wasm-dbms` Only (no IC toolchain)
+## Local Checks
 
-If your change is confined to the generic engine, macros, or WASI bits, run the focused recipes:
+Run the focused recipes while iterating, then the full suite before opening a pull request:
 
 ```sh
 just test_wasm_dbms              # fast unit tests for wasm-dbms-{api,memory} and wasm-dbms
 just build_wasm_dbms             # build generic crates for wasm32-unknown-unknown
 just test_wasm_dbms_example      # end-to-end Component Model example (Wasmtime host + guest)
+just build_all                   # generic crates + WASI example
+just test_all                    # unit tests + WIT example
 just check                       # formatting, clippy, docs, dependency policy, and tests
-```
-
-Open the PR once these pass locally; the CI job covers the IC build and integration tests for you.
-
-## Working on `ic-dbms`
-
-When touching IC crates, run the full suite locally before opening a PR:
-
-```sh
-just build_all                   # generic + IC canisters + WASI example
-just test_all                    # unit tests + PocketIC integration tests + WIT example
-just check                       # full local quality gate
 ```
 
 ## Common Commands
@@ -137,11 +108,10 @@ A non-exhaustive cheat sheet (run `just --list` for everything):
 
 | Command                         | Description                                                 |
 | ------------------------------- | ----------------------------------------------------------- |
-| `just build_all`                | Builds every crate, canister, and the WASI example.         |
+| `just build_all`                | Builds every crate and the WASI example.                    |
 | `just test`                     | Runs unit and doc tests across the workspace.               |
 | `just test <name>`              | Filters unit tests by substring.                            |
-| `just integration_test [name]`  | Runs the PocketIC integration tests.                        |
-| `just test_all`                 | Runs unit, doc, integration, and WIT example tests.         |
+| `just test_all`                 | Runs unit, doc, and WIT example tests.                      |
 | `just fmt`                      | Formats supported files with dprint.                        |
 | `just fmt_check`                | Checks Rust, Markdown, TOML, and YAML formatting.           |
 | `just clippy`                   | Runs workspace Clippy checks.                               |
@@ -202,14 +172,14 @@ The release notes are generated from these prefixes by `git-cliff` (see [`cliff.
 - Keep PRs focused; split unrelated changes into separate PRs.
 - Reference the GitHub issue in the PR description (`Closes #N`).
 - The PR title should also follow Conventional Commits — it becomes the squash-merge commit message.
-- All CI jobs (`lint`, `unit-test`, integration tests, doc tests, bench-build) must be green before review.
+- All CI jobs (`lint`, `unit-test`, doc tests, bench-build, WIT example) must be green before review.
 
 ### Documentation
 
 User-facing changes must update the relevant pages under `docs/`:
 
 - Generic engine behaviour → `docs/guides/` and `docs/reference/`.
-- IC-specific behaviour → `docs/ic/guides/` and `docs/ic/reference/`.
+- IC-specific behaviour → the [ic-dbms](https://github.com/veeso/ic-dbms) repository.
 - Architecture and internals → `docs/technical/`.
 
 Design notes and implementation plans live in `.superpowers/` — never under `docs/plans/`.
@@ -228,25 +198,19 @@ change either of them — adding/removing methods, changing signatures, adding e
 `Query`/`Filter`/`Value` — update **every** surface below in the same PR:
 
 - `wit/dbms.wit` — WIT interface for the WASI guest.
-- `crates/ic-dbms/ic-dbms-canister/src/api.rs` — generic helpers used by the canister macro.
-- `crates/ic-dbms/ic-dbms-macros/src/dbms_canister.rs` — the `#[derive(DbmsCanister)]` endpoint generator.
-- `crates/ic-dbms/ic-dbms-client/src/client.rs` and the three implementations under `client/`
-  (`ic.rs`, `agent.rs`, `pocket_ic.rs`).
-- `crates/ic-dbms/integration-tests/dbms-canister-client-integration/src/lib.rs` — wrapper canister.
-- `crates/ic-dbms/integration-tests/pocket-ic-tests/tests/` — coverage for both the direct client and the
-  wrapper canister; remember to register the new test in `tests/integration_tests.rs`.
+- The [ic-dbms](https://github.com/veeso/ic-dbms) repository — it consumes these traits through the published crates
+  (canister API helpers, the `#[derive(DbmsCanister)]` macro, the `Client` trait and its implementations, and the
+  PocketIC integration tests). Mention the required follow-up there in your pull request.
 
 Documentation that must follow the same change: `docs/reference/query.md`, `docs/reference/errors.md`,
-`docs/ic/reference/schema.md`, `docs/ic/guides/client-api.md`, `docs/guides/querying.md`, and
-`docs/guides/crud-operations.md`. When in doubt, grep for the old method name across the workspace before
+`docs/guides/querying.md`, and `docs/guides/crud-operations.md`. When in doubt, grep for the old method name across the workspace before
 finishing the change.
 
 ## Testing Guidelines
 
 - Every public function should have at least one unit test exercising the happy path and the most relevant
   failure modes.
-- Use the in-memory `MemoryProvider` for fast unit tests; reach for PocketIC only when you need true canister
-  semantics (cycles, inter-canister calls, upgrades).
+- Use the in-memory `MemoryProvider` for fast unit tests.
 - Doc tests are part of CI (`cargo test --doc`); keep code samples in `///` blocks compiling.
 - Benchmarks live under `crates/wasm-dbms/wasm-dbms/benches/`; CI builds them but does not measure performance.
   Run them locally with `just bench`.

@@ -24,7 +24,7 @@ You define your schema as Rust structs with derive macros, and wasm-dbms provide
 transactions, foreign key integrity, validation, and sanitization — all running within the sandbox of your WASM module.
 
 wasm-dbms supports any WASM runtime (Wasmtime, Wasmer, WasmEdge) and offers first-class integration with
-Internet Computer canisters through the `ic-dbms` adapter.
+Internet Computer canisters through the [`ic-dbms`](https://github.com/veeso/ic-dbms) adapter.
 
 ---
 
@@ -57,11 +57,11 @@ API and type reference documentation:
 
 ### IC Integration
 
-For deploying wasm-dbms as an Internet Computer canister:
+Internet Computer support lives in the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) project, documented at <https://ic.wasm-dbms.cc>:
 
-- [IC Getting Started](./ic/guides/get-started.md) - Deploy a database canister on the IC
-- [Access Control](./ic/guides/access-control.md) - Managing the ACL
-- [Client API](./ic/guides/client-api.md) - Using the IC client library
+- [IC Getting Started](https://ic.wasm-dbms.cc/guides/get-started.html) - Deploy a database canister on the IC
+- [Access Control](https://ic.wasm-dbms.cc/guides/access-control.html) - Managing the ACL
+- [Client API](https://ic.wasm-dbms.cc/guides/client-api.html) - Using the IC client library
 
 ### WASI Integration
 
@@ -130,4 +130,4 @@ let users = database.select::<User>(query)?;
 - **Foreign keys**: Referential integrity with cascade/restrict behaviors
 - **Validation & Sanitization**: Built-in validators and sanitizers
 - **JSON support**: Store and query semi-structured data
-- **IC Integration**: First-class support for Internet Computer canisters via `ic-dbms`
+- **IC Integration**: First-class support for Internet Computer canisters via [`ic-dbms`](https://github.com/veeso/ic-dbms)

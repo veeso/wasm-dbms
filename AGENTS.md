@@ -5,16 +5,17 @@ Prioritize correctness, maintainability, test coverage, and idiomatic Rust.
 
 ## Project Context
 
-The project has two layers:
+This repository contains **wasm-dbms**: a runtime-agnostic DBMS engine that
+runs on any WASM runtime.
 
-- **wasm-dbms**: a runtime-agnostic DBMS engine that runs on any WASM runtime.
-- **ic-dbms**: a thin Internet Computer adapter built on wasm-dbms.
+The Internet Computer adapter, **ic-dbms**, is built on wasm-dbms and lives in
+the separate [ic-dbms](https://github.com/veeso/ic-dbms) repository.
 
-Each layer follows three internal layers:
+The engine follows three internal layers:
 
 1. Memory: stable-memory management and low-level encoding/decoding.
 2. DBMS: tables, CRUD operations, transactions, and integrity checks.
-3. API: the generic `Database` trait or the IC canister API.
+3. API: the generic `Database` trait.
 
 ## Project Overview
 
@@ -23,8 +24,9 @@ runtimes. Developers define schemas with Rust structs and derive macros; the
 framework provides CRUD operations, ACID transactions, foreign-key integrity,
 and validation/sanitization.
 
-The IC adapter adds Candid serialization, ACL-based access control, canister
-lifecycle management, and client libraries for Internet Computer deployment.
+The IC adapter in the [ic-dbms](https://github.com/veeso/ic-dbms) repository adds
+Candid serialization, ACL-based access control, canister lifecycle management,
+and client libraries for Internet Computer deployment.
 
 ## Common Commands
 
@@ -37,10 +39,10 @@ just check
 Useful focused commands are:
 
 ```sh
-# Build all workspace targets, including canisters and the WASI example.
+# Build all workspace targets, including the WASI example.
 just build_all
 
-# Run unit, doc, integration, and WIT example tests.
+# Run unit, doc, and WIT example tests.
 just test_all
 
 # Run the generic engine's fast test and build paths.
@@ -79,13 +81,8 @@ crates/
 │   ├── wasm-dbms/              # Core DBMS engine
 │   └── wasm-dbms-macros/       # Encode, Table, CustomDataType, DatabaseSchema
 │
-└── ic-dbms/                    # IC-specific crates
-    ├── ic-dbms-api/            # IC types and wasm-dbms-api re-exports
-    ├── ic-dbms-canister/       # IC canister DBMS implementation
-    ├── ic-dbms-macros/         # DbmsCanister procedural macro
-    ├── ic-dbms-client/         # Canister client libraries
-    ├── example/                # Reference implementation
-    └── integration-tests/      # PocketIC integration tests
+└── wasi-dbms/                  # WASI-specific crates
+    └── wasi-dbms-memory/       # File-backed memory provider for WASI runtimes
 ```
 
 ### Dependency Graph
@@ -93,9 +90,7 @@ crates/
 ```text
 wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms
                                                                  ^
-ic-dbms-macros <── ic-dbms-canister ─────────────────────────────┘
-                        ^
-                   ic-dbms-client
+                                              ic-dbms (separate repository)
 ```
 
 ### Macro System
@@ -104,9 +99,10 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 2. `#[derive(Table)]` generates `TableSchema`, record, request, and foreign
    fetcher types.
 3. `#[derive(DatabaseSchema)]` generates the `DatabaseSchema<M, A>` dispatch
-   implementation and is re-exported through `ic-dbms-canister::prelude`.
-4. `#[derive(DbmsCanister)]` generates the complete IC canister API and CRUD
-   endpoints.
+   implementation.
+
+The `#[derive(DbmsCanister)]` macro, which generates the IC canister API, lives
+in the [ic-dbms](https://github.com/veeso/ic-dbms) repository.
 
 ### Memory Model
 
@@ -146,9 +142,6 @@ pub struct User {
 IC tables additionally derive `CandidType` and `Deserialize`; the `#[candid]`
 attribute adds Candid/Serde derives to generated types.
 
-An IC canister schema combines `DatabaseSchema` and `DbmsCanister`, then exports
-its Candid interface with `ic_cdk::export_candid!()`.
-
 ## Documentation Structure
 
 ```text
@@ -163,7 +156,7 @@ docs/
 │   └── custom-data-types.md   # Custom data types
 ├── reference/                 # Generic data types, schema, validation, errors
 ├── technical/                 # Architecture and internals
-└── ic/                        # IC-specific guides and reference
+└── wasi/                      # WASI memory provider
 ```
 
 ## Build and Tooling Requirements
@@ -211,30 +204,17 @@ the past; treat this as a checklist:
 - `wit/dbms.wit`: update the WIT records, variants, and database interface,
   rebuild `wasm-dbms-example-guest` and `wasm-dbms-example-host`, and run the
   host demo end to end.
-- `crates/ic-dbms/ic-dbms-canister/src/api.rs`: generic per-operation helpers
-  consumed by macro-generated canister endpoints.
-- `crates/ic-dbms/ic-dbms-macros/src/dbms_canister.rs`: the
-  `#[derive(DbmsCanister)]` macro, including per-table endpoints such as
-  `select_<table>`, `aggregate_<table>`, `insert_<table>`, shared select,
-  transaction, and ACL endpoints.
-- `crates/ic-dbms/ic-dbms-client/src/client.rs`: the `Client` trait and all
-  implementations:
-  - `client/ic.rs`: canister-to-canister calls via `ic-cdk`.
-  - `client/agent.rs`: external calls via `ic-agent`, behind the `ic-agent`
-    feature.
-  - `client/pocket_ic.rs`: integration tests, behind the `pocket-ic` feature.
-- `crates/ic-dbms/integration-tests/dbms-canister-client-integration/src/lib.rs`:
-  the wrapper canister exposing the client method end to end.
-- `crates/ic-dbms/integration-tests/pocket-ic-tests/tests/`: coverage through
-  both the direct client and wrapper canister; register each test file in
-  `tests/integration_tests.rs`.
+- The [ic-dbms](https://github.com/veeso/ic-dbms) repository consumes these traits
+  through the published crates. A change here needs a matching change there
+  after release: `ic-dbms-canister/src/api.rs`, the `#[derive(DbmsCanister)]`
+  macro in `ic-dbms-macros`, the `Client` trait and its implementations in
+  `ic-dbms-client`, and the PocketIC integration tests. Mention the required
+  follow-up in the pull request description.
 
 Documentation that must follow the same change:
 
 - `docs/reference/query.md` and `docs/reference/errors.md` for builder methods
   or error variants.
-- `docs/ic/reference/schema.md` for generated Candid endpoints.
-- `docs/ic/guides/client-api.md` for `Client` trait methods.
 - `docs/guides/querying.md` and `docs/guides/crud-operations.md` for
   caller-facing behavior changes.
 

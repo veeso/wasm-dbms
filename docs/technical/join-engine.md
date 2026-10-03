@@ -15,7 +15,7 @@
 
 The join engine executes cross-table join queries, combining rows from two or more tables based on column equality conditions. It supports four join types — INNER, LEFT, RIGHT, and FULL — and integrates with the existing query pipeline for filtering, ordering, pagination, and column selection.
 
-The implementation lives in `crates/ic-dbms-canister/src/dbms/join.rs`.
+The implementation lives in `crates/wasm-dbms/wasm-dbms/src/join.rs`.
 
 ---
 
