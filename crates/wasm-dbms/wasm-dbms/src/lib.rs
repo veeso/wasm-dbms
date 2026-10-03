@@ -33,7 +33,7 @@
 //! | Crate              | Role                                                                    |
 //! |--------------------|-------------------------------------------------------------------------|
 //! | `wasm-dbms-api`    | Shared types, traits, validators, sanitizers, error variants            |
-//! | `wasm-dbms-memory` | `MemoryProvider` abstraction, page management, schema/ACL/table storage |
+//! | `wasm-dbms-memory` | `MemoryProvider` abstraction, page management, schema/table storage     |
 //! | `wasm-dbms-macros` | `Encode`, `Table`, `CustomDataType`, `DatabaseSchema` derive macros     |
 //! | `wasm-dbms`        | DBMS engine: CRUD, joins, aggregations, integrity, transactions         |
 //!
@@ -45,8 +45,8 @@
 //!
 //! Each engine concern lives in its own module:
 //!
-//! - [`DbmsContext`] — owns all database state (schema registry, ACL,
-//!   memory manager, active transactions). Wraps mutable state in
+//! - [`DbmsContext`] — owns all database state (schema registry, memory
+//!   manager, active transactions). Wraps mutable state in
 //!   `RefCell` so a single shared reference is enough to drive
 //!   operations.
 //! - [`WasmDbmsDatabase`] — short-lived session bound to a
@@ -168,17 +168,7 @@
 //!
 //! Custom backends just need to implement `MemoryProvider`.
 //!
-//! ## Access control
-//!
-//! [`DbmsContext`] is generic over an [`AccessControl`] provider.
-//! Use [`AccessControlList`] for identity-based per-table permissions
-//! or [`NoAccessControl`] for runtimes that do not need it. The IC
-//! adapter wires `AccessControlList` to canister principals.
-//!
 //! [`MemoryProvider`]: wasm_dbms_memory::MemoryProvider
-//! [`AccessControl`]: wasm_dbms_memory::AccessControl
-//! [`AccessControlList`]: wasm_dbms_memory::AccessControlList
-//! [`NoAccessControl`]: wasm_dbms_memory::NoAccessControl
 //!
 //! ## Threading
 //!

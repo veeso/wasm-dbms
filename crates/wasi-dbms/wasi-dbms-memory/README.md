@@ -41,7 +41,7 @@ use wasi_dbms_memory::WasiMemoryProvider;
 use wasm_dbms::DbmsContext;
 
 let provider = WasiMemoryProvider::new("./data/mydb.bin").unwrap();
-let ctx = DbmsContext::new(provider, acl);
+let ctx = DbmsContext::new(provider);
 // use ctx with wasm-dbms as usual
 ```
 

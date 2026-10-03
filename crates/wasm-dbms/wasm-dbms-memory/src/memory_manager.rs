@@ -12,12 +12,10 @@ use crate::provider::MemoryProvider;
 
 /// Schema page (reserved page 0).
 pub const SCHEMA_PAGE: Page = 0;
-/// ACL page (reserved page 1).
-pub const ACL_PAGE: Page = 1;
-/// Unclaimed-pages ledger page (reserved page 2).
-pub const UNCLAIMED_PAGES_PAGE: Page = 2;
+/// Unclaimed-pages ledger page (reserved page 1).
+pub const UNCLAIMED_PAGES_PAGE: Page = 1;
 /// Number of reserved pages allocated at initialization.
-pub const RESERVED_PAGES: u64 = 3;
+pub const RESERVED_PAGES: u64 = 2;
 
 /// The memory manager handles page-level memory operations on top of a
 /// [`MemoryProvider`].
@@ -47,18 +45,13 @@ where
             return manager;
         }
 
-        // Request the missing reserved pages (schema, ACL, unclaimed).
+        // Request the missing reserved pages (schema, unclaimed).
         let missing = RESERVED_PAGES - current_pages;
         if let Err(err) = manager.provider.grow(missing) {
             panic!("Failed to grow memory during initialization: {err}");
         }
 
         manager
-    }
-
-    /// Returns the ACL page number.
-    pub const fn acl_page(&self) -> Page {
-        ACL_PAGE
     }
 
     /// Returns the schema page.
@@ -334,6 +327,9 @@ mod tests {
     use super::*;
     use crate::provider::HeapMemoryProvider;
 
+    /// Reserved page used as a scratch target by the raw read/write tests.
+    const SCRATCH_PAGE: Page = SCHEMA_PAGE;
+
     fn make_mm() -> MemoryManager<HeapMemoryProvider> {
         MemoryManager::init(HeapMemoryProvider::default())
     }
@@ -341,14 +337,22 @@ mod tests {
     #[test]
     fn test_should_init_memory_manager() {
         let mm = make_mm();
-        assert_eq!(mm.last_page(), Some(2));
+        assert_eq!(mm.last_page(), Some(1));
     }
 
     #[test]
     fn test_should_get_last_page() {
         let mm = make_mm();
         let last_page = mm.last_page();
-        assert_eq!(last_page, Some(2)); // schema, ACL, and unclaimed-pages pages
+        assert_eq!(last_page, Some(1)); // schema and unclaimed-pages pages
+    }
+
+    #[test]
+    fn test_reserved_layout_is_schema_then_unclaimed_pages() {
+        let mm = make_mm();
+        assert_eq!(RESERVED_PAGES, 2);
+        assert_eq!(mm.schema_page(), 0);
+        assert_eq!(mm.unclaimed_pages_page(), 1);
     }
 
     #[test]
@@ -362,12 +366,12 @@ mod tests {
     fn test_should_write_and_read_fixed_data_size() {
         let mut mm = make_mm();
         let data_to_write = FixedSizeData { a: 42, b: 1337 };
-        mm.write_at(ACL_PAGE, 0, &data_to_write)
-            .expect("Failed to write data to ACL page");
+        mm.write_at(SCRATCH_PAGE, 0, &data_to_write)
+            .expect("Failed to write data to scratch page");
 
         let out: FixedSizeData = mm
-            .read_at(ACL_PAGE, 0)
-            .expect("Failed to read data from ACL page");
+            .read_at(SCRATCH_PAGE, 0)
+            .expect("Failed to read data from scratch page");
 
         assert_eq!(out, data_to_write);
     }
@@ -376,23 +380,23 @@ mod tests {
     fn test_write_should_zero_padding() {
         let mut mm = make_mm();
         let data_to_write = Text("very_long_string".to_string());
-        mm.write_at(ACL_PAGE, 0, &data_to_write)
-            .expect("Failed to write data to ACL page");
+        mm.write_at(SCRATCH_PAGE, 0, &data_to_write)
+            .expect("Failed to write data to scratch page");
 
         let mut buffer = vec![0; 32];
-        mm.read_at_raw(ACL_PAGE, 0, &mut buffer)
-            .expect("Failed to read data from ACL page");
+        mm.read_at_raw(SCRATCH_PAGE, 0, &mut buffer)
+            .expect("Failed to read data from scratch page");
 
         let non_zero_count = buffer.iter().filter(|&&b| b != 0).count();
         assert_eq!(non_zero_count, data_to_write.size() as usize - 1);
 
         let data_to_write_short = Text("short".to_string());
-        mm.write_at(ACL_PAGE, 0, &data_to_write_short)
-            .expect("Failed to write data to ACL page");
+        mm.write_at(SCRATCH_PAGE, 0, &data_to_write_short)
+            .expect("Failed to write data to scratch page");
 
         let mut buffer = vec![0; 32];
-        mm.read_at_raw(ACL_PAGE, 0, &mut buffer)
-            .expect("Failed to read data from ACL page");
+        mm.read_at_raw(SCRATCH_PAGE, 0, &mut buffer)
+            .expect("Failed to read data from scratch page");
 
         let non_zero_count = buffer.iter().filter(|&&b| b != 0).count();
         assert_eq!(non_zero_count, data_to_write_short.size() as usize - 1);
@@ -402,15 +406,15 @@ mod tests {
     fn test_should_zero_data() {
         let mut mm = make_mm();
         let data_to_write = FixedSizeData { a: 100, b: 200 };
-        mm.write_at(ACL_PAGE, 48, &data_to_write)
-            .expect("Failed to write data to ACL page");
+        mm.write_at(SCRATCH_PAGE, 48, &data_to_write)
+            .expect("Failed to write data to scratch page");
 
-        mm.zero(ACL_PAGE, 48, &data_to_write)
-            .expect("Failed to zero data on ACL page");
+        mm.zero(SCRATCH_PAGE, 48, &data_to_write)
+            .expect("Failed to zero data on scratch page");
 
         let mut buffer = vec![0; 50];
-        mm.read_at_raw(ACL_PAGE, 48, &mut buffer)
-            .expect("Failed to read data from ACL page");
+        mm.read_at_raw(SCRATCH_PAGE, 48, &mut buffer)
+            .expect("Failed to read data from scratch page");
 
         assert!(buffer.iter().all(|&b| b == 0));
     }
@@ -419,19 +423,19 @@ mod tests {
     fn test_should_zero_with_alignment() {
         let mut mm = make_mm();
         let data_to_write = FixedSizeData { a: 100, b: 200 };
-        mm.write_at(ACL_PAGE, 0, &data_to_write)
-            .expect("Failed to write data to ACL page");
+        mm.write_at(SCRATCH_PAGE, 0, &data_to_write)
+            .expect("Failed to write data to scratch page");
         let data_to_write = FixedSizeData { a: 100, b: 200 };
-        mm.write_at(ACL_PAGE, 6, &data_to_write)
-            .expect("Failed to write data to ACL page");
+        mm.write_at(SCRATCH_PAGE, 6, &data_to_write)
+            .expect("Failed to write data to scratch page");
 
         let data_with_alignment = DataWithAlignment { a: 100, b: 200 };
-        mm.zero(ACL_PAGE, 0, &data_with_alignment)
-            .expect("Failed to zero data on ACL page");
+        mm.zero(SCRATCH_PAGE, 0, &data_with_alignment)
+            .expect("Failed to zero data on scratch page");
 
         let mut buffer = vec![0; 32];
-        mm.read_at_raw(ACL_PAGE, 0, &mut buffer)
-            .expect("Failed to read data from ACL page");
+        mm.read_at_raw(SCRATCH_PAGE, 0, &mut buffer)
+            .expect("Failed to read data from scratch page");
         assert!(
             buffer.iter().all(|&b| b == 0),
             "First 32 bytes are not zeroed"
@@ -442,14 +446,14 @@ mod tests {
     fn test_should_check_whether_write_is_aligned() {
         let mut mm = make_mm();
         let data_to_write = FixedSizeData { a: 100, b: 200 };
-        let res = mm.write_at(ACL_PAGE, 2, &data_to_write);
+        let res = mm.write_at(SCRATCH_PAGE, 2, &data_to_write);
         assert!(matches!(res, Err(MemoryError::OffsetNotAligned { .. })));
     }
 
     #[test]
     fn test_should_check_whether_read_is_aligned() {
         let mut mm = make_mm();
-        let result: MemoryResult<FixedSizeData> = mm.read_at(ACL_PAGE, 3);
+        let result: MemoryResult<FixedSizeData> = mm.read_at(SCRATCH_PAGE, 3);
         assert!(matches!(result, Err(MemoryError::OffsetNotAligned { .. })));
     }
 
@@ -457,7 +461,7 @@ mod tests {
     fn test_should_check_whether_zero_is_aligned() {
         let mut mm = make_mm();
         let data_to_zero = FixedSizeData { a: 1, b: 2 };
-        let result = mm.zero(ACL_PAGE, 5, &data_to_zero);
+        let result = mm.zero(SCRATCH_PAGE, 5, &data_to_zero);
         assert!(matches!(result, Err(MemoryError::OffsetNotAligned { .. })));
     }
 
@@ -474,7 +478,7 @@ mod tests {
         let mut mm = make_mm();
         let data_to_zero = FixedSizeData { a: 1, b: 2 };
         let result = mm.zero(
-            ACL_PAGE,
+            SCRATCH_PAGE,
             (HeapMemoryProvider::PAGE_SIZE - 4) as PageOffset,
             &data_to_zero,
         );
@@ -485,12 +489,12 @@ mod tests {
     fn test_should_read_raw() {
         let mut mm = make_mm();
         let data_to_write = vec![1u8, 2, 3, 4, 5];
-        mm.write_at_raw(ACL_PAGE, 20, &data_to_write)
-            .expect("Failed to write raw data to ACL page");
+        mm.write_at_raw(SCRATCH_PAGE, 20, &data_to_write)
+            .expect("Failed to write raw data to scratch page");
 
         let mut buf = vec![0u8; 5];
-        mm.read_at_raw(ACL_PAGE, 20, &mut buf)
-            .expect("Failed to read raw data from ACL page");
+        mm.read_at_raw(SCRATCH_PAGE, 20, &mut buf)
+            .expect("Failed to read raw data from scratch page");
 
         assert_eq!(buf, data_to_write);
     }
@@ -500,7 +504,7 @@ mod tests {
         let mut mm = make_mm();
         let data_to_write = FixedSizeData { a: 1, b: 2 };
         let result = mm.write_at(
-            ACL_PAGE,
+            SCRATCH_PAGE,
             (HeapMemoryProvider::PAGE_SIZE - 4) as PageOffset,
             &data_to_write,
         );

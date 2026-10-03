@@ -54,7 +54,6 @@ Migrations are **forward-only** and **explicit**. The DBMS never auto-migrates o
 ├─────────────────────────────────────────────────────────┤
 │  drift == true                                          │
 │    ├─ CRUD returns DbmsError::Migration(SchemaDrift)    │
-│    ├─ ACL methods bypass the check                      │
 │    ├─ plan_migration() → Vec<MigrationOp>               │
 │    └─ migrate(policy) applies ops, clears drift         │
 └─────────────────────────────────────────────────────────┘
@@ -78,7 +77,7 @@ Drift is the only signal the DBMS uses to decide whether migration is required. 
 4. `drift = (schema_registry.schema_hash != current_hash)`.
 5. Cache `drift: bool` on the DBMS context.
 
-Every CRUD entry point early-returns `Err(DbmsError::Migration(MigrationError::SchemaDrift))` while `drift == true`. ACL methods (`acl_add_principal`, `acl_remove_principal`, `acl_allowed_principals`) bypass the check so the operator can recover even if the drift state is stuck.
+Every CRUD entry point early-returns `Err(DbmsError::Migration(MigrationError::SchemaDrift))` while `drift == true`.
 
 ---
 
@@ -410,11 +409,10 @@ See the [Migration Errors section in the errors reference](./errors.md#migration
 ### Generic (`wasm-dbms`)
 
 ```rust
-impl<M, A, S> Dbms<M, A, S>
+impl<M, S> Dbms<M, S>
 where
     M: MemoryProvider,
-    A: AccessControl,
-    S: DatabaseSchema<M, A>,
+    S: DatabaseSchema<M>,
 {
     /// O(1). True iff compiled schema differs from stored.
     pub fn has_drift(&self) -> bool;
@@ -432,10 +430,9 @@ where
 `#[derive(DatabaseSchema)]` emits three migration dispatch methods alongside the CRUD dispatch methods:
 
 ```rust
-pub trait DatabaseSchema<M, A>
+pub trait DatabaseSchema<M>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     // ... existing CRUD dispatch ...
 
@@ -468,7 +465,7 @@ service : (IcDbmsCanisterArgs) -> {
 }
 ```
 
-All three honour the existing ACL check. `MigrationOp`, `MigrationPolicy`, `TableSchemaSnapshot`, `ColumnSnapshot`, `IndexSnapshot`, `ForeignKeySnapshot`, `DataTypeSnapshot`, and `ColumnChanges` derive `CandidType + Deserialize` behind the `candid` feature in `wasm-dbms-api`, so they appear in the generated `.did` automatically.
+`MigrationOp`, `MigrationPolicy`, `TableSchemaSnapshot`, `ColumnSnapshot`, `IndexSnapshot`, `ForeignKeySnapshot`, `DataTypeSnapshot`, and `ColumnChanges` derive `CandidType + Deserialize` behind the `candid` feature in `wasm-dbms-api`, so they appear in the generated `.did` automatically.
 
 ---
 

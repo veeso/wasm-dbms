@@ -195,8 +195,8 @@ pub struct MigrationPolicy {
 #[derive(Debug, Error, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 pub enum MigrationError {
-    /// CRUD attempted while the DBMS is in drift state. Only ACL and
-    /// migration entry points are allowed until [`MigrationOp`]s are applied.
+    /// CRUD attempted while the DBMS is in drift state. Only migration
+    /// entry points are allowed until [`MigrationOp`]s are applied.
     #[error("Schema drift: stored schema differs from compiled schema")]
     SchemaDrift,
     /// A column changed to a type that is neither in the widening whitelist

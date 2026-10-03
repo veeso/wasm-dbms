@@ -19,7 +19,6 @@ rust-version = { workspace = true }
 description = "Runtime-agnostic API types and traits for the wasm-dbms DBMS engine."
 
 [dependencies]
-bitflags = { workspace = true }
 candid = { workspace = true, optional = true }
 lazy-regex = { workspace = true }
 percent-encoding = { workspace = true }

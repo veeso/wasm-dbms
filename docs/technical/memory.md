@@ -9,7 +9,6 @@
   - [Unclaimed Pages Ledger](#unclaimed-pages-ledger)
   - [Encode Trait](#encode-trait)
   - [Schema Registry](#schema-registry)
-  - [ACL Storage](#acl-storage)
   - [Table Registry](#table-registry)
     - [Schema Snapshot Ledger](#schema-snapshot-ledger)
     - [Page Ledger](#page-ledger)
@@ -60,39 +59,36 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 │ Page 0: Schema Registry (65 KiB)                 │
 │   - Table name hashes → table registry pages     │
 ├──────────────────────────────────────────────────┤
-│ Page 1: ACL Table (65 KiB)                       │
-│   - List of allowed principals                   │
-├──────────────────────────────────────────────────┤
-│ Page 2: Unclaimed Pages Ledger (65 KiB)          │
+│ Page 1: Unclaimed Pages Ledger (65 KiB)          │
 │   - Stack of pages released by destructive ops   │
 ├──────────────────────────────────────────────────┤
-│ Page 3: Table "users" Schema Snapshot            │
+│ Page 2: Table "users" Schema Snapshot            │
 ├──────────────────────────────────────────────────┤
-│ Page 4: Table "users" Page Ledger                │
+│ Page 3: Table "users" Page Ledger                │
 ├──────────────────────────────────────────────────┤
-│ Page 5: Table "users" Free Segments Ledger       │
+│ Page 4: Table "users" Free Segments Ledger       │
 ├──────────────────────────────────────────────────┤
-│ Page 6: Table "users" Index Ledger               │
+│ Page 5: Table "users" Index Ledger               │
 ├──────────────────────────────────────────────────┤
-│ Page 7: Table "users" Autoincrement Ledger (*)   │
+│ Page 6: Table "users" Autoincrement Ledger (*)   │
 ├──────────────────────────────────────────────────┤
-│ Page 8: Table "posts" Schema Snapshot            │
+│ Page 7: Table "posts" Schema Snapshot            │
 ├──────────────────────────────────────────────────┤
-│ Page 9: Table "posts" Page Ledger                │
+│ Page 8: Table "posts" Page Ledger                │
 ├──────────────────────────────────────────────────┤
-│ Page 10: Table "posts" Free Segments Ledger      │
+│ Page 9: Table "posts" Free Segments Ledger       │
 ├──────────────────────────────────────────────────┤
-│ Page 11: Table "posts" Index Ledger              │
+│ Page 10: Table "posts" Index Ledger              │
 ├──────────────────────────────────────────────────┤
-│ Page 12: Table "users" Records - Page 1          │
+│ Page 11: Table "users" Records - Page 1          │
 ├──────────────────────────────────────────────────┤
-│ Page 13: Table "users" Records - Page 2          │
+│ Page 12: Table "users" Records - Page 2          │
 ├──────────────────────────────────────────────────┤
-│ Page 14: B-Tree Node (index on users.id)         │
+│ Page 13: B-Tree Node (index on users.id)         │
 ├──────────────────────────────────────────────────┤
-│ Page 15: B-Tree Node (index on users.email)      │
+│ Page 14: B-Tree Node (index on users.email)      │
 ├──────────────────────────────────────────────────┤
-│ Page 16: Table "posts" Records - Page 1          │
+│ Page 15: Table "posts" Records - Page 1          │
 ├──────────────────────────────────────────────────┤
 │ ...                                              │
 └──────────────────────────────────────────────────┘
@@ -101,7 +97,7 @@ wasm-dbms uses stable memory directly (not the heap) to ensure data persistence.
 
 **Layout characteristics:**
 
-- Reserved pages (0-2) are allocated at initialization
+- Reserved pages (0-1) are allocated at initialization
 - Each table gets a Schema Snapshot, Page Ledger, Free Segments Ledger, and Index Ledger
 - Tables with `#[autoincrement]` columns also get an Autoincrement Ledger page
 - Record pages and B-tree node pages are allocated on demand
@@ -237,9 +233,6 @@ impl<P: MemoryProvider> MemoryManager<P> {
     /// Initialize and allocate reserved pages
     fn init(provider: P) -> Self;
 
-    /// ACL page number (always 1)
-    pub const fn acl_page(&self) -> Page;
-
     /// Schema registry page (always 0)
     pub const fn schema_page(&self) -> Page;
 }
@@ -259,7 +252,7 @@ DBMS layer without modifying any memory-crate code.
 
 ## Unclaimed Pages Ledger
 
-The unclaimed-pages ledger lives on reserved page 2 (`UNCLAIMED_PAGES_PAGE`).
+The unclaimed-pages ledger lives on reserved page 1 (`UNCLAIMED_PAGES_PAGE`).
 It is a LIFO stack of [`Page`] numbers that destructive operations have
 released. `claim_page` consults this stack before bumping the high-water
 mark; `unclaim_page` zeroes the page and pushes it onto the stack.
@@ -400,47 +393,6 @@ that table's `schema_snapshot_page` and compares its `name` against the candidat
 - Same name: the entry is the same logical table — return the existing pages, no allocation
 - Different name: two distinct names hashed to the same value — return
   `MemoryError::NameCollision { candidate, existing }` without allocating any page
-
----
-
-## ACL Storage
-
-The Access Control List is stored in Page 1. Access control is abstracted
-behind the `AccessControl` trait, which allows different runtimes to use
-different identity types (e.g., `Principal` on IC, `Vec<u8>` for generic use).
-
-```rust
-pub trait AccessControl: Default {
-    type Id;
-
-    fn load<M>(mm: &MemoryManager<M>) -> MemoryResult<Self>
-    where
-        M: MemoryProvider,
-        Self: Sized;
-
-    fn is_allowed(&self, identity: &Self::Id) -> bool;
-    fn allowed_identities(&self) -> Vec<Self::Id>;
-    fn add_identity<M>(
-        &mut self,
-        identity: Self::Id,
-        mm: &mut MemoryManager<M>,
-    ) -> MemoryResult<()>
-    where
-        M: MemoryProvider;
-    fn remove_identity<M>(
-        &mut self,
-        identity: &Self::Id,
-        mm: &mut MemoryManager<M>,
-    ) -> MemoryResult<()>
-    where
-        M: MemoryProvider;
-}
-```
-
-The default implementation `AccessControlList` uses `Vec<u8>` as its identity
-type. `NoAccessControl` is a no-op implementation (with `type Id = ()`) for
-runtimes that don't require ACL. The IC layer provides `IcAccessControlList`
-which wraps `AccessControlList` and uses `Principal` as its identity type.
 
 ---
 

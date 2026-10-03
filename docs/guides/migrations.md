@@ -386,12 +386,11 @@ A failed `migrate()` call rolls back every page touched in the journal session. 
 
 - The DBMS stays in drift state.
 - Stored data is byte-identical to its pre-migration state.
-- ACL methods still work.
 
 Recovery is iterative:
 
 1. Read the error variant. `IncompatibleType`, `DefaultMissing`, `ConstraintViolation`, `DestructiveOpDenied`, and `TransformAborted` each call out the offending table/column/reason.
-2. Fix the cause: add `#[default]`, write a `transform_column` arm, clean offending rows via ACL-allowed admin endpoints, or relax the policy.
+2. Fix the cause: add `#[default]`, write a `transform_column` arm, clean offending rows, or relax the policy.
 3. Redeploy the binary (or just retry `migrate` if the fix is data-side, not schema-side).
 
 There is no partial-success state to clean up. Either the plan applied in full or it didn't apply at all.

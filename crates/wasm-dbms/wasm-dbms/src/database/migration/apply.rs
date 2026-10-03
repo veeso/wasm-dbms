@@ -30,7 +30,7 @@ use wasm_dbms_api::prelude::{
     ForeignKeySnapshot, MSize, MigrationError, MigrationOp, Query, TableSchemaSnapshot, Value,
 };
 use wasm_dbms_memory::TableRegistry;
-use wasm_dbms_memory::prelude::{AccessControl, IndexLedger, MemoryProvider};
+use wasm_dbms_memory::prelude::{IndexLedger, MemoryProvider};
 
 use crate::database::WasmDbmsDatabase;
 use crate::database::migration::codec::{decode_record_by_snapshot, encode_record_by_snapshot};
@@ -50,10 +50,9 @@ use crate::transaction::journal::JournaledWriter;
 /// Any [`MigrationError`] surfaced by the per-op handlers, propagated as
 /// [`DbmsError::Migration`]. The journaled atomic block rolls back on the
 /// first error — partial migrations are impossible.
-pub(crate) fn apply<M, A>(db: &WasmDbmsDatabase<'_, M, A>, ops: Vec<MigrationOp>) -> DbmsResult<()>
+pub(crate) fn apply<M>(db: &WasmDbmsDatabase<'_, M>, ops: Vec<MigrationOp>) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     db.ctx.set_migrating(true);
     let result = db.atomic(|db| {
@@ -78,14 +77,13 @@ where
     Ok(())
 }
 
-fn apply_op<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn apply_op<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     op: MigrationOp,
     touched: &mut Vec<TableSchemaSnapshot>,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     match op {
         MigrationOp::CreateTable { name: _, schema } => {
@@ -125,13 +123,9 @@ where
     }
 }
 
-fn create_table<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
-    schema: &TableSchemaSnapshot,
-) -> DbmsResult<()>
+fn create_table<M>(db: &WasmDbmsDatabase<'_, M>, schema: &TableSchemaSnapshot) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let mut sr = db.ctx.schema_registry.borrow_mut();
     let mut mm = db.ctx.mm.borrow_mut();
@@ -144,10 +138,9 @@ where
     Ok(())
 }
 
-fn drop_table<M, A>(db: &WasmDbmsDatabase<'_, M, A>, name: &str) -> DbmsResult<()>
+fn drop_table<M>(db: &WasmDbmsDatabase<'_, M>, name: &str) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let mut sr = db.ctx.schema_registry.borrow_mut();
     let mut mm = db.ctx.mm.borrow_mut();
@@ -160,8 +153,8 @@ where
     Ok(())
 }
 
-fn alter_column<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn alter_column<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     column: &str,
     changes: &ColumnChanges,
@@ -169,7 +162,6 @@ fn alter_column<M, A>(
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let mut snapshot = load_snapshot_for_mutation(db, table, touched)?;
     let target = snapshot
@@ -216,15 +208,14 @@ where
 /// Validate that every non-null value in `(table, column)` is present in
 /// `(fk.table, fk.column)`. Runs before the snapshot edit so a violation
 /// rolls back the entire apply pass.
-fn validate_foreign_key<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn validate_foreign_key<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     column: &str,
     fk: &ForeignKeySnapshot,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let rows = db.schema.select(db, table, Query::builder().build())?;
     for row in rows {
@@ -239,8 +230,8 @@ where
     Ok(())
 }
 
-fn validate_foreign_key_value<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn validate_foreign_key_value<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     column: &str,
     fk: &ForeignKeySnapshot,
@@ -248,7 +239,6 @@ fn validate_foreign_key_value<M, A>(
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let target_rows = db.schema.select(
         db,
@@ -268,15 +258,14 @@ where
     Ok(())
 }
 
-fn add_index<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn add_index<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     index: &wasm_dbms_api::prelude::IndexSnapshot,
     touched: &mut Vec<TableSchemaSnapshot>,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let mut snapshot = load_snapshot_for_mutation(db, table, touched)?;
     if !snapshot.indexes.iter().any(|i| i == index) {
@@ -287,15 +276,14 @@ where
     Ok(())
 }
 
-fn drop_index<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn drop_index<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     index: &wasm_dbms_api::prelude::IndexSnapshot,
     touched: &mut Vec<TableSchemaSnapshot>,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let mut snapshot = load_snapshot_for_mutation(db, table, touched)?;
     snapshot.indexes.retain(|i| i != index);
@@ -311,14 +299,13 @@ where
 /// 2. `#[default]` attribute baked into the column snapshot.
 /// 3. `Value::Null` if the column is nullable.
 /// 4. Otherwise, [`MigrationError::DefaultMissing`].
-fn resolve_default<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn resolve_default<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     column: &ColumnSnapshot,
 ) -> DbmsResult<Value>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     if let Some(v) = db.schema.migrate_default_dyn(table, &column.name) {
         return Ok(v);
@@ -341,8 +328,8 @@ where
 /// `Ok(None)` — error with [`MigrationError::TransformReturnedNone`] (the
 /// caller could have used `WidenColumn` if the type pair were widening).
 /// `Err(_)` — propagate; the journal session rolls back.
-fn transform_column<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn transform_column<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     column: &str,
     _old_type: &DataTypeSnapshot,
@@ -351,7 +338,6 @@ fn transform_column<M, A>(
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let old_snapshot = load_snapshot_for_mutation(db, table, touched)?;
     if !old_snapshot.columns.iter().any(|c| c.name == column) {
@@ -400,8 +386,8 @@ where
 /// Widen `column` in `table` from `old_type` to `new_type` using the
 /// compatible-widening whitelist. Each record's value for the column is
 /// replaced with its widened equivalent.
-fn widen_column<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn widen_column<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     column: &str,
     old_type: &DataTypeSnapshot,
@@ -410,7 +396,6 @@ fn widen_column<M, A>(
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let old_snapshot = load_snapshot_for_mutation(db, table, touched)?;
     if !old_snapshot.columns.iter().any(|c| c.name == column) {
@@ -447,8 +432,8 @@ where
 
 /// Rename `old` → `new` in `table`. Each record's column-keyed tuple is
 /// rewritten with the new key; data is preserved verbatim.
-fn rename_column<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn rename_column<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     old: &str,
     new: &str,
@@ -456,7 +441,6 @@ fn rename_column<M, A>(
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let old_snapshot = load_snapshot_for_mutation(db, table, touched)?;
     if !old_snapshot.columns.iter().any(|c| c.name == old) {
@@ -490,15 +474,14 @@ where
 
 /// Drop `column` from `table`. Each existing record is rewritten without
 /// the column's value; the snapshot mutation is published into `touched`.
-fn drop_column<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn drop_column<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     column: &str,
     touched: &mut Vec<TableSchemaSnapshot>,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let old_snapshot = load_snapshot_for_mutation(db, table, touched)?;
     if !old_snapshot.columns.iter().any(|c| c.name == column) {
@@ -526,15 +509,14 @@ where
 /// Append `column` to `table` and back-fill every existing record with its
 /// resolved default. Snapshot mutation is published into `touched` so the
 /// final commit pass writes the new shape to the snapshot ledger.
-fn add_column<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn add_column<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     column: &ColumnSnapshot,
     touched: &mut Vec<TableSchemaSnapshot>,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let old_snapshot = load_snapshot_for_mutation(db, table, touched)?;
     let mut new_snapshot = old_snapshot.clone();
@@ -556,8 +538,8 @@ where
 
 /// Validate that `AddColumn` can backfill existing rows without violating the
 /// constraints declared on the new column.
-fn validate_added_column_constraints<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn validate_added_column_constraints<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     old_snapshot: &TableSchemaSnapshot,
     column: &ColumnSnapshot,
@@ -565,7 +547,6 @@ fn validate_added_column_constraints<M, A>(
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     if !column.nullable && matches!(default, Value::Null) {
         return Err(DbmsError::Migration(MigrationError::ConstraintViolation {
@@ -599,8 +580,8 @@ where
 ///
 /// Runs inside the existing journal session opened by `apply`, so any
 /// failure rolls back every page touched by the rewrite.
-fn rewrite_table<M, A, F>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn rewrite_table<M, F>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     old_snapshot: &TableSchemaSnapshot,
     new_snapshot: &TableSchemaSnapshot,
@@ -608,7 +589,6 @@ fn rewrite_table<M, A, F>(
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
     F: FnMut(Vec<(String, Value)>) -> DbmsResult<Vec<(String, Value)>>,
 {
     let pages = table_registry_pages(db, table)?;
@@ -643,14 +623,13 @@ where
 
 /// Rebuild indexes for `snapshot` by scanning the current live rows stored for
 /// `table`.
-fn rebuild_indexes_from_storage<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn rebuild_indexes_from_storage<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     snapshot: &TableSchemaSnapshot,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let pages = table_registry_pages(db, table)?;
     let rows = load_live_rows(db, table, snapshot)?;
@@ -705,14 +684,13 @@ where
 /// Loads the stored snapshot for `table`, preferring the in-flight pending
 /// version (already mutated earlier in the same apply pass) over the on-disk
 /// copy.
-fn load_snapshot_for_mutation<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn load_snapshot_for_mutation<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     pending: &mut Vec<TableSchemaSnapshot>,
 ) -> DbmsResult<TableSchemaSnapshot>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     if let Some(idx) = pending.iter().position(|s| s.name == table) {
         return Ok(pending.swap_remove(idx));
@@ -736,13 +714,12 @@ fn persist_pending_snapshot(pending: &mut Vec<TableSchemaSnapshot>, snapshot: Ta
     pending.push(snapshot);
 }
 
-fn table_registry_pages<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn table_registry_pages<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
 ) -> DbmsResult<wasm_dbms_memory::prelude::TableRegistryPage>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let sr = db.ctx.schema_registry.borrow();
     sr.table_registry_page_by_name(table).ok_or_else(|| {
@@ -754,14 +731,13 @@ where
     })
 }
 
-fn load_raw_rows<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn load_raw_rows<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     snapshot: &TableSchemaSnapshot,
 ) -> DbmsResult<Vec<wasm_dbms_memory::RawRecordBytes>>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let pages = table_registry_pages(db, table)?;
     let mut mm = db.ctx.mm.borrow_mut();
@@ -776,14 +752,13 @@ where
 
 type LoadedLiveRow = (wasm_dbms_memory::RecordAddress, Vec<(String, Value)>);
 
-fn load_live_rows<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn load_live_rows<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     snapshot: &TableSchemaSnapshot,
 ) -> DbmsResult<Vec<LoadedLiveRow>>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     load_raw_rows(db, table, snapshot)?
         .into_iter()
@@ -796,26 +771,20 @@ where
         .collect()
 }
 
-fn count_rows_by_snapshot<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn count_rows_by_snapshot<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     table: &str,
     snapshot: &TableSchemaSnapshot,
 ) -> DbmsResult<usize>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     Ok(load_raw_rows(db, table, snapshot)?.len())
 }
 
-fn validate_no_nulls<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
-    table: &str,
-    column: &str,
-) -> DbmsResult<()>
+fn validate_no_nulls<M>(db: &WasmDbmsDatabase<'_, M>, table: &str, column: &str) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let rows = db.schema.select(db, table, Query::builder().build())?;
     for row in rows {
@@ -835,14 +804,9 @@ where
     Ok(())
 }
 
-fn validate_unique<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
-    table: &str,
-    column: &str,
-) -> DbmsResult<()>
+fn validate_unique<M>(db: &WasmDbmsDatabase<'_, M>, table: &str, column: &str) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let rows = db.schema.select(db, table, Query::builder().build())?;
     let mut seen = std::collections::HashSet::new();
@@ -865,13 +829,12 @@ where
 ///
 /// Runs as the final mutation inside the journaled atomic block, so a failure
 /// here rolls back every previous page write performed by the apply pass.
-fn commit_snapshots<M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+fn commit_snapshots<M>(
+    db: &WasmDbmsDatabase<'_, M>,
     snapshots: &[TableSchemaSnapshot],
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     use wasm_dbms_memory::prelude::TableRegistry;
 
