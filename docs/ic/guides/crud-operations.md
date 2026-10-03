@@ -39,6 +39,7 @@ ic-dbms provides four fundamental database operations, accessed through the `ic-
 | **Delete** | Remove records from a table | `Result<u64>` (affected rows) |
 
 All operations:
+
 - Respect access control (caller must be in ACL)
 - Support optional transaction IDs
 - Validate and sanitize data according to schema rules

@@ -20,7 +20,8 @@ const SCHEMA_SNAPSHOT_VERSION: u8 = 0x01;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]
 pub struct TableSchemaSnapshot {
-    /// Version tag of the snapshot binary layout, see [`SCHEMA_SNAPSHOT_VERSION`].
+    /// Version tag of the snapshot binary layout, see
+    /// `SCHEMA_SNAPSHOT_VERSION`.
     pub version: u8,
     /// Name of the table this snapshot was taken from.
     pub name: String,
@@ -173,7 +174,7 @@ pub struct ForeignKeySnapshot {
 
 /// Stable, tag-keyed encoding of the `ON DELETE` referential action.
 ///
-/// Mirrors [`DeleteBehavior`](crate::dbms::query::delete::DeleteBehavior). Discriminants are part of the on-disk format and must not be reused
+/// Mirrors [`DeleteBehavior`](crate::dbms::query::DeleteBehavior). Discriminants are part of the on-disk format and must not be reused
 /// or reordered; new variants must take a fresh tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "candid", derive(candid::CandidType))]

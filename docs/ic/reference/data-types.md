@@ -33,7 +33,7 @@ pub struct User {
     #[primary_key]
     pub id: Uint32,
     #[custom_type]
-    pub owner: Principal,  // IC principal who owns this record
+    pub owner: Principal, // IC principal who owns this record
 }
 ```
 
@@ -79,7 +79,7 @@ pub struct Document {
     pub id: Uuid,
     pub title: Text,
     #[custom_type]
-    pub owner: Principal,      // Who created this
+    pub owner: Principal, // Who created this
     #[custom_type]
     pub last_editor: Principal, // Who last modified this
 }
@@ -105,7 +105,7 @@ pub struct Task {
     pub id: Uint32,
     pub title: Text,
     #[custom_type]
-    pub assignee: Nullable<Principal>,  // May be unassigned
+    pub assignee: Nullable<Principal>, // May be unassigned
 }
 ```
 

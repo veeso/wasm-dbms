@@ -1,17 +1,17 @@
 [package]
 name = "wasm-dbms-memory"
 version = { workspace = true }
-edition = { workspace = true }
 authors = { workspace = true }
-description = "Memory abstraction and page management for the wasm-dbms framework"
-license = { workspace = true }
-repository = { workspace = true }
-readme = "README.md"
-rust-version = { workspace = true }
-documentation = "https://docs.rs/wasm-dbms-memory"
 categories = ["database", "wasm"]
-keywords = ["database", "wasm", "memory"]
+documentation = "https://docs.rs/wasm-dbms-memory"
+edition = { workspace = true }
 include = ["src/**/*", "../../../LICENSE", "README.md", "../../../CHANGELOG.md"]
+keywords = ["database", "wasm", "memory"]
+license = { workspace = true }
+readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Memory abstraction and page management for the wasm-dbms framework"
 
 [dependencies]
 wasm-dbms-api = { workspace = true }

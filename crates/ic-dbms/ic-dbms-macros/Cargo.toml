@@ -2,14 +2,9 @@
 name = "ic-dbms-macros"
 version = { workspace = true }
 authors = { workspace = true }
-edition = { workspace = true }
-rust-version = { workspace = true }
-license = { workspace = true }
-keywords = { workspace = true }
 categories = { workspace = true }
-repository = { workspace = true }
 documentation = "https://docs.rs/ic-dbms-macros/"
-description = "Macros and derive ic-dbms-canister"
+edition = { workspace = true }
 include = [
   "examples/**/*",
   "src/**/*",
@@ -17,7 +12,12 @@ include = [
   "README.md",
   "../../../CHANGELOG.md",
 ]
+keywords = { workspace = true }
+license = { workspace = true }
 readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Macros and derive ic-dbms-canister"
 
 [lib]
 name = "ic_dbms_macros"

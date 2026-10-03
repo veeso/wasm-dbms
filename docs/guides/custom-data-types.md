@@ -49,8 +49,7 @@ Your type must derive or implement several traits. For enums, all must be implem
 use serde::{Deserialize, Serialize};
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, Serialize, Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
 )]
 pub enum Priority {
     #[default]
@@ -63,10 +62,7 @@ pub enum Priority {
 For structs, the same traits are required:
 
 ```rust
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
 pub struct Address {
     pub street: String,
     pub city: String,
@@ -122,6 +118,7 @@ The `Encode` trait defines how your type is serialized to and from bytes for mem
 
 ```rust
 use std::borrow::Cow;
+
 use wasm_dbms_api::prelude::*;
 
 impl Encode for Priority {
@@ -141,11 +138,9 @@ impl Encode for Priority {
             0 => Ok(Priority::Low),
             1 => Ok(Priority::Medium),
             2 => Ok(Priority::High),
-            other => Err(MemoryError::DecodeError(
-                DecodeError::TryFromSliceError(
-                    format!("invalid Priority byte: {other}"),
-                ),
-            )),
+            other => Err(MemoryError::DecodeError(DecodeError::TryFromSliceError(
+                format!("invalid Priority byte: {other}"),
+            ))),
         }
     }
 
@@ -163,9 +158,7 @@ The `#[derive(Encode)]` macro works for structs whose fields all implement `Enco
 use wasm_dbms_api::prelude::*;
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, Serialize, Deserialize,
-    Encode,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Encode,
 )]
 pub struct Address {
     pub street: Text,
@@ -344,8 +337,7 @@ use wasm_dbms_api::prelude::*;
 
 // 1. Define the type
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, Serialize, Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
 )]
 pub enum Priority {
     #[default]
@@ -383,11 +375,9 @@ impl Encode for Priority {
             0 => Ok(Priority::Low),
             1 => Ok(Priority::Medium),
             2 => Ok(Priority::High),
-            other => Err(MemoryError::DecodeError(
-                DecodeError::TryFromSliceError(
-                    format!("invalid Priority byte: {other}"),
-                ),
-            )),
+            other => Err(MemoryError::DecodeError(DecodeError::TryFromSliceError(
+                format!("invalid Priority byte: {other}"),
+            ))),
         }
     }
 
@@ -437,9 +427,18 @@ use wasm_dbms_api::prelude::*;
 
 // 1. Define the type with Encode and CustomDataType derives
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord,
-    Hash, Default, Serialize, Deserialize,
-    Encode, CustomDataType,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    Encode,
+    CustomDataType,
 )]
 #[type_tag = "address"]
 pub struct Address {
@@ -452,7 +451,8 @@ pub struct Address {
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f, "{}, {} {}",
+            f,
+            "{}, {} {}",
             self.street.as_str(),
             self.city.as_str(),
             self.zip.as_str(),

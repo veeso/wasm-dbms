@@ -87,7 +87,7 @@ pub struct User {
     pub id: Uint32,
     pub name: Text,
 
-    pub bio: Nullable<Text>,   // NEW — no further work needed
+    pub bio: Nullable<Text>, // NEW — no further work needed
 }
 ```
 
@@ -136,13 +136,13 @@ pub struct Event {
     pub id: Uint32,
     pub kind: Text,
 
-    pub severity: Uint8,   // NEW
+    pub severity: Uint8, // NEW
 }
 
 impl Migrate for Event {
     fn default_value(column: &str) -> Option<Value> {
         match column {
-            "severity" => Some(Value::Uint8(Uint8(1))),  // medium severity by default
+            "severity" => Some(Value::Uint8(Uint8(1))), // medium severity by default
             _ => None,
         }
     }
@@ -202,11 +202,13 @@ pub struct Event {
     #[primary_key]
     pub id: Uint32,
 
-    pub severity: Uint8,   // was: Text("low" | "medium" | "high")
+    pub severity: Uint8, // was: Text("low" | "medium" | "high")
 }
 
 impl Migrate for Event {
-    fn default_value(_column: &str) -> Option<Value> { None }
+    fn default_value(_column: &str) -> Option<Value> {
+        None
+    }
 
     fn transform_column(column: &str, old: Value) -> DbmsResult<Option<Value>> {
         match column {
@@ -259,7 +261,7 @@ dbms.migrate(MigrationPolicy { allow_destructive: true })?;
 
 ## Tightening Constraints
 
-A *tightening* is any `AlterColumn` change in the restrictive direction:
+A _tightening_ is any `AlterColumn` change in the restrictive direction:
 
 - `nullable: true` → `nullable: false`
 - `unique: false` → `unique: true`
@@ -297,7 +299,7 @@ pub struct User {
     #[primary_key]
     pub id: Uint32,
 
-    #[index]                                  // NEW
+    #[index] // NEW
     #[unique]
     pub email: Text,
 }

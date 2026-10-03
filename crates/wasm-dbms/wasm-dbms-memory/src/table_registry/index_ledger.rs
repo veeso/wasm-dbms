@@ -51,7 +51,8 @@ impl IndexLedger {
     /// Initializes the index ledger from owned column-key vectors.
     ///
     /// Used by the migration engine, which materialises a table from a
-    /// [`TableSchemaSnapshot`] and therefore has no `'static` slice handy.
+    /// [`TableSchemaSnapshot`](wasm_dbms_api::prelude::TableSchemaSnapshot) and
+    /// therefore has no `'static` slice handy.
     pub fn init_from_keys<I>(
         ledger_page: Page,
         index_keys: I,

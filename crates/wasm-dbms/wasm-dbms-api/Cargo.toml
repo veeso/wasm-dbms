@@ -2,21 +2,21 @@
 name = "wasm-dbms-api"
 version = { workspace = true }
 authors = { workspace = true }
-edition = { workspace = true }
-rust-version = { workspace = true }
-license = { workspace = true }
-keywords = ["wasm", "dbms", "database", "types"]
 categories = ["database", "wasm"]
-repository = { workspace = true }
 documentation = "https://docs.rs/wasm-dbms-api/"
-description = "Runtime-agnostic API types and traits for the wasm-dbms DBMS engine."
+edition = { workspace = true }
 include = [
   "src/**/*",
   "../../../LICENSE",
   "README.md",
   "../../../CHANGELOG.md",
 ]
+keywords = ["wasm", "dbms", "database", "types"]
+license = { workspace = true }
 readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Runtime-agnostic API types and traits for the wasm-dbms DBMS engine."
 
 [dependencies]
 bitflags = { workspace = true }

@@ -90,7 +90,7 @@ where
         }
     }
 
-    /// Converts the nullable into an Option<T>.
+    /// Converts the nullable into an `Option<T>`.
     pub fn into_opt(self) -> Option<T> {
         self.into()
     }

@@ -76,13 +76,14 @@ The `FileMemoryProvider` implements the `MemoryProvider` trait using `std::fs` f
 use wasm_dbms_memory::prelude::MemoryProvider;
 
 pub struct FileMemoryProvider {
-    file: File,       // open file handle
-    size: u64,        // current size in bytes
-    pages: u64,       // allocated pages (size / PAGE_SIZE)
+    file: File, // open file handle
+    size: u64,  // current size in bytes
+    pages: u64, // allocated pages (size / PAGE_SIZE)
 }
 ```
 
 Operations:
+
 - **grow(n)** — extends the file by `n × 65536` bytes
 - **read(offset, buf)** — seeks to offset and reads into buffer
 - **write(offset, buf)** — seeks to offset, writes buffer, and flushes

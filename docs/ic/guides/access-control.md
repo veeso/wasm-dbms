@@ -5,13 +5,13 @@
 ic-dbms uses a granular Access Control List (ACL) keyed by `Principal`. Each
 identity carries an `IdentityPerms` record:
 
-| Field        | Type           | Meaning                                                |
-|--------------|----------------|--------------------------------------------------------|
-| `admin`      | `bool`         | Bypass all per-table checks. Does NOT imply other ops. |
-| `manage_acl` | `bool`         | Grant/revoke perms; add/remove identities.             |
-| `migrate`    | `bool`         | Run `migrate` / `pending_migrations` / `has_drift`.    |
-| `all_tables` | `TablePerms`   | Per-op bits applied to every table.                    |
-| `per_table`  | `Vec<(Table, TablePerms)>` | Per-table additive grants.               |
+| Field        | Type                       | Meaning                                                |
+| ------------ | -------------------------- | ------------------------------------------------------ |
+| `admin`      | `bool`                     | Bypass all per-table checks. Does NOT imply other ops. |
+| `manage_acl` | `bool`                     | Grant/revoke perms; add/remove identities.             |
+| `migrate`    | `bool`                     | Run `migrate` / `pending_migrations` / `has_drift`.    |
+| `all_tables` | `TablePerms`               | Per-op bits applied to every table.                    |
+| `per_table`  | `Vec<(Table, TablePerms)>` | Per-table additive grants.                             |
 
 `TablePerms` is a `u8` bitfield over `READ`, `INSERT`, `UPDATE`, `DELETE`.
 
@@ -30,11 +30,11 @@ let args = IcDbmsCanisterInitArgs {
 
 Bootstrap rules:
 
-| `allowed_principals` | Result                                             |
-|----------------------|----------------------------------------------------|
-| `None`               | Deployer principal becomes a full admin.           |
-| `Some(vec![])`       | Same as `None` — deployer becomes a full admin.    |
-| `Some(vec![p, q])`   | Each listed principal becomes a full admin.        |
+| `allowed_principals` | Result                                          |
+| -------------------- | ----------------------------------------------- |
+| `None`               | Deployer principal becomes a full admin.        |
+| `Some(vec![])`       | Same as `None` — deployer becomes a full admin. |
+| `Some(vec![p, q])`   | Each listed principal becomes a full admin.     |
 
 A "full admin" carries `admin = true`, `manage_acl = true`, `migrate = true`,
 and `all_tables = TablePerms::all()`.
@@ -43,43 +43,43 @@ and `all_tables = TablePerms::all()`.
 
 ### Operational flags
 
-| Endpoint            | Required perm  | Effect                          |
-|---------------------|----------------|---------------------------------|
-| `grant_admin`       | `manage_acl`   | Set `admin` on target.          |
-| `revoke_admin`      | `manage_acl`   | Clear `admin` on target.        |
-| `grant_manage_acl`  | `manage_acl`   | Set `manage_acl` on target.     |
-| `revoke_manage_acl` | `manage_acl`   | Clear `manage_acl` on target.   |
-| `grant_migrate`     | `manage_acl`   | Set `migrate` on target.        |
-| `revoke_migrate`    | `manage_acl`   | Clear `migrate` on target.      |
+| Endpoint            | Required perm | Effect                        |
+| ------------------- | ------------- | ----------------------------- |
+| `grant_admin`       | `manage_acl`  | Set `admin` on target.        |
+| `revoke_admin`      | `manage_acl`  | Clear `admin` on target.      |
+| `grant_manage_acl`  | `manage_acl`  | Set `manage_acl` on target.   |
+| `revoke_manage_acl` | `manage_acl`  | Clear `manage_acl` on target. |
+| `grant_migrate`     | `manage_acl`  | Set `migrate` on target.      |
+| `revoke_migrate`    | `manage_acl`  | Clear `migrate` on target.    |
 
 ### Table perms
 
-| Endpoint                  | Required perm  | Effect                                   |
-|---------------------------|----------------|------------------------------------------|
-| `grant_all_tables_perms`  | `manage_acl`   | OR `perms` into `all_tables`.            |
-| `revoke_all_tables_perms` | `manage_acl`   | Mask `perms` out of `all_tables`.        |
-| `grant_table_perms`       | `manage_acl`   | OR `perms` into `per_table[table]`.      |
-| `revoke_table_perms`      | `manage_acl`   | Mask `perms` out of `per_table[table]`.  |
+| Endpoint                  | Required perm | Effect                                  |
+| ------------------------- | ------------- | --------------------------------------- |
+| `grant_all_tables_perms`  | `manage_acl`  | OR `perms` into `all_tables`.           |
+| `revoke_all_tables_perms` | `manage_acl`  | Mask `perms` out of `all_tables`.       |
+| `grant_table_perms`       | `manage_acl`  | OR `perms` into `per_table[table]`.     |
+| `revoke_table_perms`      | `manage_acl`  | Mask `perms` out of `per_table[table]`. |
 
 ### Identity lifecycle
 
-| Endpoint            | Required perm  | Effect                                    |
-|---------------------|----------------|-------------------------------------------|
-| `remove_identity`   | `manage_acl`   | Drop the identity entirely.               |
-| `list_identities`   | `manage_acl`   | List every identity with its perms.       |
-| `my_perms`          | (none)         | Return the caller's own perms.            |
+| Endpoint          | Required perm | Effect                              |
+| ----------------- | ------------- | ----------------------------------- |
+| `remove_identity` | `manage_acl`  | Drop the identity entirely.         |
+| `list_identities` | `manage_acl`  | List every identity with its perms. |
+| `my_perms`        | (none)        | Return the caller's own perms.      |
 
 ### CRUD enforcement
 
 `#[derive(DbmsCanister)]` injects a `granted` check before each generated
 endpoint:
 
-| Endpoint kind                          | Required perm         |
-|----------------------------------------|-----------------------|
-| `select_*` / `aggregate_*` / `select`  | `TablePerms::READ`    |
-| `insert_*`                             | `TablePerms::INSERT`  |
-| `update_*`                             | `TablePerms::UPDATE`  |
-| `delete_*`                             | `TablePerms::DELETE`  |
+| Endpoint kind                         | Required perm        |
+| ------------------------------------- | -------------------- |
+| `select_*` / `aggregate_*` / `select` | `TablePerms::READ`   |
+| `insert_*`                            | `TablePerms::INSERT` |
+| `update_*`                            | `TablePerms::UPDATE` |
+| `delete_*`                            | `TablePerms::DELETE` |
 
 Effective check: `admin || (all_tables | per_table[table]).contains(required)`.
 
@@ -88,11 +88,11 @@ not checked separately in v1.
 
 ### Migration
 
-| Endpoint              | Required perm |
-|-----------------------|---------------|
-| `has_drift`           | `migrate`     |
-| `pending_migrations`  | `migrate`     |
-| `migrate`             | `migrate`     |
+| Endpoint             | Required perm |
+| -------------------- | ------------- |
+| `has_drift`          | `migrate`     |
+| `pending_migrations` | `migrate`     |
+| `migrate`            | `migrate`     |
 
 ### Transactions
 
@@ -129,9 +129,9 @@ DbmsError::AccessDenied {
 `RequiredPerm` enumerates the missing perm class:
 
 - `RequiredPerm::Table(TablePerms)` — a table operation.
-- `RequiredPerm::Admin`             — admin bypass missing.
-- `RequiredPerm::ManageAcl`         — ACL management missing.
-- `RequiredPerm::Migrate`           — migration missing.
+- `RequiredPerm::Admin` — admin bypass missing.
+- `RequiredPerm::ManageAcl` — ACL management missing.
+- `RequiredPerm::Migrate` — migration missing.
 
 ## Recipes
 
@@ -158,4 +158,3 @@ client.grant_migrate(bot).await?;
 ```rust
 client.grant_manage_acl(deputy).await?;
 ```
-

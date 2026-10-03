@@ -162,7 +162,7 @@ pub country: Text,  // e.g., "US", "GB", "DE"
 Create a struct implementing the `Validate` trait:
 
 ```rust
-use wasm_dbms_api::prelude::{Validate, Value, DbmsResult, DbmsError};
+use wasm_dbms_api::prelude::{DbmsError, DbmsResult, Validate, Value};
 
 /// Validates that a number is positive
 pub struct PositiveValidator;
@@ -176,7 +176,9 @@ impl Validate for PositiveValidator {
             Value::Int32(_) | Value::Int64(_) | Value::Decimal(_) => {
                 Err(DbmsError::Validation("Value must be positive".to_string()))
             }
-            _ => Err(DbmsError::Validation("PositiveValidator only applies to numeric types".to_string()))
+            _ => Err(DbmsError::Validation(
+                "PositiveValidator only applies to numeric types".to_string(),
+            )),
         }
     }
 }

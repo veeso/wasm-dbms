@@ -1,20 +1,55 @@
-# Formats the code
-[group('code_check')]
-fmt args="":
-    cargo fmt --all {{ args }}
+alias lint := clippy
 
-# Formats the code using the nightly version of rustfmt
-[group('code_check')]
-fmt_nightly args="":
-    cargo +nightly fmt --all {{ args }}
+# Format Markdown, Rust, TOML, and YAML files.
+[group('code-check')]
+fmt *args="":
+  dprint fmt {{ args }}
 
-# Runs clippy on the code
-[group('code_check')]
+# Check formatting without changing files.
+[group('code-check')]
+fmt_check *args="":
+  dprint check {{ args }}
+
+# Run Clippy for every workspace package.
+[group('code-check')]
 clippy args="":
-    cargo clippy --all-features {{ args }}
+  cargo clippy --workspace --all-features {{ args }}
 
-# Runs fmt and clippy on the code. It fails if any of the checks fail
-[group('code_check')]
-check_code:
-    just fmt_nightly "--check"
-    just clippy "-- -D warnings"
+# Inspect the resolved dependency graph.
+[group('code-check')]
+dependency_tree args="":
+  cargo tree --workspace --all-features {{ args }}
+
+# Build Rust documentation and deny warnings.
+[group('code-check')]
+doc args="":
+  RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps {{ args }}
+
+# Check advisories, licenses, bans, and dependency sources.
+[group('code-check')]
+deny args="":
+  cargo deny check {{ args }}
+
+# Audit GitHub Actions workflows.
+[group('code-check')]
+zizmor args="":
+  zizmor .github/workflows {{ args }}
+
+# Align Markdown tables in place.
+[group('code-check')]
+fmt_md_tables file:
+  fmt-md-tables -i {{ quote(file) }}
+
+# Scan paths for verified or unknown secrets.
+[group('code-check')]
+scan_secrets *args=".":
+  trufflehog filesystem {{ args }} --results=verified,unknown --fail --fail-on-scan-errors --force-skip-binaries --no-update
+
+# Run the complete local quality gate.
+[group('code-check')]
+check:
+  just fmt_check
+  just clippy "-- -D warnings"
+  just doc
+  just deny
+  just test

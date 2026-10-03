@@ -75,7 +75,7 @@ Bridges user-defined types into the `Value` system. The type must also derive `E
 and implement `Display`.
 
 ```rust
-use wasm_dbms_macros::{Encode, CustomDataType};
+use wasm_dbms_macros::{CustomDataType, Encode};
 
 #[derive(Encode, CustomDataType)]
 #[type_tag = "status"]

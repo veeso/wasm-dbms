@@ -190,6 +190,7 @@ Released on 2026-04-28
   > gate per-operation; migration endpoints gate on `migrate`.
   >
   > Breaking changes:
+  >
   > - ACL page layout bumped to v2 (no migration from 0.8.x).
   > - `IcDbmsCanisterInitArgs.allowed_principals` is `Option<Vec<Principal>>`;
   >   `None`/empty bootstraps the deployer as full admin.
@@ -403,6 +404,7 @@ Released on 2026-03-30
   > Key changes:
   >
   > Memory layer (wasm-dbms-memory):
+  >
   > - IndexLedger: per-table registry mapping column sets to B-tree roots
   > - IndexTree: page-per-node B+ tree with variable-size keys, doubly-linked
   >   leaves for range scans, and automatic node splitting/merging
@@ -412,6 +414,7 @@ Released on 2026-03-30
   > - INSERT/UPDATE/DELETE maintain all indexes eagerly
   >
   > DBMS layer (wasm-dbms):
+  >
   > - FilterAnalyzer: extracts index plans (Eq, Range, In) from query filters
   > - IndexReader: unified view merging base B-tree results with transaction
   >   overlay additions/removals
@@ -421,6 +424,7 @@ Released on 2026-03-30
   >   plan is found; remaining filter conditions applied as residual checks
   >
   > Macro layer (wasm-dbms-macros):
+  >
   > - `#[index]` attribute on fields for single-column indexes
   > - `#[index(group = "name")]` for composite indexes
   > - Automatic primary key index generation in TableSchema
@@ -454,6 +458,7 @@ Released on 2026-03-30
   > Implementation across all layers:
   >
   > **Memory layer (wasm-dbms-memory):**
+  >
   > - AutoincrementLedger: per-table ledger storing current counter values
   >   for each autoincrement column, persisted to a dedicated memory page
   > - AutoincrementRegistry: HashMap-based registry mapping column names to
@@ -464,16 +469,19 @@ Released on 2026-03-30
   >   exposes autoincrement_next() to get the next value for a column
   >
   > **API layer (wasm-dbms-api):**
+  >
   > - ColumnDef: add auto_increment field to column definitions
   > - MemoryError::AutoincrementOverflow: new error variant returned when
   >   a column reaches its type's maximum value (uses checked_add)
   > - Filter: support autoincrement columns in query filters
   >
   > **Macro layer (wasm-dbms-macros):**
+  >
   > - Table derive macro: parse #[autoincrement] attribute on fields,
   >   propagate auto_increment flag to generated TableSchema impl
   >
   > **DBMS layer (wasm-dbms):**
+  >
   > - Database: wire autoincrement through insert operations
   > - Transaction overlay: support autoincrement in transactional context
   >
@@ -523,6 +531,7 @@ Released on 2026-03-30
   > in table field definitions via the derive macro.
 - autoincrement macro codegen and DBMS integration
   > Fix InsertRequest codegen for autoincrement fields:
+  >
   > - from_values: wraps found values in Autoincrement::Value, absent ones
   >   in Autoincrement::Auto
   > - into_values: skips Autoincrement::Auto fields, includes Value fields
@@ -555,8 +564,8 @@ Released on 2026-03-02
 
 - migrate Principal from built-in to CustomDataType
   > Value::Principal and DataTypeKind::Principal removed.
-  Principal fields in tables must now use #[custom_type] annotation.
-  Existing stable memory schemas are incompatible (fingerprint change).
+  > Principal fields in tables must now use #[custom_type] annotation.
+  > Existing stable memory schemas are incompatible (fingerprint change).
 - restructure workspace into wasm-dbms and ic-dbms layers
   > restructure workspace into wasm-dbms and ic-dbms layers
 
@@ -586,10 +595,15 @@ Released on 2026-03-02
 - add WIT interface definition for wasm-dbms Component Model API
 - add WIT guest crate with FileMemoryProvider and example schemas
   > Create the wasm-dbms-example-guest crate scaffolding with:
+  >
   > - FileMemoryProvider: file-backed MemoryProvider implementation with
-      >   persistence across process restarts and full test coverage
+  >
+  >> persistence across process restarts and full test coverage
+  >
   > - Example table schemas (User, Post) with ExampleDatabaseSchema
-      >   implementing the generic DatabaseSchema<M> trait
+  >
+  >> implementing the generic DatabaseSchema<M> trait
+  >
   > - register_tables helper for DBMS context initialization
   >
   > Fix wasm-dbms-macros to use DbmsError/DbmsResult instead of
@@ -624,6 +638,7 @@ Released on 2026-03-02
   > trap-reverts-stable-memory semantics.
   >
   > Key changes:
+  >
   > - Add JournalEntry, begin/commit/rollback_journal to MemoryManager
   > - Refactor atomic() to use journal with nested-call awareness
   > - Refactor commit() to use a single journal spanning all operations
@@ -636,11 +651,15 @@ Released on 2026-03-02
 
 - 💥 restructure workspace into wasm-dbms and ic-dbms layers
   > Split the monolithic ic-dbms crates into a two-layer architecture:
+  >
   > - wasm-dbms (generic layer): runtime-agnostic DBMS engine (wasm-dbms-api,
-      >   wasm-dbms-memory, wasm-dbms, wasm-dbms-macros)
+  >
+  >> wasm-dbms-memory, wasm-dbms, wasm-dbms-macros)
+  >
   > - ic-dbms (IC layer): thin adapter for Internet Computer canister
-      >   integration (ic-dbms-api, ic-dbms-canister, ic-dbms-macros,
-      >   ic-dbms-client, example, integration-tests)
+  >
+  >> integration (ic-dbms-api, ic-dbms-canister, ic-dbms-macros,
+  >> ic-dbms-client, example, integration-tests)
   >
   > Also fixes integration test wasm paths to account for the new directory
   > depth and updates CI, docs, and build scripts accordingly.
@@ -695,16 +714,25 @@ Released on 2026-03-02
   > like CustomDataType::TYPE_TAG and Encode::decode in all codegen paths.
 - address code review findings
   > - Replace String::leak() with OnceLock-based static cache in
-      >   Value::type_name() for Custom variants to prevent unbounded leaks
+  >
+  >> Value::type_name() for Custom variants to prevent unbounded leaks
+  >
   > - Add compile-time error when #[custom_type] and #[foreign_key] are
-      >   combined on the same field
+  >
+  >> combined on the same field
 - harden custom data types and add CustomValue constructor
   > - Add cache size guard (max 64 entries) to Value::type_name() to
-      >   prevent unbounded memory leaks on IC
+  >
+  >> prevent unbounded memory leaks on IC
+  >
   > - Replace panicking .expect() with non-panicking if-let-Ok decode
-      >   in macro codegen for custom types (record, insert, update)
+  >
+  >> in macro codegen for custom types (record, insert, update)
+  >
   > - Add CustomValue::new<T>() constructor enforcing consistency between
-      >   type_tag, encoded bytes, and display string
+  >
+  >> type_tag, encoded bytes, and display string
+  >
   > - Add Project table with #[custom_type] owner field to example canister
   > - Add PocketIC integration tests for custom type CRUD and filtering
 - exclude guest crate from native tests and fix clippy warning
@@ -713,10 +741,14 @@ Released on 2026-03-02
   > redundant_closure clippy warning in the host binary.
 - update MSRV to 1.91.1, fix ACL persist-before-panic, fix clippy warnings
   > - Set rust-version to 1.91.1 (actual MSRV per cargo msrv) across
-      >   workspace Cargo.toml, CLAUDE.md, and all docs
+  >
+  >> workspace Cargo.toml, CLAUDE.md, and all docs
+  >
   > - Replace is_multiple_of (Rust 1.87+) with modulo check for MSRV compat
   > - Fix ACL remove_identity to check emptiness before persisting, preventing
-      >   corrupted state on non-IC runtimes
+  >
+  >> corrupted state on non-IC runtimes
+  >
   > - Add #[allow(clippy::approx_constant)] to JSON test module
   > - Remove unused _name binding in DatabaseSchema metadata parsing
 - remove redundant drop and unnecessary pub visibility in journal refactor
@@ -748,8 +780,8 @@ Released on 2026-02-27
 
 - 💥 Remove generic T from Query, since it's unnecessary
   > The `T: TableSchema` argument from `Query` and `QueryBuilder` was actually unnecessary, because it didn't provide
-  any meaningful information. The T argument has just been moved to the dbms `select` method, in order to bring
-  information to the selected entity.
+  > any meaningful information. The T argument has just been moved to the dbms `select` method, in order to bring
+  > information to the selected entity.
 - add generic select endpoint for untyped table queries (#10)
   > Add a `select_raw` method to the Database trait and a `select` canister
   > endpoint that returns `Vec<Vec<(CandidColumnDef, Value)>>`, enabling

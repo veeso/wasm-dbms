@@ -5,6 +5,16 @@ clean:
   rm -rf {{WASM_DIR}}
   cargo clean
 
+# Build every host-compatible workspace target in debug mode.
+[group('build')]
+build args="":
+  cargo build --workspace --all-targets --exclude wasm-dbms-example-guest {{ args }}
+
+# Build every host-compatible workspace target in release mode.
+[group('build')]
+release args="":
+  cargo build --workspace --all-targets --release --exclude wasm-dbms-example-guest {{ args }}
+
 [group('build')]
 build_all: build_wasm_dbms build_wasi_dbms build_library_wasm32 build_all_canisters build_wasm_dbms_example
 

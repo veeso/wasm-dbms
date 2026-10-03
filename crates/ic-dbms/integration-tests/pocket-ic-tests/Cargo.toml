@@ -2,11 +2,11 @@
 name = "pocket-ic-tests"
 version = { workspace = true }
 edition = { workspace = true }
-rust-version = { workspace = true }
 license = { workspace = true }
-repository = { workspace = true }
-description = "integration tests for ic-dbms-canister"
 publish = false
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "integration tests for ic-dbms-canister"
 
 [dependencies]
 anyhow = { workspace = true }

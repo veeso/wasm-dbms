@@ -32,7 +32,10 @@ use ic_dbms_api::prelude::IcDbmsError;
 // IcDbmsError is the same as wasm_dbms_api::DbmsError
 // It provides the full error hierarchy:
 pub enum IcDbmsError {
-    AccessDenied { table: Option<TableFingerprint>, required: RequiredPerm },
+    AccessDenied {
+        table: Option<TableFingerprint>,
+        required: RequiredPerm,
+    },
     Memory(MemoryError),
     Migration(MigrationError),
     Query(QueryError),
@@ -52,12 +55,12 @@ You can use `IcDbmsError` or `DbmsError` interchangeably. The `IcDbmsError` alia
 Granular ACL checks return `DbmsError::AccessDenied { table, required }` when
 the caller is missing a perm. `required` is a `RequiredPerm` enum:
 
-| Variant                       | Meaning                              |
-|-------------------------------|--------------------------------------|
-| `Table(TablePerms)`           | Per-table CRUD perm missing.         |
-| `Admin`                       | `admin` bypass missing.              |
-| `ManageAcl`                   | ACL-management perm missing.         |
-| `Migrate`                     | Migration perm missing.              |
+| Variant             | Meaning                      |
+| ------------------- | ---------------------------- |
+| `Table(TablePerms)` | Per-table CRUD perm missing. |
+| `Admin`             | `admin` bypass missing.      |
+| `ManageAcl`         | ACL-management perm missing. |
+| `Migrate`           | Migration perm missing.      |
 
 `table` is `Some(TableFingerprint)` for table-scoped operations and `None`
 for `manage_acl` / `migrate` failures.
@@ -229,7 +232,10 @@ async fn insert_with_retry<T: Table>(
                     println!("Attempt {} failed, retrying...", attempt + 1);
                     continue;
                 }
-                return Err(format!("Call failed after {} attempts: {:?}", max_retries, call_err));
+                return Err(format!(
+                    "Call failed after {} attempts: {:?}",
+                    max_retries, call_err
+                ));
             }
         }
     }

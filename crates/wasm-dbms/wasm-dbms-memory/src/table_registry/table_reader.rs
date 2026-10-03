@@ -41,7 +41,7 @@ where
 /// A reader for the table registry that allows reading records from memory.
 ///
 /// The table reader provides methods to read records from the table registry one by one,
-/// using the underlying [`PageLedger`] to locate the records in memory.
+/// using the underlying `PageLedger` to locate the records in memory.
 pub struct TableReader<'a, E, MA>
 where
     E: Encode,

@@ -150,11 +150,38 @@ All clients implement the `Client` trait, providing a consistent API:
 ```rust
 pub trait Client {
     // CRUD Operations
-    async fn insert<T: Table>(&self, table: &str, record: T::InsertRequest, tx: Option<u64>) -> Result<Result<(), IcDbmsError>>;
-    async fn select<T: Table>(&self, table: &str, query: Query<T>, tx: Option<u64>) -> Result<Result<Vec<T::Record>, IcDbmsError>>;
-    async fn aggregate<T: Table>(&self, table: &str, query: Query, aggregates: Vec<AggregateFunction>, tx: Option<u64>) -> Result<Result<Vec<AggregatedRow>, IcDbmsError>>;
-    async fn update<T: Table>(&self, table: &str, update: T::UpdateRequest, tx: Option<u64>) -> Result<Result<u64, IcDbmsError>>;
-    async fn delete<T: Table>(&self, table: &str, behavior: DeleteBehavior, filter: Option<Filter>, tx: Option<u64>) -> Result<Result<u64, IcDbmsError>>;
+    async fn insert<T: Table>(
+        &self,
+        table: &str,
+        record: T::InsertRequest,
+        tx: Option<u64>,
+    ) -> Result<Result<(), IcDbmsError>>;
+    async fn select<T: Table>(
+        &self,
+        table: &str,
+        query: Query<T>,
+        tx: Option<u64>,
+    ) -> Result<Result<Vec<T::Record>, IcDbmsError>>;
+    async fn aggregate<T: Table>(
+        &self,
+        table: &str,
+        query: Query,
+        aggregates: Vec<AggregateFunction>,
+        tx: Option<u64>,
+    ) -> Result<Result<Vec<AggregatedRow>, IcDbmsError>>;
+    async fn update<T: Table>(
+        &self,
+        table: &str,
+        update: T::UpdateRequest,
+        tx: Option<u64>,
+    ) -> Result<Result<u64, IcDbmsError>>;
+    async fn delete<T: Table>(
+        &self,
+        table: &str,
+        behavior: DeleteBehavior,
+        filter: Option<Filter>,
+        tx: Option<u64>,
+    ) -> Result<Result<u64, IcDbmsError>>;
 
     // Transactions
     async fn begin_transaction(&self) -> Result<u64>;
@@ -419,17 +446,15 @@ client.insert::<User>(User::table_name(), user, None).await??;
 A backend canister calling the database canister:
 
 ```rust
-use ic_cdk::update;
-use ic_dbms_client::{IcDbmsCanisterClient, Client as _};
 use candid::Principal;
+use ic_cdk::update;
+use ic_dbms_client::{Client as _, IcDbmsCanisterClient};
 
 const DBMS_CANISTER: &str = "rrkah-fqaaa-aaaaa-aaaaq-cai";
 
 #[update]
 async fn create_user(name: String, email: String) -> Result<u32, String> {
-    let client = IcDbmsCanisterClient::new(
-        Principal::from_text(DBMS_CANISTER).unwrap()
-    );
+    let client = IcDbmsCanisterClient::new(Principal::from_text(DBMS_CANISTER).unwrap());
 
     let user_id = generate_id();
     let user = UserInsertRequest {
@@ -449,9 +474,7 @@ async fn create_user(name: String, email: String) -> Result<u32, String> {
 
 #[update]
 async fn get_users() -> Result<Vec<UserRecord>, String> {
-    let client = IcDbmsCanisterClient::new(
-        Principal::from_text(DBMS_CANISTER).unwrap()
-    );
+    let client = IcDbmsCanisterClient::new(Principal::from_text(DBMS_CANISTER).unwrap());
 
     let query = Query::builder().all().build();
 
@@ -468,9 +491,10 @@ async fn get_users() -> Result<Vec<UserRecord>, String> {
 A CLI tool or backend service:
 
 ```rust
-use ic_agent::{Agent, identity::BasicIdentity};
-use ic_dbms_client::{IcDbmsAgentClient, Client as _};
 use candid::Principal;
+use ic_agent::Agent;
+use ic_agent::identity::BasicIdentity;
+use ic_dbms_client::{Client as _, IcDbmsAgentClient};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -491,7 +515,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // List all users
     let query = Query::builder().all().build();
-    let users = client.select::<User>(User::table_name(), query, None).await??;
+    let users = client
+        .select::<User>(User::table_name(), query, None)
+        .await??;
 
     for user in users {
         println!("User: {} ({})", user.name, user.email);
@@ -506,9 +532,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Testing with PocketIC:
 
 ```rust
-use ic_dbms_client::{IcDbmsPocketIcClient, Client as _};
+use candid::{Principal, encode_one};
+use ic_dbms_client::{Client as _, IcDbmsPocketIcClient};
 use pocket_ic::PocketIc;
-use candid::{encode_one, Principal};
 
 #[tokio::test]
 async fn test_user_crud() {
@@ -524,12 +550,7 @@ async fn test_user_crud() {
         allowed_principals: vec![admin_principal],
     });
 
-    pic.install_canister(
-        canister_id,
-        wasm,
-        encode_one(init_args).unwrap(),
-        None
-    );
+    pic.install_canister(canister_id, wasm, encode_one(init_args).unwrap(), None);
 
     // Create client
     let client = IcDbmsPocketIcClient::new(canister_id, admin_principal, &pic);
@@ -540,11 +561,19 @@ async fn test_user_crud() {
         name: "Test User".into(),
         email: "test@example.com".into(),
     };
-    client.insert::<User>(User::table_name(), user, None).await.unwrap().unwrap();
+    client
+        .insert::<User>(User::table_name(), user, None)
+        .await
+        .unwrap()
+        .unwrap();
 
     // Test select
     let query = Query::builder().all().build();
-    let users = client.select::<User>(User::table_name(), query, None).await.unwrap().unwrap();
+    let users = client
+        .select::<User>(User::table_name(), query, None)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(users.len(), 1);
     assert_eq!(users[0].name.as_str(), "Test User");
 
@@ -553,20 +582,32 @@ async fn test_user_crud() {
         .set_name("Updated User".into())
         .filter(Filter::eq("id", Value::Uint32(1.into())))
         .build();
-    let affected = client.update::<User>(User::table_name(), update, None).await.unwrap().unwrap();
+    let affected = client
+        .update::<User>(User::table_name(), update, None)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(affected, 1);
 
     // Test delete
-    let deleted = client.delete::<User>(
-        User::table_name(),
-        DeleteBehavior::Restrict,
-        Some(Filter::eq("id", Value::Uint32(1.into()))),
-        None
-    ).await.unwrap().unwrap();
+    let deleted = client
+        .delete::<User>(
+            User::table_name(),
+            DeleteBehavior::Restrict,
+            Some(Filter::eq("id", Value::Uint32(1.into()))),
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(deleted, 1);
 
     // Verify deletion
-    let users = client.select::<User>(User::table_name(), Query::builder().all().build(), None).await.unwrap().unwrap();
+    let users = client
+        .select::<User>(User::table_name(), Query::builder().all().build(), None)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(users.len(), 0);
 }
 ```

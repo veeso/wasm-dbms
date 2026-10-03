@@ -1,17 +1,17 @@
 [package]
 name = "wasm-dbms"
 version = { workspace = true }
-edition = { workspace = true }
 authors = { workspace = true }
-description = "Runtime-agnostic DBMS engine for WASM environments"
-license = { workspace = true }
-repository = { workspace = true }
-readme = "README.md"
-rust-version = { workspace = true }
-documentation = "https://docs.rs/wasm-dbms"
 categories = ["database", "wasm"]
-keywords = ["database", "wasm", "dbms"]
+documentation = "https://docs.rs/wasm-dbms"
+edition = { workspace = true }
 include = ["src/**/*", "../../../LICENSE", "README.md", "../../../CHANGELOG.md"]
+keywords = ["database", "wasm", "dbms"]
+license = { workspace = true }
+readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Runtime-agnostic DBMS engine for WASM environments"
 
 [dependencies]
 rust_decimal = { workspace = true }

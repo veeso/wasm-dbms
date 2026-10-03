@@ -26,7 +26,7 @@ This repository contains three crate families:
 ### Crate Architecture
 
 | Crate              | Description                                                 |
-|--------------------|-------------------------------------------------------------|
+| ------------------ | ----------------------------------------------------------- |
 | `wasm-dbms-api`    | Shared types, traits, validators, sanitizers                |
 | `wasm-dbms-memory` | Memory abstraction and page management                      |
 | `wasm-dbms`        | Core DBMS engine with transactions, joins, integrity checks |

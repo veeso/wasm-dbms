@@ -146,17 +146,33 @@ pub enum MigrationError {
         old: DataTypeSnapshot,
         new: DataTypeSnapshot,
     },
-    DefaultMissing { table: String, column: String },
-    ConstraintViolation { table: String, column: String, reason: String },
-    DestructiveOpDenied { op: String },
-    TransformAborted { table: String, column: String, reason: String },
+    DefaultMissing {
+        table: String,
+        column: String,
+    },
+    ConstraintViolation {
+        table: String,
+        column: String,
+        reason: String,
+    },
+    DestructiveOpDenied {
+        op: String,
+    },
+    TransformAborted {
+        table: String,
+        column: String,
+        reason: String,
+    },
     WideningIncompatible {
         table: String,
         column: String,
         old_type: DataTypeSnapshot,
         new_type: DataTypeSnapshot,
     },
-    TransformReturnedNone { table: String, column: String },
+    TransformReturnedNone {
+        table: String,
+        column: String,
+    },
     ForeignKeyViolation {
         table: String,
         column: String,
@@ -603,7 +619,7 @@ Sanitization errors are less common than validation errors since sanitizers typi
 ```rust
 pub enum MemoryError {
     OutOfBounds,           // Read/write outside allocated memory
-    ProviderError(String),      // Memory provider error
+    ProviderError(String), // Memory provider error
     InsufficientSpace,     // Not enough space to allocate
 }
 ```
@@ -648,18 +664,20 @@ match result {
 ```rust
 fn handle_db_error(error: DbmsError) -> String {
     match error {
-        DbmsError::Query(QueryError::PrimaryKeyConflict) =>
-            "Record with this ID already exists".to_string(),
-        DbmsError::Query(QueryError::UniqueConstraintViolation { field }) =>
-            format!("Duplicate value on unique field: {}", field),
-        DbmsError::Query(QueryError::BrokenForeignKeyReference) =>
-            "Referenced record not found".to_string(),
-        DbmsError::Query(QueryError::ForeignKeyConstraintViolation) =>
-            "Cannot delete: record has dependencies".to_string(),
-        DbmsError::Validation(msg) =>
-            format!("Invalid data: {}", msg),
-        _ =>
-            format!("Unexpected error: {:?}", error),
+        DbmsError::Query(QueryError::PrimaryKeyConflict) => {
+            "Record with this ID already exists".to_string()
+        }
+        DbmsError::Query(QueryError::UniqueConstraintViolation { field }) => {
+            format!("Duplicate value on unique field: {}", field)
+        }
+        DbmsError::Query(QueryError::BrokenForeignKeyReference) => {
+            "Referenced record not found".to_string()
+        }
+        DbmsError::Query(QueryError::ForeignKeyConstraintViolation) => {
+            "Cannot delete: record has dependencies".to_string()
+        }
+        DbmsError::Validation(msg) => format!("Invalid data: {}", msg),
+        _ => format!("Unexpected error: {:?}", error),
     }
 }
 ```

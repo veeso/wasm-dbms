@@ -2,21 +2,21 @@
 name = "wasm-dbms-macros"
 version = { workspace = true }
 authors = { workspace = true }
-edition = { workspace = true }
-rust-version = { workspace = true }
-license = { workspace = true }
-keywords = ["wasm", "dbms", "database", "macros"]
 categories = ["database", "wasm"]
-repository = { workspace = true }
 documentation = "https://docs.rs/wasm-dbms-macros/"
-description = "Runtime-agnostic procedural macros for the wasm-dbms DBMS engine."
+edition = { workspace = true }
 include = [
   "src/**/*",
   "../../../LICENSE",
   "README.md",
   "../../../CHANGELOG.md",
 ]
+keywords = ["wasm", "dbms", "database", "macros"]
+license = { workspace = true }
 readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Runtime-agnostic procedural macros for the wasm-dbms DBMS engine."
 
 [lib]
 name = "wasm_dbms_macros"

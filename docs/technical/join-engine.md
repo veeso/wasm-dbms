@@ -47,35 +47,35 @@ The `DatabaseSchema` trait provides the `select` method that the engine uses to 
 The `join()` method processes a query through these steps:
 
 ```
-                    ┌──────────────────────────┐
-                    │ 1. Read FROM table rows  │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────▼─────────────┐
-                    │ 2. For each JOIN clause:  │◄──── left-to-right
-                    │    Read right table rows  │
-                    │    Nested-loop join       │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────▼─────────────┐
-                    │ 3. Apply filter           │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────▼─────────────┐
-                    │ 4. Apply ordering         │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────▼─────────────┐
-                    │ 5. Apply offset           │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────▼─────────────┐
-                    │ 6. Apply limit            │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────▼─────────────┐
-                    │ 7. Flatten to output      │
-                    └──────────────────────────┘
+┌──────────────────────────┐
+│ 1. Read FROM table rows  │
+└────────────┬─────────────┘
+             │
+┌────────────▼─────────────┐
+│ 2. For each JOIN clause:  │◄──── left-to-right
+│    Read right table rows  │
+│    Nested-loop join       │
+└────────────┬─────────────┘
+             │
+┌────────────▼─────────────┐
+│ 3. Apply filter           │
+└────────────┬─────────────┘
+             │
+┌────────────▼─────────────┐
+│ 4. Apply ordering         │
+└────────────┬─────────────┘
+             │
+┌────────────▼─────────────┐
+│ 5. Apply offset           │
+└────────────┬─────────────┘
+             │
+┌────────────▼─────────────┐
+│ 6. Apply limit            │
+└────────────┬─────────────┘
+             │
+┌────────────▼─────────────┐
+│ 7. Flatten to output      │
+└──────────────────────────┘
 ```
 
 1. **Read FROM table**: All rows from the primary table are loaded using an unfiltered `Query::builder().all().build()`.
@@ -156,7 +156,7 @@ Join results use `JoinColumnDef` instead of `ColumnDef`:
 
 ```rust
 pub struct JoinColumnDef {
-    pub table: Option<String>,  // Source table name
+    pub table: Option<String>, // Source table name
     pub name: String,
     pub data_type: DataTypeKind,
     pub nullable: bool,
@@ -167,6 +167,7 @@ pub struct JoinColumnDef {
 The `table` field is `Some(table_name)` for join results, allowing consumers to distinguish columns that share the same name across different tables.
 
 At the API layer, the generated `select` endpoint checks `query.has_joins()`:
+
 - **With joins**: Routes to `select_join`, which uses `JoinEngine`.
 - **Without joins**: Routes to `select_raw`, the standard single-table path.
 
@@ -176,7 +177,7 @@ Both paths return `Vec<Vec<(JoinColumnDef, Value)>>`, but for non-join queries t
 
 ## Limitations
 
-- **O(n*m) nested-loop join**: Each join performs a full nested-loop comparison. For two tables of size *n* and *m*, this is O(n*m) per join clause.
+- **O(n*m) nested-loop join**: Each join performs a full nested-loop comparison. For two tables of size _n_ and _m_, this is O(n*m) per join clause.
 - **Full table scans for join matching**: The join ON condition itself does not use indexes — both sides are compared via linear scan. However, if the query has a filter, the individual table reads that feed the join may use indexes (via the standard select path).
 - **All rows loaded into memory**: Every table involved in the join is fully materialized in memory before processing. This can be a concern for very large tables on the IC.
 - **Equality joins only**: The ON condition only supports column equality (`left_col = right_col`). Range conditions, expressions, and multi-column ON clauses are not supported.

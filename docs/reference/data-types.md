@@ -330,7 +330,7 @@ let dt: DateTime = chrono_dt.into();
 pub struct Event {
     #[primary_key]
     pub id: Uint32,
-    #[sanitizer(UtcSanitizer)]  // Convert to UTC
+    #[sanitizer(UtcSanitizer)] // Convert to UTC
     pub scheduled_at: DateTime,
 }
 ```
@@ -500,7 +500,7 @@ pub struct Employee {
     pub id: Uint32,
     pub name: Text,
     #[foreign_key(entity = "Employee", table = "employees", column = "id")]
-    pub manager_id: Nullable<Uint32>,  // Top-level employees have no manager
+    pub manager_id: Nullable<Uint32>, // Top-level employees have no manager
 }
 ```
 
@@ -519,7 +519,7 @@ pub struct Task {
     #[primary_key]
     pub id: Uint32,
     #[custom_type]
-    pub priority: Priority,  // User-defined custom type
+    pub priority: Priority, // User-defined custom type
 }
 ```
 

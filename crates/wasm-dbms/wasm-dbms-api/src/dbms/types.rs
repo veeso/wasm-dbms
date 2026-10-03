@@ -60,7 +60,7 @@ pub trait DataType:
 /// # Ordering contract
 ///
 /// For custom types used with range filters (`Gt`, `Lt`, `Ge`, `Le`) or `ORDER BY`,
-/// the [`Encode`](crate::memory::Encode) output must be order-preserving: if `a < b`,
+/// the [`Encode`] output must be order-preserving: if `a < b`,
 /// then `a.encode() < b.encode()` lexicographically.
 /// Equality filters (`Eq`, `Ne`, `In`) only require canonical encoding.
 pub trait CustomDataType: DataType {

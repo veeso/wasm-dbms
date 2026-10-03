@@ -139,19 +139,28 @@ The outer `Result` wraps transport / canister-call failures; the inner
 ### Inter-Canister
 
 ```rust
-use ic_dbms_api::prelude::{MigrationPolicy};
-use ic_dbms_client::{Client as _, IcDbmsCanisterClient};
 use candid::Principal;
+use ic_dbms_api::prelude::MigrationPolicy;
+use ic_dbms_client::{Client as _, IcDbmsCanisterClient};
 
 #[ic_cdk::update]
 async fn heal_schema(canister: Principal) -> Result<u64, String> {
     let client = IcDbmsCanisterClient::new(canister);
 
-    if !client.has_drift().await.map_err(|e| e.to_string())??.then_some(()).is_some() {
+    if !client
+        .has_drift()
+        .await
+        .map_err(|e| e.to_string())??
+        .then_some(())
+        .is_some()
+    {
         return Ok(0);
     }
 
-    let ops = client.pending_migrations().await.map_err(|e| e.to_string())??;
+    let ops = client
+        .pending_migrations()
+        .await
+        .map_err(|e| e.to_string())??;
     client
         .migrate(MigrationPolicy::default())
         .await
@@ -164,10 +173,10 @@ async fn heal_schema(canister: Principal) -> Result<u64, String> {
 ### External Agent
 
 ```rust
+use candid::Principal;
 use ic_agent::Agent;
 use ic_dbms_api::prelude::MigrationPolicy;
 use ic_dbms_client::{Client as _, IcDbmsAgentClient};
-use candid::Principal;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -185,7 +194,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("  {op:?}");
         }
         client
-            .migrate(MigrationPolicy { allow_destructive: false })
+            .migrate(MigrationPolicy {
+                allow_destructive: false,
+            })
             .await??;
     }
 
@@ -229,8 +240,8 @@ you can wire `migrate` directly into a `#[ic_cdk::post_upgrade]` hook so the
 schema heals before the first CRUD call lands.
 
 ```rust
-use ic_dbms_api::prelude::{MigrationPolicy};
-use ic_dbms_canister::prelude::{DatabaseSchema as _, DBMS_CONTEXT, WasmDbmsDatabase};
+use ic_dbms_api::prelude::MigrationPolicy;
+use ic_dbms_canister::prelude::{DBMS_CONTEXT, DatabaseSchema as _, WasmDbmsDatabase};
 
 #[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]

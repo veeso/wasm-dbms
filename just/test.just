@@ -17,6 +17,30 @@ integration_test test_name="":
   echo "Running integration tests..."
   cargo test {{test_name}} -p pocket-ic-tests
 
+# Generate an LCOV coverage report with the CI exclusions.
+[group('test')]
+coverage output="lcov.info" args="":
+  cargo llvm-cov \
+    --no-fail-fast \
+    --workspace \
+    --lib \
+    --lcov \
+    --output-path {{ output }} \
+    --ignore-filename-regex '.*(client|macros|example|pocket-ic-tests).*' \
+    --exclude "ic-dbms-client" \
+    --exclude "ic-dbms-macros" \
+    --exclude "pocket-ic-tests" \
+    --exclude "dbms-canister-client-integration" \
+    --exclude "pocket-ic-tests-macro" \
+    --exclude "example" \
+    --exclude-from-report "ic-dbms-client" \
+    --exclude-from-report "ic-dbms-macros" \
+    --exclude-from-report "pocket-ic-tests" \
+    --exclude-from-report "pocket-ic-tests-macro" \
+    --exclude-from-report "dbms-canister-client-integration" \
+    --exclude-from-report "example" \
+    {{ args }}
+
 # Run the WIT Component Model example (end-to-end test)
 [group('test')]
 test_wasm_dbms_example: build_wasm_dbms_example

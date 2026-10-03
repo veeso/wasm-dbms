@@ -1,17 +1,17 @@
 [package]
 name = "wasi-dbms-memory"
 version = { workspace = true }
-edition = { workspace = true }
 authors = { workspace = true }
-description = "Memory provider and page management for wasm-dbms using WASI"
-license = { workspace = true }
-repository = { workspace = true }
-readme = "README.md"
-rust-version = { workspace = true }
-documentation = "https://docs.rs/wasi-dbms-memory"
 categories = ["database", "wasm"]
-keywords = ["database", "wasm", "memory", "wasi"]
+documentation = "https://docs.rs/wasi-dbms-memory"
+edition = { workspace = true }
 include = ["src/**/*", "../../../LICENSE", "README.md", "../../../CHANGELOG.md"]
+keywords = ["database", "wasm", "memory", "wasi"]
+license = { workspace = true }
+readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Memory provider and page management for wasm-dbms using WASI"
 
 [dependencies]
 wasm-dbms-api = { workspace = true }

@@ -1,7 +1,8 @@
 # Contributing to wasm-dbms
 
 Thank you for your interest in contributing to **wasm-dbms**! This document describes how to set up a local development
-environment, the workflow used for changes, and the conventions every contribution must follow.
+environment, the workflow used for changes, and the conventions every contribution must follow. AI-assisted
+contributions must also follow the [AI policy](./AI_POLICY.md).
 
 By participating in this project you agree to abide by the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
@@ -48,29 +49,34 @@ If you are unsure whether a change is welcome, open a GitHub issue and ask befor
 The workspace is split into two crate families. Detailed architecture lives in
 [`docs/technical/architecture.md`](./docs/technical/architecture.md); the short version:
 
-| Path                    | Purpose                                                                |
-|-------------------------|------------------------------------------------------------------------|
-| `crates/wasm-dbms/`     | Runtime-agnostic DBMS engine and procedural macros (no IC dependency). |
-| `crates/wasi-dbms/`     | Memory providers and examples for WASI runtimes (Wasmtime, etc.).      |
-| `crates/ic-dbms/`       | Internet Computer adapter, client libraries, and integration tests.    |
-| `wit/`                  | WIT interface definitions for the WASI Component Model bindings.       |
-| `docs/`                 | mdBook-style documentation.                                            |
-| `just/`                 | Modular `Justfile` recipes (`build`, `test`, `code_check`, `bench`).   |
+| Path                | Purpose                                                                |
+| ------------------- | ---------------------------------------------------------------------- |
+| `crates/wasm-dbms/` | Runtime-agnostic DBMS engine and procedural macros (no IC dependency). |
+| `crates/wasi-dbms/` | Memory providers and examples for WASI runtimes (Wasmtime, etc.).      |
+| `crates/ic-dbms/`   | Internet Computer adapter, client libraries, and integration tests.    |
+| `wit/`              | WIT interface definitions for the WASI Component Model bindings.       |
+| `docs/`             | mdBook-style documentation.                                            |
+| `just/`             | Modular `Justfile` recipes for build, test, quality, and release work. |
 
 ## Development Environment
 
 ### Required Tooling
 
-- **Rust toolchain** pinned by [`rust-toolchain.toml`](./rust-toolchain.toml) (currently `1.95.0`) with the
+- **Rust toolchain** pinned by [`rust-toolchain.toml`](./rust-toolchain.toml) (currently `1.99.0`) with the
   `wasm32-unknown-unknown` and `wasm32-wasip2` targets. `rustup` will install both automatically the first time
   you run a `cargo` command in the repository.
-- **Nightly Rust** with `rustfmt` (used for formatting only):
+- **Nightly Rust** with `rustfmt` (used by dprint for Rust formatting only):
 
   ```sh
   rustup toolchain install nightly --component rustfmt
   ```
 
 - [`just`](https://github.com/casey/just) — task runner used by every workflow in CI.
+- [`dprint`](https://dprint.dev/) — formatter for Rust, Markdown, TOML, and YAML.
+- [`cargo-deny`](https://embarkstudios.github.io/cargo-deny/) — dependency policy checks.
+- [`git-cliff`](https://git-cliff.org/) — generated changelog tooling.
+- [`zizmor`](https://woodruffw.github.io/zizmor/) — GitHub Actions security checks.
+- [`TruffleHog`](https://github.com/trufflesecurity/trufflehog) — secret scanning.
 
 ### Optional Tooling (IC work only)
 
@@ -96,7 +102,10 @@ git clone https://github.com/veeso/wasm-dbms.git
 cd wasm-dbms
 
 # Verify the toolchain installs correctly and the workspace builds
-cargo build --workspace
+cargo check --workspace
+
+# Run the repository's normal quality gate
+just check
 ```
 
 ## Working on `wasm-dbms` Only (no IC toolchain)
@@ -107,7 +116,7 @@ If your change is confined to the generic engine, macros, or WASI bits, run the 
 just test_wasm_dbms              # fast unit tests for wasm-dbms-{api,memory} and wasm-dbms
 just build_wasm_dbms             # build generic crates for wasm32-unknown-unknown
 just test_wasm_dbms_example      # end-to-end Component Model example (Wasmtime host + guest)
-just check_code                  # nightly fmt --check + clippy -D warnings
+just check                       # formatting, clippy, docs, dependency policy, and tests
 ```
 
 Open the PR once these pass locally; the CI job covers the IC build and integration tests for you.
@@ -119,32 +128,40 @@ When touching IC crates, run the full suite locally before opening a PR:
 ```sh
 just build_all                   # generic + IC canisters + WASI example
 just test_all                    # unit tests + PocketIC integration tests + WIT example
-just check_code                  # format + clippy
+just check                       # full local quality gate
 ```
 
 ## Common Commands
 
 A non-exhaustive cheat sheet (run `just --list` for everything):
 
-| Command                          | Description                                                        |
-|----------------------------------|--------------------------------------------------------------------|
-| `just build_all`                 | Builds every crate, canister, and the WASI example.                |
-| `just test`                      | Runs all unit + doc tests across the workspace.                    |
-| `just test <name>`               | Filters unit tests by substring.                                   |
-| `just integration_test [name]`   | Runs the PocketIC integration tests.                               |
-| `just test_all`                  | All of the above, plus the WIT host/guest example.                 |
-| `just clippy`                    | `cargo clippy --all-features`.                                     |
-| `just fmt_nightly`               | Formats the whole workspace with nightly `rustfmt`.                |
-| `just check_code`                | What CI runs: `fmt_nightly --check` + `clippy -- -D warnings`.     |
-| `just clean`                     | Removes `.artifact/` and `target/` (asks for confirmation).        |
+| Command                         | Description                                                 |
+| ------------------------------- | ----------------------------------------------------------- |
+| `just build_all`                | Builds every crate, canister, and the WASI example.         |
+| `just test`                     | Runs unit and doc tests across the workspace.               |
+| `just test <name>`              | Filters unit tests by substring.                            |
+| `just integration_test [name]`  | Runs the PocketIC integration tests.                        |
+| `just test_all`                 | Runs unit, doc, integration, and WIT example tests.         |
+| `just fmt`                      | Formats supported files with dprint.                        |
+| `just fmt_check`                | Checks Rust, Markdown, TOML, and YAML formatting.           |
+| `just clippy`                   | Runs workspace Clippy checks.                               |
+| `just doc`                      | Builds warning-free workspace documentation.                |
+| `just deny`                     | Runs cargo-deny policy checks.                              |
+| `just zizmor`                   | Audits GitHub Actions workflows.                            |
+| `just scan_secrets .`           | Scans the repository for secrets with TruffleHog.           |
+| `just check`                    | Runs the normal local quality gate.                         |
+| `just coverage`                 | Runs the workspace coverage command used by CI.             |
+| `just changelog_preview 0.10.0` | Previews generated release notes.                           |
+| `just package_list "--help"`    | Shows the package-file inspection command.                  |
+| `just clean`                    | Removes `.artifact/` and `target/` (asks for confirmation). |
 
 ## Workflow
 
-1. **Open an issue first** for non-trivial changes so the design can be discussed.
+1. Discuss non-trivial design changes before implementation and link the relevant issue in the pull request when one exists.
 2. Fork the repository and create a topic branch from `main`.
 3. Implement your change with tests.
-4. Run `just check_code` and the relevant test recipes locally.
-5. Update documentation under `docs/` and the `CHANGELOG.md` entry if user-visible behaviour changes (see
+4. Run `just check` and the relevant build and test recipes locally.
+5. Update documentation under `docs/` and preview generated release notes if user-visible behaviour changes (see
    [Changelog](#changelog)).
 6. Open a pull request against `main` describing the motivation, the approach, and any follow-ups.
 
@@ -152,8 +169,9 @@ A non-exhaustive cheat sheet (run `just --list` for everything):
 
 ### Code Style
 
-- Format with **nightly** `rustfmt`: `just fmt_nightly`. CI fails on any diff.
-- Lint clean under `cargo clippy --all-features -- -D warnings`.
+- Format supported files with dprint: `just fmt`; CI fails on any diff from `just fmt_check`.
+- Rust formatting is delegated to the configured nightly `rustfmt` command.
+- Lint clean under `just clippy "-- -D warnings"`.
 - Prefer `where` clauses over inline trait bounds on generic parameters.
 - No `unsafe` without an accompanying `// SAFETY:` comment that justifies the invariants.
 - Keep public items documented; the project relies on `docs.rs` for the API reference.
@@ -194,13 +212,14 @@ User-facing changes must update the relevant pages under `docs/`:
 - IC-specific behaviour → `docs/ic/guides/` and `docs/ic/reference/`.
 - Architecture and internals → `docs/technical/`.
 
-Design notes and implementation plans live in `.claude/plans/` — never under `docs/plans/`.
+Design notes and implementation plans live in `.superpowers/` — never under `docs/plans/`.
 
 ### Changelog
 
-Add a bullet under the **Unreleased** section of [`CHANGELOG.md`](./CHANGELOG.md) for any user-visible change
-(new feature, bug fix, breaking change, deprecation). Internal refactors that do not change behaviour can be
-omitted.
+User-visible changes are generated from Conventional Commit history. Preview
+the next notes with `just changelog_preview <version>` and generate the entry
+with `just changelog <version>`. Internal refactors that do not change
+behaviour can be omitted from release-note-oriented commit messages.
 
 ### Database API Surface
 

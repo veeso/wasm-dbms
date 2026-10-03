@@ -19,8 +19,7 @@ instance.
 
 All the client methods can be accessed through the [`Client`](crate::prelude::Client) trait.
 
-The crate provides an implementation of the client for IC DBMS Canister, called [
-`IcDbmsCanisterClient`](crate::prelude::IcDbmsCanisterClient),
+The crate provides an implementation of the client for IC DBMS Canister, called [`IcDbmsCanisterClient`](crate::prelude::IcDbmsCanisterClient),
 which can be used on ic canisters.
 
 If you want to use the client in integration tests with `pocket-ic`, you can use the
@@ -67,7 +66,6 @@ pub struct User {
 ### Use the client
 
 ```rust
-
 async fn main() -> anyhow::Result<()> {
     let principal = Principal::from_text("...")?;
     let client = IcDbmsCanisterClient::new(principal);
@@ -102,9 +100,7 @@ use ic_agent::Agent;
 use ic_dbms_client::prelude::{Client as _, IcDbmsAgentClient};
 
 async fn main() -> anyhow::Result<()> {
-    let agent = Agent::builder()
-        .with_url("https://ic0.app")
-        .build()?;
+    let agent = Agent::builder().with_url("https://ic0.app").build()?;
 
     let canister_id = Principal::from_text("...")?;
     let client = IcDbmsAgentClient::new(&agent, canister_id);

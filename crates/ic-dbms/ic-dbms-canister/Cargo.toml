@@ -2,14 +2,9 @@
 name = "ic-dbms-canister"
 version = { workspace = true }
 authors = { workspace = true }
-edition = { workspace = true }
-rust-version = { workspace = true }
-license = { workspace = true }
-keywords = { workspace = true }
 categories = { workspace = true }
-repository = { workspace = true }
 documentation = "https://docs.rs/ic-dbms-canister/"
-description = "A framework to build Database canisters on the Internet Computer using DBMS, by just providing the schema."
+edition = { workspace = true }
 include = [
   "examples/**/*",
   "src/**/*",
@@ -17,7 +12,12 @@ include = [
   "README.md",
   "../../../CHANGELOG.md",
 ]
+keywords = { workspace = true }
+license = { workspace = true }
 readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "A framework to build Database canisters on the Internet Computer using DBMS, by just providing the schema."
 
 [dependencies]
 candid = { workspace = true }
