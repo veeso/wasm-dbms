@@ -40,15 +40,15 @@ The interface definition lives at `/wit/dbms.wit` (workspace root). It defines a
 
 Key operations:
 
-| Operation | Signature |
-|-----------|-----------|
-| `select` | `(table, query) → list<row>` |
-| `insert` | `(table, row, tx?) → ()` |
-| `update` | `(table, row, tx?) → u64` |
-| `delete` | `(table, filter?, tx?) → u64` |
-| `begin-transaction` | `() → transaction-id` |
-| `commit` | `(tx) → ()` |
-| `rollback` | `(tx) → ()` |
+| Operation           | Signature                     |
+| ------------------- | ----------------------------- |
+| `select`            | `(table, query) → list<row>`  |
+| `insert`            | `(table, row, tx?) → ()`      |
+| `update`            | `(table, row, tx?) → u64`     |
+| `delete`            | `(table, filter?, tx?) → u64` |
+| `begin-transaction` | `() → transaction-id`         |
+| `commit`            | `(tx) → ()`                   |
+| `rollback`          | `(tx) → ()`                   |
 
 ---
 

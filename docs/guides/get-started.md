@@ -196,8 +196,8 @@ let users = database.select::<User>(query)?;
 Here's a complete example showing insert, query, update, and delete operations:
 
 ```rust
-use wasm_dbms_api::prelude::*;
 use my_schema::{User, UserInsertRequest, UserUpdateRequest};
+use wasm_dbms_api::prelude::*;
 
 fn example(database: &impl Database) -> Result<(), DbmsError> {
     // 1. INSERT a new user
@@ -242,9 +242,9 @@ fn example(database: &impl Database) -> Result<(), DbmsError> {
 For unit tests, use `HeapMemoryProvider` which stores data in heap memory:
 
 ```rust
+use my_schema::{MySchema, User, UserInsertRequest};
 use wasm_dbms::prelude::*;
 use wasm_dbms_api::prelude::*;
-use my_schema::{User, UserInsertRequest, MySchema};
 
 #[test]
 fn test_insert_and_select() {

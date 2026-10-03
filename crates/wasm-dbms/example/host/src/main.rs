@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Result, Store};
 use wasmtime_wasi::p2::add_to_linker_sync;
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 // Generate host-side bindings from the WIT definition.
 //
@@ -167,7 +167,7 @@ fn main() -> Result<()> {
     // 3. WASI context with the current directory preopened as "/".
     let mut wasi_builder = WasiCtxBuilder::new();
     wasi_builder.inherit_stdio();
-    wasi_builder.preopened_dir(&work_dir, "/", DirPerms::all(), FilePerms::all())?;
+    wasi_builder.preopened_dir(&work_dir, "/", FsPerms::ReadWrite)?;
     let wasi_ctx = wasi_builder.build();
 
     let state = HostState {

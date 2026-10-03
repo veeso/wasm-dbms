@@ -65,7 +65,7 @@ The `DatabaseSchema` macro is provided by `wasm-dbms-macros` and re-exported thr
 
 ```rust
 use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
-use my_schema::{User, Post};
+use my_schema::{Post, User};
 
 #[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]
@@ -87,7 +87,7 @@ The `DbmsCanister` macro is an IC-specific procedural macro that generates a com
 
 ```rust
 use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
-use my_schema::{User, Post, Comment};
+use my_schema::{Comment, Post, User};
 
 #[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts", Comment = "comments")]
@@ -151,6 +151,7 @@ service : (IcDbmsCanisterArgs) -> {
 **Method naming convention:** `{operation}_{table_name}` (e.g., `insert_users`, `select_posts`, `aggregate_users`, `delete_comments`)
 
 **Parameter patterns:**
+
 - `opt nat` is the optional transaction ID
 - `select` and `aggregate` methods are `query` calls (no state changes, no cycles consumed)
 - All other methods are `update` calls
@@ -310,7 +311,7 @@ The `ic_cdk::export_candid!()` macro at the end of your canister `lib.rs` genera
 ```rust
 // canister/src/lib.rs
 use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
-use my_schema::{User, Post};
+use my_schema::{Post, User};
 
 #[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]
@@ -377,7 +378,7 @@ pub struct Post {
 ```rust
 // canister/src/lib.rs
 use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
-use my_schema::{User, Post};
+use my_schema::{Post, User};
 
 #[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]

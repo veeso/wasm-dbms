@@ -88,8 +88,9 @@ The `#[table = "name"]` attribute specifies the table name in the database:
 
 ```rust
 #[derive(Table, ...)]
-#[table = "user_accounts"]  // Table name in database
-pub struct UserAccount {    // Rust struct name (can differ)
+#[table = "user_accounts"] // Table name in database
+pub struct UserAccount {
+    // Rust struct name (can differ)
     // ...
 }
 ```
@@ -113,7 +114,7 @@ Every table must have exactly one primary key:
 #[table = "users"]
 pub struct User {
     #[primary_key]
-    pub id: Uint32,  // Primary key
+    pub id: Uint32, // Primary key
     pub name: Text,
 }
 ```
@@ -132,7 +133,7 @@ pub struct User {
 #[table = "orders"]
 pub struct Order {
     #[primary_key]
-    pub id: Uuid,  // UUID primary key
+    pub id: Uuid, // UUID primary key
     pub total: Decimal,
 }
 ```
@@ -147,7 +148,7 @@ Automatically generate sequential values for a column on insert:
 pub struct User {
     #[primary_key]
     #[autoincrement]
-    pub id: Uint32,  // Automatically assigned 1, 2, 3, ...
+    pub id: Uint32, // Automatically assigned 1, 2, 3, ...
     pub name: Text,
 }
 ```
@@ -193,7 +194,7 @@ pub struct User {
     pub id: Uint32,
 
     #[unique]
-    pub email: Text,  // Must be unique across all rows
+    pub email: Text, // Must be unique across all rows
 
     pub name: Text,
 }
@@ -230,7 +231,7 @@ pub struct User {
     pub id: Uint32,
 
     #[index]
-    pub email: Text,  // Single-column index
+    pub email: Text, // Single-column index
 
     pub name: Text,
 }
@@ -329,7 +330,7 @@ pub struct Task {
     #[primary_key]
     pub id: Uint32,
     #[custom_type]
-    pub priority: Priority,  // User-defined type
+    pub priority: Priority, // User-defined type
 }
 ```
 
@@ -439,7 +440,7 @@ When the `#[candid]` attribute is present, the `Table` macro adds `candid::Candi
 - Required for IC canister deployment where types must cross canister boundaries via Candid
 - Any context where generated types need Candid serialization
 
-> **Note:** The `#[candid]` attribute only affects the types *generated* by the `Table` macro. You still need to derive `CandidType` and `Deserialize` on the table struct itself.
+> **Note:** The `#[candid]` attribute only affects the types _generated_ by the `Table` macro. You still need to derive `CandidType` and `Deserialize` on the table struct itself.
 
 See the [IC Schema Reference](../ic/reference/schema.md) for full IC integration details.
 
@@ -450,11 +451,11 @@ Advanced: Configure memory alignment for dynamic-size tables:
 ```rust
 #[derive(Table, ...)]
 #[table = "large_records"]
-#[alignment = 64]  // 64-byte alignment
+#[alignment = 64] // 64-byte alignment
 pub struct LargeRecord {
     #[primary_key]
     pub id: Uint32,
-    pub data: Text,  // Variable-size field
+    pub data: Text, // Variable-size field
 }
 ```
 

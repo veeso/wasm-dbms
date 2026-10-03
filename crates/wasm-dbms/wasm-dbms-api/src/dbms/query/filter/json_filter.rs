@@ -111,7 +111,8 @@ impl JsonFilter {
     ///
     /// # Errors
     ///
-    /// Returns [`QueryError::InvalidQuery`] if the path syntax is invalid.
+    /// Returns [`QueryError::InvalidQuery`](crate::dbms::query::QueryError::InvalidQuery)
+    /// if the path syntax is invalid.
     pub fn matches(&self, json: &Json) -> QueryResult<bool> {
         match self {
             JsonFilter::Contains(pattern) => Ok(json_contains(json.value(), pattern.value())),

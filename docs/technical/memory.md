@@ -156,8 +156,7 @@ impl MemoryProvider for IcMemoryProvider {
     const PAGE_SIZE: u64 = ic_cdk::stable::WASM_PAGE_SIZE_IN_BYTES;
 
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64> {
-        ic_cdk::stable::stable_grow(new_pages)
-            .map_err(MemoryError::ProviderError)
+        ic_cdk::stable::stable_grow(new_pages).map_err(MemoryError::ProviderError)
     }
 
     fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
@@ -203,9 +202,15 @@ pub trait MemoryAccess {
     /// Zero an entire allocated page (primitive).
     fn zero_page(&mut self, page: Page) -> MemoryResult<()>;
     fn read_at<D: Encode>(&mut self, page: Page, offset: PageOffset) -> MemoryResult<D>;
-    fn write_at<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
+    fn write_at<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E)
+    -> MemoryResult<()>;
     fn zero<E: Encode>(&mut self, page: Page, offset: PageOffset, data: &E) -> MemoryResult<()>;
-    fn read_at_raw(&mut self, page: Page, offset: PageOffset, buf: &mut [u8]) -> MemoryResult<usize>;
+    fn read_at_raw(
+        &mut self,
+        page: Page,
+        offset: PageOffset,
+        buf: &mut [u8],
+    ) -> MemoryResult<usize>;
 }
 ```
 
@@ -241,7 +246,9 @@ impl<P: MemoryProvider> MemoryManager<P> {
 
 // MemoryAccess is implemented for MemoryManager<P>,
 // delegating directly to the underlying MemoryProvider.
-impl<P: MemoryProvider> MemoryAccess for MemoryManager<P> { /* ... */ }
+impl<P: MemoryProvider> MemoryAccess for MemoryManager<P> {
+    /* ... */
+}
 ```
 
 All table-registry and ledger functions are generic over `impl MemoryAccess` rather than
@@ -360,11 +367,11 @@ The Schema Registry maps tables to their storage pages:
 ```rust
 /// Information about a table's storage pages
 pub struct TableRegistryPage {
-    pub schema_snapshot_page: Page,                 // Schema Snapshot Ledger location
-    pub pages_list_page: Page,                      // Page Ledger location
-    pub free_segments_page: Page,                   // Free Segments Ledger location
-    pub index_registry_page: Page,                  // Index Ledger location
-    pub autoincrement_registry_page: Option<Page>,  // Autoincrement Ledger (if needed)
+    pub schema_snapshot_page: Page, // Schema Snapshot Ledger location
+    pub pages_list_page: Page,      // Page Ledger location
+    pub free_segments_page: Page,   // Free Segments Ledger location
+    pub index_registry_page: Page,  // Index Ledger location
+    pub autoincrement_registry_page: Option<Page>, // Autoincrement Ledger (if needed)
 }
 
 /// Maps table fingerprints to storage locations
@@ -413,10 +420,18 @@ pub trait AccessControl: Default {
 
     fn is_allowed(&self, identity: &Self::Id) -> bool;
     fn allowed_identities(&self) -> Vec<Self::Id>;
-    fn add_identity<M>(&mut self, identity: Self::Id, mm: &mut MemoryManager<M>) -> MemoryResult<()>
+    fn add_identity<M>(
+        &mut self,
+        identity: Self::Id,
+        mm: &mut MemoryManager<M>,
+    ) -> MemoryResult<()>
     where
         M: MemoryProvider;
-    fn remove_identity<M>(&mut self, identity: &Self::Id, mm: &mut MemoryManager<M>) -> MemoryResult<()>
+    fn remove_identity<M>(
+        &mut self,
+        identity: &Self::Id,
+        mm: &mut MemoryManager<M>,
+    ) -> MemoryResult<()>
     where
         M: MemoryProvider;
 }
@@ -453,13 +468,18 @@ drift detection and migration planning.
 
 ```rust
 pub struct SchemaSnapshotLedger {
-    snapshot: TableSchemaSnapshot,  // cached copy of the on-disk snapshot
+    snapshot: TableSchemaSnapshot, // cached copy of the on-disk snapshot
 }
 
 impl SchemaSnapshotLedger {
     pub fn init<Schema: TableSchema>(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<()>;
     pub fn load(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self>;
-    pub fn write(&mut self, page: Page, snapshot: TableSchemaSnapshot, mm: &mut impl MemoryAccess) -> MemoryResult<()>;
+    pub fn write(
+        &mut self,
+        page: Page,
+        snapshot: TableSchemaSnapshot,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<()>;
     pub fn get(&self) -> &TableSchemaSnapshot;
 }
 ```
@@ -513,8 +533,8 @@ Tracks which pages contain records for this table:
 
 ```rust
 pub struct PageLedger {
-    ledger_page: Page,      // Where this ledger is stored
-    pages: PageTable,       // List of data pages with free space info
+    ledger_page: Page, // Where this ledger is stored
+    pages: PageTable,  // List of data pages with free space info
 }
 
 impl PageLedger {
@@ -537,7 +557,7 @@ Tracks free space from deleted/moved records:
 ```rust
 pub struct FreeSegmentsLedger {
     free_segments_page: Page,
-    tables: PagesTable,  // Pages containing FreeSegmentsTables
+    tables: PagesTable, // Pages containing FreeSegmentsTables
 }
 
 pub struct FreeSegment {
@@ -585,7 +605,7 @@ value for each autoincrement column. The `AutoincrementLedger` manages these cou
 ```rust
 pub struct AutoincrementLedger {
     page: Page,
-    registry: AutoincrementRegistry,  // column name → current Value
+    registry: AutoincrementRegistry, // column name → current Value
 }
 ```
 
@@ -682,7 +702,7 @@ fn align_up<E: Encode>(size: usize) -> usize {
 ```rust
 #[derive(Table, ...)]
 #[table = "large_records"]
-#[alignment = 64]  // Custom alignment for this table
+#[alignment = 64] // Custom alignment for this table
 pub struct LargeRecord {
     // ...
 }
@@ -751,7 +771,7 @@ The `IndexLedger` is stored in a single page per table and maps column sets to B
 ```rust
 pub struct IndexLedger {
     ledger_page: Page,
-    tables: HashMap<Vec<String>, Page>,  // column names → root page
+    tables: HashMap<Vec<String>, Page>, // column names → root page
 }
 ```
 
@@ -872,10 +892,10 @@ linked leaf pages:
 
 ```rust
 pub struct IndexTreeWalker<K: Encode + Ord> {
-    entries: Vec<LeafEntry<K>>,   // Current leaf's entries
-    cursor: usize,                // Position within current leaf
-    next_leaf: Option<Page>,      // Next leaf page for continuation
-    end_key: Option<K>,           // Optional upper bound (inclusive)
+    entries: Vec<LeafEntry<K>>, // Current leaf's entries
+    cursor: usize,              // Position within current leaf
+    next_leaf: Option<Page>,    // Next leaf page for continuation
+    end_key: Option<K>,         // Optional upper bound (inclusive)
 }
 ```
 

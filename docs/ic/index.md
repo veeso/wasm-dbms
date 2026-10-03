@@ -67,13 +67,11 @@ IC-DBMS is composed of four crates:
 
 ```rust
 // In your schema crate
-use ic_dbms_api::prelude::*;  // Re-exports wasm_dbms_api types
-
+use ic_dbms_api::prelude::*; // Re-exports wasm_dbms_api types
 // In your canister crate
 use ic_dbms_canister::prelude::DbmsCanister;
-
 // In your client code
-use ic_dbms_client::{IcDbmsCanisterClient, Client as _};
+use ic_dbms_client::{Client as _, IcDbmsCanisterClient};
 ```
 
 ---

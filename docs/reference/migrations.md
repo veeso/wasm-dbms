@@ -88,11 +88,11 @@ A snapshot is a self-describing, versioned view of a table's compile-time shape.
 
 ```rust
 pub struct TableSchemaSnapshot {
-    pub version: u8,                    // bumped on any breaking layout change
+    pub version: u8, // bumped on any breaking layout change
     pub name: String,
     pub primary_key: String,
     pub alignment: u32,
-    pub columns: Vec<ColumnSnapshot>,   // declaration order preserved
+    pub columns: Vec<ColumnSnapshot>, // declaration order preserved
     pub indexes: Vec<IndexSnapshot>,
 }
 
@@ -109,19 +109,30 @@ pub struct ColumnSnapshot {
 
 #[repr(u8)]
 pub enum DataTypeSnapshot {
-    Int8 = 0x01, Int16 = 0x02, Int32 = 0x03, Int64 = 0x04,
-    Uint8 = 0x10, Uint16 = 0x11, Uint32 = 0x12, Uint64 = 0x13,
-    Float32 = 0x20, Float64 = 0x21, Decimal = 0x22,
+    Int8 = 0x01,
+    Int16 = 0x02,
+    Int32 = 0x03,
+    Int64 = 0x04,
+    Uint8 = 0x10,
+    Uint16 = 0x11,
+    Uint32 = 0x12,
+    Uint64 = 0x13,
+    Float32 = 0x20,
+    Float64 = 0x21,
+    Decimal = 0x22,
     Boolean = 0x30,
-    Date = 0x40, Datetime = 0x41,
-    Blob = 0x50, Text = 0x51, Uuid = 0x52,
+    Date = 0x40,
+    Datetime = 0x41,
+    Blob = 0x50,
+    Text = 0x51,
+    Uuid = 0x52,
     Json = 0x60,
     Custom { tag: String, wire_size: WireSize } = 0xF0,
 }
 
 pub enum WireSize {
-    Fixed(u32),       // column occupies exactly N bytes
-    LengthPrefixed,   // body preceded by 2-byte LE length prefix
+    Fixed(u32),     // column occupies exactly N bytes
+    LengthPrefixed, // body preceded by 2-byte LE length prefix
 }
 ```
 
@@ -177,11 +188,26 @@ Indexes are matched by `(sorted column list, unique)` tuple. Differences emit `A
 
 ```rust
 pub enum MigrationOp {
-    CreateTable { name: String, schema: TableSchemaSnapshot },
-    DropTable { name: String },                            // destructive
-    AddColumn { table: String, column: ColumnSnapshot },
-    DropColumn { table: String, column: String },          // destructive
-    RenameColumn { table: String, old: String, new: String },
+    CreateTable {
+        name: String,
+        schema: TableSchemaSnapshot,
+    },
+    DropTable {
+        name: String,
+    }, // destructive
+    AddColumn {
+        table: String,
+        column: ColumnSnapshot,
+    },
+    DropColumn {
+        table: String,
+        column: String,
+    }, // destructive
+    RenameColumn {
+        table: String,
+        old: String,
+        new: String,
+    },
     AlterColumn {
         table: String,
         column: String,
@@ -199,8 +225,14 @@ pub enum MigrationOp {
         old_type: DataTypeSnapshot,
         new_type: DataTypeSnapshot,
     },
-    AddIndex { table: String, index: IndexSnapshot },
-    DropIndex { table: String, index: IndexSnapshot },
+    AddIndex {
+        table: String,
+        index: IndexSnapshot,
+    },
+    DropIndex {
+        table: String,
+        index: IndexSnapshot,
+    },
 }
 
 pub struct ColumnChanges {
@@ -310,16 +342,15 @@ where
     /// Dynamic default for AddColumn on a non-nullable column.
     /// `None` falls back to the static `#[default]` attribute, else
     /// DefaultMissing.
-    fn default_value(_column: &str) -> Option<Value> { None }
+    fn default_value(_column: &str) -> Option<Value> {
+        None
+    }
 
     /// Transform a stored value during an incompatible type change.
     /// `Ok(None)` → no transform (errors unless widening applies).
     /// `Ok(Some(v))` → use `v`.
     /// `Err(_)` → abort migration; journal rolls back.
-    fn transform_column(
-        _column: &str,
-        _old: Value,
-    ) -> DbmsResult<Option<Value>> {
+    fn transform_column(_column: &str, _old: Value) -> DbmsResult<Option<Value>> {
         Ok(None)
     }
 }
@@ -333,12 +364,14 @@ See the [Migrate Override section in the schema reference](./schema.md#migrate-o
 
 ```rust
 pub struct MigrationPolicy {
-    pub allow_destructive: bool,   // DropTable, DropColumn
+    pub allow_destructive: bool, // DropTable, DropColumn
 }
 
 impl Default for MigrationPolicy {
     fn default() -> Self {
-        Self { allow_destructive: false }
+        Self {
+            allow_destructive: false,
+        }
     }
 }
 ```
@@ -356,17 +389,17 @@ dbms.migrate(MigrationPolicy { allow_destructive: true })?;
 
 `DbmsError::Migration(MigrationError)` covers the full migration pipeline:
 
-| Variant                  | When                                                                                              |
-| ------------------------ | ------------------------------------------------------------------------------------------------- |
-| `SchemaDrift`            | CRUD called while `drift == true`. Call `migrate(policy)` first.                                  |
-| `IncompatibleType`       | Type change is neither in the widening whitelist nor handled by `transform_column`.               |
-| `DefaultMissing`         | `AddColumn` on a non-nullable column without `#[default]` or `default_value` override.            |
-| `ConstraintViolation`    | Tightening op found data that violates the new constraint.                                        |
-| `DestructiveOpDenied`    | Planner emitted `DropTable` / `DropColumn` while `allow_destructive` is `false`.                  |
-| `TransformAborted`       | User `transform_column` impl returned `Err`.                                                      |
-| `WideningIncompatible`   | `WidenColumn` op falls outside the widening whitelist (and no `transform_column` impl handled it). |
-| `TransformReturnedNone`  | `Migrate::transform_column` returned `Ok(None)` while a transform was required.                   |
-| `ForeignKeyViolation`    | Add-FK tightening found a row whose value is absent from the target table's column.               |
+| Variant                 | When                                                                                               |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `SchemaDrift`           | CRUD called while `drift == true`. Call `migrate(policy)` first.                                   |
+| `IncompatibleType`      | Type change is neither in the widening whitelist nor handled by `transform_column`.                |
+| `DefaultMissing`        | `AddColumn` on a non-nullable column without `#[default]` or `default_value` override.             |
+| `ConstraintViolation`   | Tightening op found data that violates the new constraint.                                         |
+| `DestructiveOpDenied`   | Planner emitted `DropTable` / `DropColumn` while `allow_destructive` is `false`.                   |
+| `TransformAborted`      | User `transform_column` impl returned `Err`.                                                       |
+| `WideningIncompatible`  | `WidenColumn` op falls outside the widening whitelist (and no `transform_column` impl handled it). |
+| `TransformReturnedNone` | `Migrate::transform_column` returned `Ok(None)` while a transform was required.                    |
+| `ForeignKeyViolation`   | Add-FK tightening found a row whose value is absent from the target table's column.                |
 
 See the [Migration Errors section in the errors reference](./errors.md#migration-errors) for matching examples and remediation.
 
@@ -410,11 +443,7 @@ where
     where
         Self: Sized;
 
-    fn migrate_transform(
-        table: &str,
-        column: &str,
-        old: Value,
-    ) -> DbmsResult<Option<Value>>
+    fn migrate_transform(table: &str, column: &str, old: Value) -> DbmsResult<Option<Value>>
     where
         Self: Sized;
 

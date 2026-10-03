@@ -40,7 +40,7 @@ pub struct User {
     #[primary_key]
     pub id: Uint32,
     pub name: Text,
-    pub metadata: Json,          // Required JSON field
+    pub metadata: Json,           // Required JSON field
     pub settings: Nullable<Json>, // Optional JSON field
 }
 ```
@@ -161,6 +161,7 @@ let filter = Filter::json("metadata", JsonFilter::contains(pattern));
 | `{"tags": ["a", "b", "c"]}`              | `{"tags": ["b"]}`             | Match                     |
 
 **Use cases:**
+
 - Check if user has specific role: `contains({"role": "admin"})`
 - Check if array contains value: `contains({"tags": ["important"]})`
 - Check nested properties: `contains({"settings": {"theme": "dark"}})`
@@ -295,8 +296,9 @@ JsonFilter::extract_eq("name", Value::Text("Alice".into()))
 ## Complete Example
 
 ```rust
-use wasm_dbms_api::prelude::*;
 use std::str::FromStr;
+
+use wasm_dbms_api::prelude::*;
 
 #[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "products"]
@@ -304,13 +306,14 @@ pub struct Product {
     #[primary_key]
     pub id: Uint32,
     pub name: Text,
-    pub attributes: Json,  // {"color": "red", "size": "M", "tags": ["sale", "new"], "price": 29.99}
+    pub attributes: Json, // {"color": "red", "size": "M", "tags": ["sale", "new"], "price": 29.99}
 }
 
 fn example_queries(database: &impl Database) -> Result<(), Box<dyn std::error::Error>> {
     // Find all red products
-    let filter = Filter::json("attributes",
-        JsonFilter::extract_eq("color", Value::Text("red".into()))
+    let filter = Filter::json(
+        "attributes",
+        JsonFilter::extract_eq("color", Value::Text("red".into())),
     );
     let query = Query::builder().filter(filter).build();
     let red_products = database.select::<Product>(query)?;
@@ -327,18 +330,28 @@ fn example_queries(database: &impl Database) -> Result<(), Box<dyn std::error::E
     let sized_products = database.select::<Product>(query)?;
 
     // Find red products with price > 20
-    let filter = Filter::json("attributes", JsonFilter::extract_eq("color", Value::Text("red".into())))
-        .and(Filter::json("attributes", JsonFilter::extract_gt("price", Value::Decimal(20.0.into()))));
+    let filter = Filter::json(
+        "attributes",
+        JsonFilter::extract_eq("color", Value::Text("red".into())),
+    )
+    .and(Filter::json(
+        "attributes",
+        JsonFilter::extract_gt("price", Value::Decimal(20.0.into())),
+    ));
     let query = Query::builder().filter(filter).build();
     let expensive_red = database.select::<Product>(query)?;
 
     // Find products in specific sizes
-    let filter = Filter::json("attributes",
-        JsonFilter::extract_in("size", vec![
-            Value::Text("S".into()),
-            Value::Text("M".into()),
-            Value::Text("L".into()),
-        ])
+    let filter = Filter::json(
+        "attributes",
+        JsonFilter::extract_in(
+            "size",
+            vec![
+                Value::Text("S".into()),
+                Value::Text("M".into()),
+                Value::Text("L".into()),
+            ],
+        ),
     );
     let query = Query::builder().filter(filter).build();
     let standard_sizes = database.select::<Product>(query)?;
@@ -354,6 +367,7 @@ fn example_queries(database: &impl Database) -> Result<(), Box<dyn std::error::E
 JSON filter operations return errors for:
 
 **Invalid path syntax:**
+
 - Empty paths
 - Trailing dots (`"user."`)
 - Unclosed brackets (`"items[0"`)
@@ -361,6 +375,7 @@ JSON filter operations return errors for:
 - Non-numeric array indices (`"items[abc]"`)
 
 **Non-JSON column:**
+
 - Applying JSON filter to a non-JSON column
 
 ```rust

@@ -2,11 +2,11 @@
 name = "dbms-canister-client-integration"
 version = { workspace = true }
 edition = { workspace = true }
-rust-version = { workspace = true }
 license = { workspace = true }
-repository = { workspace = true }
-description = "integration tests for the IcDbmsCanisterClient"
 publish = false
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "integration tests for the IcDbmsCanisterClient"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

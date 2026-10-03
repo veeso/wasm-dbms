@@ -1,3 +1,13 @@
+# Publish a crate to crates.io.
+[group('publish')]
+publish args="":
+  cargo publish --locked {{ args }}
+
+# List files included in the packaged crate.
+[group('publish')]
+package_list args="":
+  cargo package --list --exclude-lockfile {{ args }}
+
 # Publish all crates in dependency order
 [group('publish')]
 publish_all: publish_wasm_dbms_all publish_wasi_dbms_all publish_ic_dbms_all

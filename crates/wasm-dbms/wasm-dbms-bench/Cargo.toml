@@ -1,12 +1,12 @@
 [package]
 name = "wasm-dbms-bench"
 version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 license.workspace = true
 publish = false
+repository.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 criterion = { workspace = true }

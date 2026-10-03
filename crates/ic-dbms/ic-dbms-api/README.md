@@ -16,7 +16,7 @@ This crate exposes all the types shared between an IC DBMS Canister and an exter
 
 You can import all the useful types and traits by using the prelude module:
 
-```rust
+````rust
 use ic_dbms_api::prelude::*;
 ```txt
 
@@ -139,3 +139,4 @@ use ic_dbms_api::prelude::*;
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](../LICENSE) file for details.
+````

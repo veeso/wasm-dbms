@@ -1,6 +1,6 @@
 //! This module contains all the built-in validations which can be applied to columns.
 //!
-//! Each validation function takes a [`&crate::prelude::Value`] as input and returns a `DbmsResult<()>` indicating
+//! Each validation function takes a [`Value`](crate::dbms::value::Value) as input and returns a `DbmsResult<()>` indicating
 //! whether the value passes the validation or not.
 
 mod case;

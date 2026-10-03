@@ -284,7 +284,8 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
 /// for a user-defined enum or struct.
 ///
 /// The type must also derive [`Encode`] (for binary serialization) and implement
-/// [`Display`](std::fmt::Display) (for the cached display string in [`CustomValue`]).
+/// [`Display`](std::fmt::Display) (for the cached display string in
+/// `CustomValue`).
 ///
 /// # Required attribute
 ///
@@ -340,7 +341,7 @@ pub fn derive_custom_data_type(input: TokenStream) -> TokenStream {
 ///   for `select`, `insert`, `delete`, `update`, `validate_insert`,
 ///   `validate_update`, and `referenced_tables`.
 /// - An inherent `register_tables` method that registers all tables in a
-///   [`DbmsContext`].
+///   `DbmsContext`.
 ///
 /// # Example
 ///
@@ -356,7 +357,7 @@ pub fn derive_custom_data_type(input: TokenStream) -> TokenStream {
 /// # Requirements
 ///
 /// - Each type in the `#[tables(...)]` attribute must implement
-///   [`TableSchema`].
+///   `TableSchema`.
 /// - The generated types (`UserInsertRequest`, `UserUpdateRequest`,
 ///   `UserRecord`, etc.) must be in scope.
 #[proc_macro_derive(DatabaseSchema, attributes(tables))]

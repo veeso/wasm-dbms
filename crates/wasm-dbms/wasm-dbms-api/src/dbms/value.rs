@@ -191,7 +191,7 @@ impl Value {
         }
     }
 
-    /// Returns reference to the inner [`CustomValue`] if this is a `Custom` variant.
+    /// Returns reference to the inner [`CustomValue`](crate::dbms::custom_value::CustomValue) if this is a `Custom` variant.
     pub fn as_custom(&self) -> Option<&crate::dbms::custom_value::CustomValue> {
         match self {
             Value::Custom(v) => Some(v),

@@ -49,7 +49,7 @@ impl AutoincrementLedger {
     ///
     /// # Errors
     ///
-    /// Returns [`MemoryError::AutoincrementOverflow`] if the column has reached its maximum value.
+    /// Returns `MemoryError::AutoincrementOverflow` if the column has reached its maximum value.
     pub fn next(&mut self, column: &str, mm: &mut impl MemoryAccess) -> MemoryResult<Value> {
         let value = self.registry.next(column)?;
         mm.write_at(self.page, 0, &self.registry)?;

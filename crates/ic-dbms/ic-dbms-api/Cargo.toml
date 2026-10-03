@@ -2,14 +2,9 @@
 name = "ic-dbms-api"
 version = { workspace = true }
 authors = { workspace = true }
-edition = { workspace = true }
-rust-version = { workspace = true }
-license = { workspace = true }
-keywords = { workspace = true }
 categories = { workspace = true }
-repository = { workspace = true }
 documentation = "https://docs.rs/ic-dbms-api/"
-description = "Public API types for ic-dbms-canister. This crate provides shared types for interacting and implementing the ic-dbms-canister."
+edition = { workspace = true }
 include = [
   "examples/**/*",
   "src/**/*",
@@ -17,7 +12,12 @@ include = [
   "README.md",
   "../../../CHANGELOG.md",
 ]
+keywords = { workspace = true }
+license = { workspace = true }
 readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Public API types for ic-dbms-canister. This crate provides shared types for interacting and implementing the ic-dbms-canister."
 
 [dependencies]
 candid = { workspace = true }

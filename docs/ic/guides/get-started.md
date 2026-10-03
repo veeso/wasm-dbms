@@ -184,7 +184,7 @@ In `canister/src/lib.rs`:
 
 ```rust
 use ic_dbms_canister::prelude::{DatabaseSchema, DbmsCanister};
-use my_schema::{User, Post};
+use my_schema::{Post, User};
 
 #[derive(DatabaseSchema, DbmsCanister)]
 #[tables(User = "users", Post = "posts")]
@@ -293,9 +293,9 @@ dfx deploy my_dbms --argument '(variant { Init = record { allowed_principals = v
 Here's a complete example showing insert, query, update, and delete operations:
 
 ```rust
-use ic_dbms_client::{IcDbmsCanisterClient, Client as _};
-use my_schema::{User, UserInsertRequest, UserUpdateRequest};
 use ic_dbms_api::prelude::*;
+use ic_dbms_client::{Client as _, IcDbmsCanisterClient};
+use my_schema::{User, UserInsertRequest, UserUpdateRequest};
 
 async fn example(canister_id: Principal) -> Result<(), Box<dyn std::error::Error>> {
     let client = IcDbmsCanisterClient::new(canister_id);
@@ -307,13 +307,17 @@ async fn example(canister_id: Principal) -> Result<(), Box<dyn std::error::Error
         email: "alice@example.com".into(),
         created_at: DateTime::now(),
     };
-    client.insert::<User>(User::table_name(), insert_req, None).await??;
+    client
+        .insert::<User>(User::table_name(), insert_req, None)
+        .await??;
 
     // 2. SELECT users
     let query = Query::builder()
         .filter(Filter::eq("name", Value::Text("Alice".into())))
         .build();
-    let users = client.select::<User>(User::table_name(), query, None).await??;
+    let users = client
+        .select::<User>(User::table_name(), query, None)
+        .await??;
     println!("Found {} user(s)", users.len());
 
     // 3. UPDATE the user
@@ -321,16 +325,20 @@ async fn example(canister_id: Principal) -> Result<(), Box<dyn std::error::Error
         .set_email("alice.new@example.com".into())
         .filter(Filter::eq("id", Value::Uint32(1.into())))
         .build();
-    let updated = client.update::<User>(User::table_name(), update_req, None).await??;
+    let updated = client
+        .update::<User>(User::table_name(), update_req, None)
+        .await??;
     println!("Updated {} record(s)", updated);
 
     // 4. DELETE the user
-    let deleted = client.delete::<User>(
-        User::table_name(),
-        DeleteBehavior::Restrict,
-        Some(Filter::eq("id", Value::Uint32(1.into()))),
-        None
-    ).await??;
+    let deleted = client
+        .delete::<User>(
+            User::table_name(),
+            DeleteBehavior::Restrict,
+            Some(Filter::eq("id", Value::Uint32(1.into()))),
+            None,
+        )
+        .await??;
     println!("Deleted {} record(s)", deleted);
 
     Ok(())

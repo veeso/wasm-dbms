@@ -26,7 +26,7 @@ use self::write_at::WriteAt;
 use crate::{MemoryAccess, TableRegistryPage, align_up};
 
 /// The table registry takes care of storing the records for each table,
-/// using the [`FreeSegmentsLedger`] and [`PageLedger`] to derive exactly where to read/write.
+/// using the `FreeSegmentsLedger` and `PageLedger` to derive exactly where to read/write.
 ///
 /// A registry is generic over a record, which must implement [`Encode`].
 ///

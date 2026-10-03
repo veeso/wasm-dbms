@@ -38,6 +38,7 @@ wasm-dbms provides four fundamental database operations through the `Database` t
 | **Delete** | Remove records from a table | `Result<u64>` (affected rows) |
 
 All operations:
+
 - Support optional transaction IDs
 - Validate and sanitize data according to schema rules
 - Enforce foreign key constraints

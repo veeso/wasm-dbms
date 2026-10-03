@@ -17,7 +17,7 @@ wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbm
 ```
 
 | Crate              | Description                                                 |
-|--------------------|-------------------------------------------------------------|
+| ------------------ | ----------------------------------------------------------- |
 | `wasm-dbms-api`    | Shared types, traits, validators, sanitizers                |
 | `wasm-dbms-memory` | Memory abstraction and page management                      |
 | `wasm-dbms`        | Core DBMS engine with transactions, joins, integrity checks |

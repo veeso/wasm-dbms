@@ -3,11 +3,11 @@ name = "wasm-dbms-example-guest"
 version = { workspace = true }
 authors = { workspace = true }
 edition = { workspace = true }
-rust-version = { workspace = true }
 license = { workspace = true }
-repository = { workspace = true }
-description = "WIT Component Model guest example for wasm-dbms"
 publish = false
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "WIT Component Model guest example for wasm-dbms"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

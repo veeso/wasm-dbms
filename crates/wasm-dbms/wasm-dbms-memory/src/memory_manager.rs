@@ -313,7 +313,7 @@ where
 }
 
 /// Gets the padding at the given offset to the next multiple of
-/// [`E::ALIGNMENT`].
+/// `E::ALIGNMENT`.
 #[inline]
 pub const fn align_up<E>(offset: usize) -> usize
 where

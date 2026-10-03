@@ -18,6 +18,7 @@
 Sanitizers automatically transform data before it's stored in the database. Unlike validators (which reject invalid data), sanitizers modify data to conform to expected formats.
 
 **Key points:**
+
 - Sanitizers run before validators
 - Data is transformed, not rejected
 - Multiple sanitizers can be chained
@@ -273,9 +274,9 @@ pub struct User {
     pub id: Uint32,
 
     // Order matters!
-    #[sanitizer(TrimSanitizer)]              // 1. Trim whitespace
+    #[sanitizer(TrimSanitizer)] // 1. Trim whitespace
     #[sanitizer(CollapseWhitespaceSanitizer)] // 2. Collapse spaces
-    #[sanitizer(LowerCaseSanitizer)]         // 3. Lowercase
+    #[sanitizer(LowerCaseSanitizer)] // 3. Lowercase
     pub email: Text,
 }
 
