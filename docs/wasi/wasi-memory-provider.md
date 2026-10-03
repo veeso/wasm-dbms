@@ -100,15 +100,14 @@ let provider = WasiMemoryProvider::try_from(path).unwrap();
 
 ## File Layout and Portability
 
-The backing file is byte-for-byte equivalent to IC stable memory: a contiguous sequence
-of 64 KiB pages, zero-filled on allocation. This means database snapshots are portable
+The backing file is a contiguous sequence of 64 KiB pages, zero-filled on allocation. This means database snapshots are portable
 between different `MemoryProvider` implementations.
 
 A file created by `WasiMemoryProvider` can be loaded by any provider that uses the same
 page layout, and vice versa. This enables workflows such as:
 
-- Exporting a database from an IC canister and loading it locally for debugging
-- Developing and testing with WASI, then deploying to the Internet Computer
+- Exporting a database from another runtime and loading it locally for debugging
+- Developing and testing with WASI, then deploying to another runtime
 - Migrating data between different WASM runtimes
 
 ---
@@ -139,7 +138,6 @@ across runtimes.
 | Provider             | Use case        | Backing storage                |
 | -------------------- | --------------- | ------------------------------ |
 | `WasiMemoryProvider` | WASI production | Single flat file on filesystem |
-| `IcMemoryProvider`   | IC production   | IC stable memory APIs          |
 | `HeapMemoryProvider` | Testing         | In-process `Vec<u8>`           |
 
-All three share the same page layout, so data is portable across implementations.
+Both share the same page layout, so data is portable across implementations.

@@ -18,13 +18,13 @@
 
 wasm-dbms is an embeddable relational database engine written in Rust, designed to run entirely inside WebAssembly
 runtimes. Unlike traditional databases that run as external services, wasm-dbms compiles into your WASM module and
-manages data directly in linear or stable memory — no network calls, no external dependencies.
+manages data directly in linear memory — no network calls, no external dependencies.
 
 You define your schema as Rust structs with derive macros, and wasm-dbms provides full CRUD operations, ACID
 transactions, foreign key integrity, validation, and sanitization — all running within the sandbox of your WASM module.
 
-wasm-dbms supports any WASM runtime (Wasmtime, Wasmer, WasmEdge) and offers first-class integration with
-Internet Computer canisters through the [`ic-dbms`](https://github.com/veeso/ic-dbms) adapter.
+wasm-dbms supports any WASM runtime (Wasmtime, Wasmer, WasmEdge). For the Internet Computer, see the
+[ic-dbms](https://github.com/veeso/ic-dbms) project.
 
 ---
 
@@ -55,12 +55,9 @@ API and type reference documentation:
 - [JSON](./reference/json.md) - JSON data type and filtering
 - [Errors](./reference/errors.md) - Error types and handling
 
-### IC Integration
+### Internet Computer
 
-Internet Computer support lives in the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) project, documented at <https://ic.wasm-dbms.cc>:
-
-- [IC Getting Started](https://ic.wasm-dbms.cc/guides/get-started.html) - Deploy a database canister on the IC
-- [Client API](https://ic.wasm-dbms.cc/guides/client-api.html) - Using the IC client library
+Internet Computer support lives in the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) project. Read its documentation at <https://ic.wasm-dbms.cc>.
 
 ### WASI Integration
 
@@ -129,4 +126,3 @@ let users = database.select::<User>(query)?;
 - **Foreign keys**: Referential integrity with cascade/restrict behaviors
 - **Validation & Sanitization**: Built-in validators and sanitizers
 - **JSON support**: Store and query semi-structured data
-- **IC Integration**: First-class support for Internet Computer canisters via [`ic-dbms`](https://github.com/veeso/ic-dbms)

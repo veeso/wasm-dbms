@@ -18,7 +18,6 @@
   - [API Surface](#api-surface)
     - [Generic (`wasm-dbms`)](#generic-wasm-dbms)
     - [`DatabaseSchema` Dispatch](#databaseschema-dispatch)
-    - [IC Endpoints](#ic-endpoints)
   - [Non-Goals](#non-goals)
   - [Worked Example](#worked-example)
   - [Best Practices](#best-practices)
@@ -54,7 +53,7 @@ Migrations are **forward-only** and **explicit**. The DBMS never auto-migrates o
 ├─────────────────────────────────────────────────────────┤
 │  drift == true                                          │
 │    ├─ CRUD returns DbmsError::Migration(SchemaDrift)    │
-│    ├─ plan_migration() → Vec<MigrationOp>               │
+│    ├─ pending_migrations() → Vec<MigrationOp>               │
 │    └─ migrate(policy) applies ops, clears drift         │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -63,7 +62,7 @@ Migrations are **forward-only** and **explicit**. The DBMS never auto-migrates o
 
 - **Boot**: one `u64` read from Page 0 plus one `xxh3` hash of the encoded compiled snapshots. `O(tables × columns)`.
 - **Hot path (CRUD)**: a single `bool` load (drift flag on the DBMS context) plus a branch. No snapshot decode, no hash recompute.
-- **Snapshot decode**: only on `plan_migration()` or `migrate()`. Never during CRUD.
+- **Snapshot decode**: only on `pending_migrations()` or `migrate()`. Never during CRUD.
 
 ---
 
@@ -269,7 +268,7 @@ All ops execute inside a single `JournaledWriter` session. Any failure rolls bac
 
 All three writes live in the same journal session as the data rewrites, so partial migrations are impossible.
 
-**Pre-flight validation:** before opening the journal session, the planner runs `plan_migration()`, checks `MigrationPolicy`, and verifies each op is applicable (`AddColumn` has a default or is nullable, type changes are widenings or have a transform, etc.). Errors in this phase do not touch memory.
+**Pre-flight validation:** before opening the journal session, the planner runs `pending_migrations()`, checks `MigrationPolicy`, and verifies each op is applicable (`AddColumn` has a default or is nullable, type changes are widenings or have a transform, etc.). Errors in this phase do not touch memory.
 
 ---
 
@@ -406,22 +405,22 @@ See the [Migration Errors section in the errors reference](./errors.md#migration
 
 ## API Surface
 
-### Generic (`wasm-dbms`)
+### `Database` Trait
+
+The migration methods are part of the `Database` trait, implemented by `WasmDbmsDatabase`:
 
 ```rust
-impl<M, S> Dbms<M, S>
-where
-    M: MemoryProvider,
-    S: DatabaseSchema<M>,
-{
-    /// O(1). True iff compiled schema differs from stored.
-    pub fn has_drift(&self) -> bool;
+pub trait Database {
+    // ... CRUD, query, and transaction methods ...
+
+    /// O(1) after the first call. True iff compiled schema differs from stored.
+    fn has_drift(&self) -> DbmsResult<bool>;
 
     /// Compute the diff without applying. Safe to call during drift.
-    pub fn plan_migration(&self) -> DbmsResult<Vec<MigrationOp>>;
+    fn pending_migrations(&self) -> DbmsResult<Vec<MigrationOp>>;
 
     /// Apply the diff. Transactional. Errors leave the database unchanged.
-    pub fn migrate(&mut self, policy: MigrationPolicy) -> DbmsResult<()>;
+    fn migrate(&mut self, policy: MigrationPolicy) -> DbmsResult<()>;
 }
 ```
 
@@ -452,20 +451,7 @@ where
 
 The macro generates match arms keyed by table name. `migrate_default` chains `Migrate::default_value` → `ColumnDef::default`; `migrate_transform` dispatches to `Migrate::transform_column`; `compiled_snapshots` calls `T::schema_snapshot()` for every table in the `#[tables(...)]` list.
 
-### IC Endpoints
-
-`#[derive(DbmsCanister)]` emits three additional admin-gated endpoints:
-
-```candid
-service : (IcDbmsCanisterArgs) -> {
-  // ...
-  has_schema_drift : () -> (bool) query;
-  plan_migration  : () -> (Result_Vec_MigrationOp);
-  migrate         : (MigrationPolicy) -> (Result);
-}
-```
-
-`MigrationOp`, `MigrationPolicy`, `TableSchemaSnapshot`, `ColumnSnapshot`, `IndexSnapshot`, `ForeignKeySnapshot`, `DataTypeSnapshot`, and `ColumnChanges` derive `CandidType + Deserialize` behind the `candid` feature in `wasm-dbms-api`, so they appear in the generated `.did` automatically.
+For the migration endpoints exposed on the Internet Computer, see the [ic-dbms documentation](https://ic.wasm-dbms.cc).
 
 ---
 
@@ -512,7 +498,7 @@ pub struct UserV2 {
 }
 ```
 
-After upgrading the canister, `dbms.has_drift()` returns `true`. Calling `dbms.migrate(MigrationPolicy::default())` produces the following ops (in apply order):
+After deploying the new binary, `dbms.has_drift()` returns `true`. Calling `dbms.migrate(MigrationPolicy::default())` produces the following ops (in apply order):
 
 1. `RenameColumn { table: "users", old: "name", new: "full_name" }`
 2. `AddColumn { table: "users", column: ColumnSnapshot { name: "login_count", default: Some(Value::Uint32(Uint32(0))), ... } }`
@@ -534,7 +520,7 @@ Plan a `nullable: false` flip in two steps: first add the column nullable + back
 
 **3. Always start with `allow_destructive: false`.**
 
-Run `plan_migration()` and inspect the ops before flipping the policy. A surprise `DropTable` because of a typo in `#[table = "..."]` is much cheaper to catch in pre-flight than after the journal commits.
+Run `pending_migrations()` and inspect the ops before flipping the policy. A surprise `DropTable` because of a typo in `#[table = "..."]` is much cheaper to catch in pre-flight than after the journal commits.
 
 **4. Test drift with the real binary format.**
 
@@ -546,4 +532,4 @@ Adding a new variant takes a fresh tag. Renaming or reordering existing tags bre
 
 **6. Persist migration logs externally.**
 
-The DBMS does not retain a history of applied migrations beyond the new `schema_hash`. If you need an audit trail, log `plan_migration()` output before calling `migrate()`.
+The DBMS does not retain a history of applied migrations beyond the new `schema_hash`. If you need an audit trail, log `pending_migrations()` output before calling `migrate()`.

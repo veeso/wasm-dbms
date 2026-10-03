@@ -155,7 +155,7 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/). 
 ```text
 feat(query): add HAVING clause to aggregate queries
 fix(memory): handle page boundary in free segment ledger
-docs(ic): clarify ACL bootstrap flow
+docs(memory): clarify page allocation flow
 chore(ci): cache cargo registry between jobs
 ```
 
@@ -222,7 +222,7 @@ Use the issue templates under [`.github/ISSUE_TEMPLATE/`](./.github/ISSUE_TEMPLA
 - Crate version (or commit SHA).
 - Minimal reproduction (preferably a failing test).
 - Expected vs. actual behaviour.
-- Host platform and runtime (native, Wasmtime, IC replica, mainnet …).
+- Host platform and runtime (native, Wasmtime, Wasmer …).
 
 ## Security Issues
 

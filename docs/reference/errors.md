@@ -197,8 +197,8 @@ match database.insert::<User>(req) {
 
 **Solutions:**
 
-- Call `dbms.migrate(MigrationPolicy::default())` from `post_upgrade` (IC) or your boot path to clear the drift flag.
-- Inspect the diff first via `dbms.plan_migration()` to confirm the ops are safe.
+- Call `dbms.migrate(MigrationPolicy::default())` from your boot path to clear the drift flag.
+- Inspect the diff first via `dbms.pending_migrations()` to confirm the ops are safe.
 
 ### IncompatibleType
 
@@ -244,7 +244,7 @@ match database.insert::<User>(req) {
 **Solutions:**
 
 - Inspect the embedded `reason` string to see which row failed.
-- Fix the offending data manually (or via a helper canister method) before retrying `migrate`.
+- Fix the offending data manually (or via a helper routine) before retrying `migrate`.
 
 ### WideningIncompatible
 

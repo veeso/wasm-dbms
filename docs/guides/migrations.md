@@ -16,14 +16,12 @@
   - [Tightening Constraints](#tightening-constraints)
   - [Adding and Dropping Indexes](#adding-and-dropping-indexes)
   - [Running Migrations](#running-migrations)
-    - [Generic Backend](#generic-backend)
-    - [IC Canister](#ic-canister)
   - [Inspecting Drift Without Migrating](#inspecting-drift-without-migrating)
   - [Recovering from a Failed Migration](#recovering-from-a-failed-migration)
   - [Testing Migrations](#testing-migrations)
   - [Common Pitfalls](#common-pitfalls)
 
-> For the full type and API reference (snapshot format, op enum, error variants, IC endpoints), see the [Migrations Reference](../reference/migrations.md).
+> For the full type and API reference (snapshot format, op enum, error variants), see the [Migrations Reference](../reference/migrations.md).
 
 ---
 
@@ -64,9 +62,9 @@ Drift fires whenever the encoded snapshot of any compiled table differs from the
 For most schema changes, the loop is:
 
 1. **Edit the schema** in your `#[derive(Table)]` structs.
-2. **Build and deploy** the new binary. On the IC, this is a canister upgrade.
-3. **Inspect drift.** Call `dbms.has_drift()` (or the `has_schema_drift` Candid query). Skip if `false`.
-4. **Plan.** Call `dbms.plan_migration()` and review the `Vec<MigrationOp>`.
+2. **Build and deploy** the new binary.
+3. **Inspect drift.** Call `dbms.has_drift()?`. Skip if `false`.
+4. **Plan.** Call `dbms.pending_migrations()` and review the `Vec<MigrationOp>`.
 5. **Apply.** Call `dbms.migrate(policy)` once the plan looks right.
 
 The remaining sections walk through the common shapes of step 1 and the policy choices for step 5.
@@ -171,7 +169,7 @@ pub struct User {
 
 The planner walks the slice in order: it first looks for a stored column named `name`; if that misses, it tries `username`. The first hit emits `RenameColumn { old, new: "full_name" }` and the column's data carries over intact.
 
-**Multiple renames across releases:** keep older entries at the tail. If you renamed `username` → `name` in v2 and `name` → `full_name` in v3, list `["name", "username"]` so a v1-installed canister upgrading directly to v3 still finds its column.
+**Multiple renames across releases:** keep older entries at the tail. If you renamed `username` → `name` in v2 and `name` → `full_name` in v3, list `["name", "username"]` so a v1-installed database upgrading directly to v3 still finds its column.
 
 ---
 
@@ -244,7 +242,7 @@ Return values:
 `DropColumn` and `DropTable` are **destructive**. The default `MigrationPolicy::default()` refuses them:
 
 ```rust
-let plan = dbms.plan_migration()?;   // shows DropTable / DropColumn ops
+let plan = dbms.pending_migrations()?;   // shows DropTable / DropColumn ops
 let result = dbms.migrate(MigrationPolicy::default());
 // → Err(DbmsError::Migration(MigrationError::DestructiveOpDenied { op: "DropColumn" }))
 ```
@@ -255,7 +253,7 @@ Opt in explicitly:
 dbms.migrate(MigrationPolicy { allow_destructive: true })?;
 ```
 
-> **Tip:** keep `allow_destructive: false` in the standard upgrade path and set it to `true` only when the operator has manually inspected `plan_migration()` output. A typo in `#[table = "..."]` looks identical to a deliberate drop in the diff.
+> **Tip:** keep `allow_destructive: false` in the standard upgrade path and set it to `true` only when the operator has manually inspected `pending_migrations()` output. A typo in `#[table = "..."]` looks identical to a deliberate drop in the diff.
 
 ---
 
@@ -311,15 +309,16 @@ pub struct User {
 
 ## Running Migrations
 
-### Generic Backend
-
 ```rust
 use wasm_dbms::prelude::*;
 use wasm_dbms_api::prelude::MigrationPolicy;
 
-fn boot(mut dbms: Dbms<...>) -> DbmsResult<()> {
-    if dbms.has_drift() {
-        let plan = dbms.plan_migration()?;
+fn boot<M>(mut dbms: WasmDbmsDatabase<'_, M>) -> DbmsResult<()>
+where
+    M: MemoryProvider,
+{
+    if dbms.has_drift()? {
+        let plan = dbms.pending_migrations()?;
         eprintln!("schema drift detected, applying {} ops", plan.len());
         for op in &plan {
             eprintln!("  {op:?}");
@@ -332,47 +331,20 @@ fn boot(mut dbms: Dbms<...>) -> DbmsResult<()> {
 
 `migrate` is idempotent: when there is no drift, it is a no-op.
 
-### IC Canister
-
-The `#[derive(DbmsCanister)]` macro emits three admin-gated endpoints:
-
-```candid
-has_schema_drift : () -> (bool) query;
-plan_migration  : () -> (Result_Vec_MigrationOp);
-migrate         : (MigrationPolicy) -> (Result);
-```
-
-Wire them into your `post_upgrade` hook so that an upgrade automatically heals drift, gated on operator confirmation:
-
-```rust
-#[ic_cdk::post_upgrade]
-fn post_upgrade() {
-    DBMS_CONTEXT.with(|ctx| {
-        // Inspect drift and decide whether to auto-migrate. For
-        // safety the framework refuses destructive ops by default.
-        let mut db = WasmDbmsDatabase::oneshot(ctx, MyDbmsCanister);
-        if db.has_drift() {
-            db.migrate(MigrationPolicy::default())
-                .expect("migration failed");
-        }
-    });
-}
-```
-
-Or, for stricter control, leave the canister in drift state after upgrade and run `migrate` from a tooling script after operator review.
+For the migration endpoints and upgrade hooks on the Internet Computer, see the [ic-dbms documentation](https://ic.wasm-dbms.cc).
 
 ---
 
 ## Inspecting Drift Without Migrating
 
-`plan_migration()` is safe to call regardless of drift state and never touches stable memory. Use it to:
+`pending_migrations()` is safe to call regardless of drift state and never writes to memory. Use it to:
 
 - Diff a development branch against production data.
 - Generate a changelog entry from `MigrationOp` Debug output.
 - Catch unintended drops in CI before the binary ships.
 
 ```rust
-let plan = dbms.plan_migration()?;
+let plan = dbms.pending_migrations()?;
 for op in plan {
     println!("{op:?}");
 }
@@ -404,7 +376,7 @@ The migration pipeline is testable end-to-end on the heap memory provider:
 1. Register the **old** schema with a fresh `DbmsContext`.
 2. Insert representative fixtures.
 3. Drop the context and reopen it with the **new** schema (no rebuild, since this is just Rust code).
-4. Assert `has_drift() == true`, inspect `plan_migration()`, call `migrate(policy)`.
+4. Assert `has_drift() == true`, inspect `pending_migrations()`, call `migrate(policy)`.
 5. Read the rows back and assert the expected post-migration state.
 
 ```rust
@@ -419,7 +391,7 @@ fn renames_preserve_data() {
 
     // v2 schema: column renamed to "full_name"
     let mut db = WasmDbmsDatabase::oneshot(&ctx, SchemaV2);
-    assert!(db.has_drift());
+    assert!(db.has_drift().unwrap());
     db.migrate(MigrationPolicy::default()).unwrap();
 
     let users: Vec<UserV2Record> = db.select::<UserV2>(Query::builder().build()).unwrap();

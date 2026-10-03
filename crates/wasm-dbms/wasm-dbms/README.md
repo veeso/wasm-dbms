@@ -135,7 +135,7 @@ database.commit()?;
 - JOIN operations between tables
 - Validation and sanitization on table columns
 - Custom data types
-- Runtime-agnostic: works on any WASM runtime (Wasmtime, Wasmer, WasmEdge, Internet Computer, etc.)
+- Runtime-agnostic: works on any WASM runtime (Wasmtime, Wasmer, WasmEdge, etc.)
 
 ## Documentation
 

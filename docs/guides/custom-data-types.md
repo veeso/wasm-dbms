@@ -84,7 +84,7 @@ pub struct Address {
 | `Display`                  | Human-readable display (see Step 2)      |
 | `Encode`                   | Binary encoding for storage (see Step 3) |
 
-> **Note:** For IC canister usage, also derive `CandidType` and `Deserialize` from the `candid` crate.
+> **Note:** For Internet Computer usage, see the [ic-dbms documentation](https://ic.wasm-dbms.cc).
 
 ### Step 2: Implement Display
 

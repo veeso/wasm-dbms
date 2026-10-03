@@ -41,7 +41,7 @@ wasm-dbms provides a rich set of data types for defining table schemas. Each typ
 | Semi-structured | Json                                                     |
 | Wrapper         | Nullable\<T\>                                            |
 
-> **Note:** The `Principal` type is available in `ic-dbms-api` for Internet Computer integration. See the [IC Data Types](https://ic.wasm-dbms.cc/reference/data-types.html) reference for details.
+> **Note:** For Internet Computer types such as `Principal`, see the [ic-dbms documentation](https://ic.wasm-dbms.cc/reference/data-types.html).
 
 ---
 
@@ -549,7 +549,7 @@ See the [Custom Data Types Guide](../guides/custom-data-types.md) for step-by-st
 | `Json`         | `serde_json::Value`     |
 | `Nullable<T>`  | `Option<T>`             |
 
-> **Note:** For IC canister usage, these types also map to Candid types. See the [IC Data Types](https://ic.wasm-dbms.cc/reference/data-types.html) reference for the Candid mapping.
+> **Note:** For the Candid mapping of these types, see the [ic-dbms documentation](https://ic.wasm-dbms.cc/reference/data-types.html).
 
 **Conversion examples:**
 
