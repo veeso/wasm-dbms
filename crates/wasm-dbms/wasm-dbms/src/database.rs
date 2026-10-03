@@ -16,9 +16,7 @@ use wasm_dbms_api::prelude::{
     ValuesSource,
 };
 use wasm_dbms_memory::RecordAddress;
-use wasm_dbms_memory::prelude::{
-    AccessControl, AccessControlList, MemoryAccess, MemoryProvider, NextRecord, TableRegistry,
-};
+use wasm_dbms_memory::prelude::{MemoryAccess, MemoryProvider, NextRecord, TableRegistry};
 
 use self::filter_analyzer::{IndexPlan, analyze_filter};
 use self::index_reader::{IndexReader, IndexSearchResult};
@@ -31,41 +29,37 @@ use crate::transaction::{DatabaseOverlay, Transaction, TransactionOp};
 /// Default capacity for SELECT queries.
 const DEFAULT_SELECT_CAPACITY: usize = 128;
 
-fn prime_drift_cache<M, A>(ctx: &DbmsContext<M, A>, schema: &dyn DatabaseSchema<M, A>)
+fn prime_drift_cache<M>(ctx: &DbmsContext<M>, schema: &dyn DatabaseSchema<M>)
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let compiled_hash = snapshots::compute_hash(schema.compiled_snapshots_dyn());
     let drifted = ctx.schema_registry.borrow().schema_hash() != compiled_hash;
     ctx.set_drift(compiled_hash, drifted);
 }
 
-/// The main DBMS database struct, generic over `MemoryProvider` and
-/// `AccessControl`.
+/// The main DBMS database struct, generic over `MemoryProvider`.
 ///
 /// This struct borrows from a [`DbmsContext`] and provides all CRUD
 /// operations, transaction management, and query execution.
-pub struct WasmDbmsDatabase<'ctx, M, A = AccessControlList>
+pub struct WasmDbmsDatabase<'ctx, M>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Reference to the DBMS context owning all state.
-    ctx: &'ctx DbmsContext<M, A>,
+    ctx: &'ctx DbmsContext<M>,
     /// Schema for dynamic dispatch of table operations.
-    schema: Box<dyn DatabaseSchema<M, A> + 'ctx>,
+    schema: Box<dyn DatabaseSchema<M> + 'ctx>,
     /// Active transaction ID, if any.
     transaction: Option<TransactionId>,
 }
 
-impl<'ctx, M, A> WasmDbmsDatabase<'ctx, M, A>
+impl<'ctx, M> WasmDbmsDatabase<'ctx, M>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Creates a one-shot (non-transactional) database instance.
-    pub fn oneshot(ctx: &'ctx DbmsContext<M, A>, schema: impl DatabaseSchema<M, A> + 'ctx) -> Self {
+    pub fn oneshot(ctx: &'ctx DbmsContext<M>, schema: impl DatabaseSchema<M> + 'ctx) -> Self {
         let schema = Box::new(schema);
         prime_drift_cache(ctx, schema.as_ref());
         Self {
@@ -77,8 +71,8 @@ where
 
     /// Creates a transactional database instance.
     pub fn from_transaction(
-        ctx: &'ctx DbmsContext<M, A>,
-        schema: impl DatabaseSchema<M, A> + 'ctx,
+        ctx: &'ctx DbmsContext<M>,
+        schema: impl DatabaseSchema<M> + 'ctx,
         transaction_id: TransactionId,
     ) -> Self {
         let schema = Box::new(schema);
@@ -116,92 +110,6 @@ where
         let ts = self.ctx.transaction_session.borrow();
         let tx = ts.get_transaction(txid)?;
         f(tx)
-    }
-
-    // --- ACL surface ------------------------------------------------------
-
-    /// Returns whether `id` is granted `required` on `table`.
-    pub fn granted(
-        &self,
-        id: &A::Id,
-        table: wasm_dbms_api::prelude::TableFingerprint,
-        required: wasm_dbms_api::prelude::TablePerms,
-    ) -> bool {
-        self.ctx.granted(id, table, required)
-    }
-
-    /// Returns whether `id` carries the `admin` bypass flag.
-    pub fn granted_admin(&self, id: &A::Id) -> bool {
-        self.ctx.granted_admin(id)
-    }
-
-    /// Returns whether `id` carries the `manage_acl` flag.
-    pub fn granted_manage_acl(&self, id: &A::Id) -> bool {
-        self.ctx.granted_manage_acl(id)
-    }
-
-    /// Returns whether `id` carries the `migrate` flag.
-    pub fn granted_migrate(&self, id: &A::Id) -> bool {
-        self.ctx.granted_migrate(id)
-    }
-
-    /// Applies a grant on behalf of `caller`. Self-enforces `manage_acl`.
-    pub fn grant(
-        &self,
-        caller: &A::Id,
-        target: A::Id,
-        grant: wasm_dbms_api::prelude::PermGrant,
-    ) -> DbmsResult<()> {
-        if !self.ctx.granted_manage_acl(caller) {
-            return Err(DbmsError::AccessDenied {
-                table: None,
-                required: wasm_dbms_api::prelude::RequiredPerm::ManageAcl,
-            });
-        }
-        self.ctx.acl_grant(target, grant)
-    }
-
-    /// Applies a revoke on behalf of `caller`. Self-enforces `manage_acl`.
-    pub fn revoke(
-        &self,
-        caller: &A::Id,
-        target: &A::Id,
-        revoke: wasm_dbms_api::prelude::PermRevoke,
-    ) -> DbmsResult<()> {
-        if !self.ctx.granted_manage_acl(caller) {
-            return Err(DbmsError::AccessDenied {
-                table: None,
-                required: wasm_dbms_api::prelude::RequiredPerm::ManageAcl,
-            });
-        }
-        self.ctx.acl_revoke(target, revoke)
-    }
-
-    /// Removes `target` from the ACL on behalf of `caller`. Self-enforces
-    /// `manage_acl`.
-    pub fn remove_identity(&self, caller: &A::Id, target: &A::Id) -> DbmsResult<()> {
-        if !self.ctx.granted_manage_acl(caller) {
-            return Err(DbmsError::AccessDenied {
-                table: None,
-                required: wasm_dbms_api::prelude::RequiredPerm::ManageAcl,
-            });
-        }
-        self.ctx.acl_remove_identity(target)
-    }
-
-    /// Returns every identity in the ACL together with its perms, on
-    /// behalf of `caller`. Self-enforces `manage_acl`.
-    pub fn identities(
-        &self,
-        caller: &A::Id,
-    ) -> DbmsResult<Vec<(A::Id, wasm_dbms_api::prelude::IdentityPerms)>> {
-        if !self.ctx.granted_manage_acl(caller) {
-            return Err(DbmsError::AccessDenied {
-                table: None,
-                required: wasm_dbms_api::prelude::RequiredPerm::ManageAcl,
-            });
-        }
-        Ok(self.ctx.acl_identities())
     }
 
     /// Returns the cached drift flag, computing and caching it on first call.
@@ -249,7 +157,7 @@ where
     /// memory in an irrecoverably corrupt state (M-PANIC-ON-BUG).
     fn atomic<F, R>(&self, f: F) -> DbmsResult<R>
     where
-        F: FnOnce(&WasmDbmsDatabase<'ctx, M, A>) -> DbmsResult<R>,
+        F: FnOnce(&WasmDbmsDatabase<'ctx, M>) -> DbmsResult<R>,
     {
         let nested = self.ctx.journal.borrow().is_some();
         if !nested {
@@ -1138,10 +1046,9 @@ fn index_key(columns: &[&str], values: &[(ColumnDef, Value)]) -> Vec<Value> {
         .collect()
 }
 
-impl<M, A> Database for WasmDbmsDatabase<'_, M, A>
+impl<M> Database for WasmDbmsDatabase<'_, M>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     fn select<T>(&self, query: Query) -> DbmsResult<Vec<T::Record>>
     where
@@ -1178,7 +1085,7 @@ where
         T: TableSchema,
     {
         self.ensure_no_drift()?;
-        aggregate::run_aggregate::<T, _, _>(self, query, aggregates)
+        aggregate::run_aggregate::<T, _>(self, query, aggregates)
     }
 
     fn insert<T>(&self, record: T::Insert) -> DbmsResult<()>

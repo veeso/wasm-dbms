@@ -5,7 +5,7 @@ use wasm_dbms_api::prelude::{
     AggregateFunction, AggregatedRow, ColumnDef, DbmsResult, DeleteBehavior, Filter, JoinColumnDef,
     Query, TableSchemaSnapshot, Value,
 };
-use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
+use wasm_dbms_memory::prelude::MemoryProvider;
 
 use crate::database::WasmDbmsDatabase;
 
@@ -17,15 +17,14 @@ use crate::database::WasmDbmsDatabase;
 ///
 /// This trait is typically implemented by generated code from the
 /// `#[derive(DatabaseSchema)]` macro.
-pub trait DatabaseSchema<M, A = AccessControlList>
+pub trait DatabaseSchema<M>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Performs a generic select for the given table name and query.
     fn select(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         table_name: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>>;
@@ -34,7 +33,7 @@ where
     /// that include source table names.
     fn select_join(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         from_table: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
@@ -44,7 +43,7 @@ where
     /// Performs an aggregate query for the given table name
     fn aggregate(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         table_name: &str,
         query: Query,
         aggregates: &[AggregateFunction],
@@ -56,7 +55,7 @@ where
     /// Performs an insert for the given table name.
     fn insert(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
     ) -> DbmsResult<()>;
@@ -64,7 +63,7 @@ where
     /// Performs a delete for the given table name.
     fn delete(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         table_name: &'static str,
         delete_behavior: DeleteBehavior,
         filter: Option<Filter>,
@@ -73,7 +72,7 @@ where
     /// Performs an update for the given table name.
     fn update(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         table_name: &'static str,
         patch_values: &[(ColumnDef, Value)],
         filter: Option<Filter>,
@@ -82,7 +81,7 @@ where
     /// Validates an insert operation.
     fn validate_insert(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
     ) -> DbmsResult<()>;
@@ -90,7 +89,7 @@ where
     /// Validates an update operation.
     fn validate_update(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         table_name: &'static str,
         record_values: &[(ColumnDef, Value)],
         old_pk: Value,

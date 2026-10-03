@@ -49,8 +49,8 @@ This design provides:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     Layer 3: API Layer                       │
-│  Canister endpoints, Candid interface, access control        │
-│  (DbmsCanister macro, ACL guards, request/response types)    │
+│  Canister endpoints, Candid interface                        │
+│  (DbmsCanister macro, request/response types)                │
 ├─────────────────────────────────────────────────────────────┤
 │                     Layer 2: DBMS Layer                      │
 │  Tables, CRUD operations, transactions, foreign keys         │
@@ -97,7 +97,7 @@ This design provides:
 
 ```
 Page 0: Schema Registry (table → page mapping)
-Page 1: ACL (allowed principals)
+Page 1: Unclaimed Pages Ledger (released pages available for reuse)
 Page 2+: Table data (Page Ledger, Free Segments, Index Ledger, Autoincrement Ledger, Records, B-tree nodes)
 ```
 
@@ -119,7 +119,7 @@ See [Memory Documentation](./memory.md) for detailed technical information.
 
 | Component            | Purpose                                                                          |
 | -------------------- | -------------------------------------------------------------------------------- |
-| `DbmsContext<M>`     | Owns all DBMS state (memory, schema, ACL, transactions, journal)                 |
+| `DbmsContext<M>`     | Owns all DBMS state (memory, schema, transactions, journal)                      |
 | `WasmDbmsDatabase`   | Session-scoped DBMS operations                                                   |
 | `TableRegistry`      | Manages records for a single table                                               |
 | `TransactionSession` | Handles transaction lifecycle                                                    |
@@ -168,7 +168,6 @@ Transactions use an overlay pattern:
 
 - Expose Candid interface
 - Handle request/response encoding
-- Enforce access control (ACL)
 - Route requests to DBMS layer
 - Generate table-specific endpoints
 
@@ -177,7 +176,6 @@ Transactions use an overlay pattern:
 | Component            | Purpose                                   |
 | -------------------- | ----------------------------------------- |
 | `DbmsCanister` macro | Generates canister API from schema        |
-| ACL guard            | Checks caller authorization               |
 | Request types        | `InsertRequest`, `UpdateRequest`, `Query` |
 | Response types       | `Record`, error handling                  |
 
@@ -197,9 +195,6 @@ select(table: String, Query, Option<TxId>) -> Result<Vec<Vec<(JoinColumnDef, Val
 begin_transaction() -> TxId
 commit(TxId) -> Result<()>
 rollback(TxId) -> Result<()>
-acl_add_principal(Principal) -> Result<()>
-acl_remove_principal(Principal) -> Result<()>
-acl_allowed_principals() -> Vec<Principal>
 ```
 
 ---
@@ -259,9 +254,6 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 - `HeapMemoryProvider` (testing)
 - `MemoryManager` (page-level operations)
 - `SchemaRegistry` (table-to-page mapping)
-- `AccessControl` trait (identity-based ACL abstraction)
-- `AccessControlList` (default `AccessControl` impl with `Vec<u8>` identity)
-- `NoAccessControl` (no-op ACL for runtimes that don't need access control)
 - `TableRegistry` (record-level operations)
 
 #### wasm-dbms
@@ -270,8 +262,8 @@ ic-dbms-macros <── ic-dbms-canister ─────────────�
 
 **Contents:**
 
-- `DbmsContext<M, A = AccessControlList>` (owns all mutable state)
-- `WasmDbmsDatabase<'ctx, M, A>` (session-scoped operations)
+- `DbmsContext<M>` (owns all mutable state)
+- `WasmDbmsDatabase<'ctx, M>` (session-scoped operations)
 - Transaction management (overlay pattern)
 - Foreign key integrity checks
 - JOIN execution engine
@@ -312,7 +304,7 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
 
 - `IcMemoryProvider` (IC stable memory)
 - `DBMS_CONTEXT` thread-local wrapping `DbmsContext<IcMemoryProvider>`
-- Canister API layer with ACL guards
+- Canister API layer
 
 **Dependencies:** ic-dbms-api, ic-dbms-macros, wasm-dbms, wasm-dbms-memory, ic-cdk
 
@@ -344,11 +336,9 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
 ```
 1. Client calls insert_users(request, tx_id)
               │
-2. ACL guard checks caller authorization
+2. API layer deserializes request
               │
-3. API layer deserializes request
-              │
-4. DBMS layer:
+3. DBMS layer:
    a. Apply sanitizers to values
    b. Apply validators to values
    c. Check primary key uniqueness
@@ -357,14 +347,14 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
       (index overlay tracks added keys)
       Else: write directly
               │
-5. Memory layer:
+4. Memory layer:
    a. Encode record to bytes
    b. Find space (free segment or new page)
    c. Write to stable memory
    d. Update all indexes with the new
       key → RecordAddress mapping
               │
-6. Return Result<()>
+5. Return Result<()>
 ```
 
 ### Select Operation
@@ -372,11 +362,9 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
 ```
 1. Client calls select_users(query, tx_id)
               │
-2. ACL guard checks caller authorization
+2. API layer deserializes query
               │
-3. API layer deserializes query
-              │
-4. DBMS layer:
+3. DBMS layer:
    a. Parse filters
    b. Analyze filter for index plan
       (equality, range, or IN on indexed column)
@@ -392,11 +380,11 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
    h. Select requested columns
    i. Handle eager loading
               │
-5. Memory layer:
+4. Memory layer:
    a. Read pages
    b. Decode records
               │
-6. Return Result<Vec<Record>>
+5. Return Result<Vec<Record>>
 ```
 
 ### Select with Join
@@ -404,11 +392,9 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
 ```
 1. Client calls select(table, query_with_joins, tx_id)
               │
-2. ACL guard checks caller authorization
-              │
-3. API layer checks query.has_joins()
+2. API layer checks query.has_joins()
               │ (true)
-4. JoinEngine:
+3. JoinEngine:
    a. Read all rows from FROM table
    b. For each JOIN clause:
       - Read all rows from joined table
@@ -419,7 +405,7 @@ The IC adapter crates are maintained in the separate [ic-dbms](https://github.co
    e. Apply offset/limit
    f. Flatten to output with JoinColumnDef
               │
-5. Return Result<Vec<Vec<(JoinColumnDef, Value)>>>
+4. Return Result<Vec<Vec<(JoinColumnDef, Value)>>>
 ```
 
 See [Join Engine](./join-engine.md) for implementation details.

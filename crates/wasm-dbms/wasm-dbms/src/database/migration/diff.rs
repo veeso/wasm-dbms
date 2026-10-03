@@ -11,7 +11,7 @@ use wasm_dbms_api::prelude::{
     ColumnSnapshot, DataTypeSnapshot, DbmsError, DbmsResult, IndexSnapshot, MigrationError,
     MigrationOp, TableSchemaSnapshot,
 };
-use wasm_dbms_memory::prelude::{AccessControl, MemoryProvider};
+use wasm_dbms_memory::prelude::MemoryProvider;
 
 use crate::schema::DatabaseSchema;
 
@@ -28,14 +28,13 @@ use crate::schema::DatabaseSchema;
 ///   one neither in the widening whitelist nor presumed transformable.
 /// - [`MigrationError::DefaultMissing`] when a non-nullable column is added
 ///   with no `#[default]` and no `Migrate::default_value` override.
-pub(crate) fn diff<M, A>(
+pub(crate) fn diff<M>(
     stored: &[TableSchemaSnapshot],
     compiled: &[TableSchemaSnapshot],
-    schema: &dyn DatabaseSchema<M, A>,
+    schema: &dyn DatabaseSchema<M>,
 ) -> DbmsResult<Vec<MigrationOp>>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let mut ops = Vec::new();
 
@@ -67,30 +66,28 @@ fn find_by_name<'a>(
     snapshots.iter().find(|s| s.name == name)
 }
 
-fn diff_table<M, A>(
+fn diff_table<M>(
     stored: &TableSchemaSnapshot,
     compiled: &TableSchemaSnapshot,
-    schema: &dyn DatabaseSchema<M, A>,
+    schema: &dyn DatabaseSchema<M>,
     ops: &mut Vec<MigrationOp>,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     diff_columns(stored, compiled, schema, ops)?;
     diff_indexes(stored, compiled, ops);
     Ok(())
 }
 
-fn diff_columns<M, A>(
+fn diff_columns<M>(
     stored: &TableSchemaSnapshot,
     compiled: &TableSchemaSnapshot,
-    schema: &dyn DatabaseSchema<M, A>,
+    schema: &dyn DatabaseSchema<M>,
     ops: &mut Vec<MigrationOp>,
 ) -> DbmsResult<()>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     let mut consumed_stored: Vec<&str> = Vec::new();
 
@@ -294,7 +291,7 @@ mod tests {
         ColumnChanges, ForeignKeySnapshot, OnDeleteSnapshot, Text, Uint32, Value,
     };
     use wasm_dbms_macros::{DatabaseSchema, Table};
-    use wasm_dbms_memory::prelude::{AccessControlList, HeapMemoryProvider};
+    use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
     use super::*;
 
@@ -691,8 +688,7 @@ mod tests {
                 },
             ],
         )];
-        let ops = diff::<HeapMemoryProvider, AccessControlList>(&stored, &compiled, &RenameSchema)
-            .unwrap();
+        let ops = diff::<HeapMemoryProvider>(&stored, &compiled, &RenameSchema).unwrap();
         assert_eq!(ops.len(), 1);
         assert!(matches!(
             &ops[0],
@@ -735,8 +731,7 @@ mod tests {
                 },
             ],
         )];
-        let ops = diff::<HeapMemoryProvider, AccessControlList>(&stored, &compiled, &RenameSchema)
-            .unwrap();
+        let ops = diff::<HeapMemoryProvider>(&stored, &compiled, &RenameSchema).unwrap();
         assert!(matches!(
             &ops[0],
             MigrationOp::RenameColumn { old, .. } if old == "old_name"

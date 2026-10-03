@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use wasm_dbms_api::prelude::{
     ColumnDef, DbmsResult, JoinColumnDef, JoinType, OrderDirection, Query, Value,
 };
-use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
+use wasm_dbms_memory::prelude::MemoryProvider;
 
 use crate::database::WasmDbmsDatabase;
 use crate::schema::DatabaseSchema;
@@ -17,21 +17,19 @@ use crate::schema::DatabaseSchema;
 type JoinedRow = Vec<(String, Vec<(ColumnDef, Value)>)>;
 
 /// Engine that executes join queries using nested-loop join.
-pub struct JoinEngine<'a, Schema: ?Sized, M, A = AccessControlList>
+pub struct JoinEngine<'a, Schema: ?Sized, M>
 where
-    Schema: DatabaseSchema<M, A>,
+    Schema: DatabaseSchema<M>,
     M: MemoryProvider,
-    A: AccessControl,
 {
     schema: &'a Schema,
-    _marker: std::marker::PhantomData<(M, A)>,
+    _marker: std::marker::PhantomData<M>,
 }
 
-impl<'a, Schema: ?Sized, M, A> JoinEngine<'a, Schema, M, A>
+impl<'a, Schema: ?Sized, M> JoinEngine<'a, Schema, M>
 where
-    Schema: DatabaseSchema<M, A>,
+    Schema: DatabaseSchema<M>,
     M: MemoryProvider,
-    A: AccessControl,
 {
     pub fn new(schema: &'a Schema) -> Self {
         Self {
@@ -41,16 +39,15 @@ where
     }
 }
 
-impl<Schema: ?Sized, M, A> JoinEngine<'_, Schema, M, A>
+impl<Schema: ?Sized, M> JoinEngine<'_, Schema, M>
 where
-    Schema: DatabaseSchema<M, A>,
+    Schema: DatabaseSchema<M>,
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Executes a join query using nested-loop join.
     pub fn join(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         from_table: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
@@ -138,7 +135,7 @@ where
     )]
     fn load_join_right_rows(
         &self,
-        dbms: &WasmDbmsDatabase<'_, M, A>,
+        dbms: &WasmDbmsDatabase<'_, M>,
         left_rows: &[JoinedRow],
         right_table: &str,
         left_table: &str,

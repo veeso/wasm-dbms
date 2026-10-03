@@ -93,7 +93,7 @@ and the reference implementation in `crates/wasm-dbms/example/`.
 
 Internet Computer support lives in the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) repository. It provides the
 `ic-dbms-api`, `ic-dbms-canister`, `ic-dbms-macros`, and `ic-dbms-client` crates, which turn a wasm-dbms schema into a
-complete database canister with a generated Candid API, access control, and client libraries.
+complete database canister with a generated Candid API and client libraries.
 
 Read the ic-dbms documentation at <https://ic.wasm-dbms.cc>.
 
@@ -109,7 +109,6 @@ See the [Getting Started Guide](https://wasm-dbms.cc/guides/get-started.html) to
 - [x] Relationships between tables with foreign keys
 - [x] Transactions with commit and rollback
 - [x] Aggregation functions (COUNT, SUM, AVG, etc.)
-- [x] Access Control Lists (ACL) to restrict access to the database
 - [x] Validation, Sanitizers and constraints on table columns
 - [x] JOIN operations between tables
 - [x] Custom data types

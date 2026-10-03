@@ -10,7 +10,7 @@ use wasm_dbms_api::prelude::{
     DbmsResult, Decimal, Filter, OrderDirection, Query, QueryError, TableSchema, Uint64, Value,
     ValuesSource,
 };
-use wasm_dbms_memory::prelude::{AccessControl, MemoryProvider};
+use wasm_dbms_memory::prelude::MemoryProvider;
 
 use crate::database::{TableColumns, WasmDbmsDatabase, sort_values_with_direction};
 
@@ -19,15 +19,14 @@ use crate::database::{TableColumns, WasmDbmsDatabase, sort_values_with_direction
 /// Pipeline: `WHERE` -> `DISTINCT` -> group rows by `GROUP BY` keys -> compute
 /// each [`AggregateFunction`] per group -> apply `HAVING` -> apply `ORDER BY`
 /// -> apply `OFFSET`/`LIMIT`.
-pub(super) fn run_aggregate<T, M, A>(
-    db: &WasmDbmsDatabase<'_, M, A>,
+pub(super) fn run_aggregate<T, M>(
+    db: &WasmDbmsDatabase<'_, M>,
     query: Query,
     aggregates: &[AggregateFunction],
 ) -> DbmsResult<Vec<AggregatedRow>>
 where
     T: TableSchema,
     M: MemoryProvider,
-    A: AccessControl,
 {
     if !query.joins.is_empty() {
         return Err(DbmsError::Query(QueryError::InvalidQuery(

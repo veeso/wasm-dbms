@@ -60,7 +60,6 @@ API and type reference documentation:
 Internet Computer support lives in the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) project, documented at <https://ic.wasm-dbms.cc>:
 
 - [IC Getting Started](https://ic.wasm-dbms.cc/guides/get-started.html) - Deploy a database canister on the IC
-- [Access Control](https://ic.wasm-dbms.cc/guides/access-control.html) - Managing the ACL
 - [Client API](https://ic.wasm-dbms.cc/guides/client-api.html) - Using the IC client library
 
 ### WASI Integration

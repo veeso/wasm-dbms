@@ -6,30 +6,28 @@
 use wasm_dbms_api::prelude::{
     ColumnDef, Database as _, DbmsError, DbmsResult, Filter, Query, QueryError, TableSchema, Value,
 };
-use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
+use wasm_dbms_memory::prelude::MemoryProvider;
 
 use super::common;
 use crate::database::WasmDbmsDatabase;
 
 /// Integrity validator for insert operations.
-pub struct InsertIntegrityValidator<'a, T, M, A = AccessControlList>
+pub struct InsertIntegrityValidator<'a, T, M>
 where
     T: TableSchema,
     M: MemoryProvider,
-    A: AccessControl,
 {
-    database: &'a WasmDbmsDatabase<'a, M, A>,
+    database: &'a WasmDbmsDatabase<'a, M>,
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<'a, T, M, A> InsertIntegrityValidator<'a, T, M, A>
+impl<'a, T, M> InsertIntegrityValidator<'a, T, M>
 where
     T: TableSchema,
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Creates a new insert integrity validator.
-    pub fn new(dbms: &'a WasmDbmsDatabase<'a, M, A>) -> Self {
+    pub fn new(dbms: &'a WasmDbmsDatabase<'a, M>) -> Self {
         Self {
             database: dbms,
             _marker: std::marker::PhantomData,
@@ -37,11 +35,10 @@ where
     }
 }
 
-impl<T, M, A> InsertIntegrityValidator<'_, T, M, A>
+impl<T, M> InsertIntegrityValidator<'_, T, M>
 where
     T: TableSchema,
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Verifies whether the given insert record is valid.
     pub fn validate(&self, record_values: &[(ColumnDef, Value)]) -> DbmsResult<()> {

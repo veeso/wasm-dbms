@@ -22,7 +22,6 @@ repository = "https://github.com/veeso/wasm-dbms"
 rust-version = "1.91.1"
 
 [workspace.dependencies]
-bitflags = { version = "2", features = ["serde"] }
 candid = { version = "0.10", features = ["value"] }
 criterion = "0.8"
 duckdb = { version = "1", features = ["bundled"] }

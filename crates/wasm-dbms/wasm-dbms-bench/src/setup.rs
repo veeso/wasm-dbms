@@ -2,7 +2,6 @@ use duckdb::Connection as DuckConnection;
 use rusqlite::Connection as SqliteConnection;
 use wasm_dbms::prelude::{DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::{Database, Text, Uint32};
-use wasm_dbms_memory::prelude::NoAccessControl;
 
 use crate::data::{DataGenerator, PostData, UserData};
 use crate::provider::HashMapMemoryProvider;
@@ -13,11 +12,11 @@ use crate::schema::{
 
 // ── wasm-dbms ──
 
-pub type BenchDbmsContext = DbmsContext<HashMapMemoryProvider, NoAccessControl>;
+pub type BenchDbmsContext = DbmsContext<HashMapMemoryProvider>;
 
 /// Creates a wasm-dbms context with registered schema (empty tables).
 pub fn setup_wasm_dbms() -> BenchDbmsContext {
-    let ctx: BenchDbmsContext = DbmsContext::with_acl(HashMapMemoryProvider::default());
+    let ctx: BenchDbmsContext = DbmsContext::new(HashMapMemoryProvider::default());
     ctx.register_table::<User>()
         .expect("failed to register users table");
     ctx.register_table::<Post>()

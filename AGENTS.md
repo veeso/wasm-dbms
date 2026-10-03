@@ -98,7 +98,7 @@ wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbm
 1. `#[derive(Encode)]` provides binary serialization for memory storage.
 2. `#[derive(Table)]` generates `TableSchema`, record, request, and foreign
    fetcher types.
-3. `#[derive(DatabaseSchema)]` generates the `DatabaseSchema<M, A>` dispatch
+3. `#[derive(DatabaseSchema)]` generates the `DatabaseSchema<M>` dispatch
    implementation.
 
 The `#[derive(DbmsCanister)]` macro, which generates the IC canister API, lives
@@ -109,7 +109,7 @@ in the [ic-dbms](https://github.com/veeso/ic-dbms) repository.
 Stable memory uses 64 KiB pages:
 
 - Schema Registry: one page.
-- ACL Table: one page.
+- Unclaimed Pages Ledger: one page.
 - Each table: a page ledger, free-segments ledger, and record pages.
 
 The `MemoryProvider` trait abstracts memory access for testability. Tests use a

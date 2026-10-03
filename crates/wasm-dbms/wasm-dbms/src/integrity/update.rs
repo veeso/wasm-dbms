@@ -7,7 +7,7 @@ use wasm_dbms_api::prelude::{
     ColumnDef, Database as _, DbmsError, DbmsResult, Filter, Query, QueryError, TableRecord,
     TableSchema, Value,
 };
-use wasm_dbms_memory::prelude::{AccessControl, AccessControlList, MemoryProvider};
+use wasm_dbms_memory::prelude::MemoryProvider;
 
 use super::common;
 use crate::database::WasmDbmsDatabase;
@@ -16,26 +16,24 @@ use crate::database::WasmDbmsDatabase;
 ///
 /// Unlike [`super::InsertIntegrityValidator`], this validator allows the
 /// primary key to remain unchanged during an update.
-pub struct UpdateIntegrityValidator<'a, T, M, A = AccessControlList>
+pub struct UpdateIntegrityValidator<'a, T, M>
 where
     T: TableSchema,
     M: MemoryProvider,
-    A: AccessControl,
 {
-    database: &'a WasmDbmsDatabase<'a, M, A>,
+    database: &'a WasmDbmsDatabase<'a, M>,
     /// The current primary key value of the record being updated.
     old_pk: Value,
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<'a, T, M, A> UpdateIntegrityValidator<'a, T, M, A>
+impl<'a, T, M> UpdateIntegrityValidator<'a, T, M>
 where
     T: TableSchema,
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Creates a new update integrity validator.
-    pub fn new(dbms: &'a WasmDbmsDatabase<'a, M, A>, old_pk: Value) -> Self {
+    pub fn new(dbms: &'a WasmDbmsDatabase<'a, M>, old_pk: Value) -> Self {
         Self {
             database: dbms,
             old_pk,
@@ -44,11 +42,10 @@ where
     }
 }
 
-impl<T, M, A> UpdateIntegrityValidator<'_, T, M, A>
+impl<T, M> UpdateIntegrityValidator<'_, T, M>
 where
     T: TableSchema,
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Verifies whether the given updated record values are valid.
     pub fn validate(&self, record_values: &[(ColumnDef, Value)]) -> DbmsResult<()> {

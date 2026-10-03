@@ -2899,15 +2899,6 @@ mod migration_e2e {
     }
 
     #[test]
-    fn test_acl_operations_bypass_drift_gate() {
-        let ctx = setup();
-        tamper_snapshot_to_force_drift(&ctx);
-        ctx.acl_grant(vec![1, 2, 3], wasm_dbms_api::prelude::PermGrant::Admin)
-            .unwrap();
-        assert!(ctx.granted_admin(&vec![1, 2, 3]));
-    }
-
-    #[test]
     fn test_crud_resumes_after_successful_migration() {
         let ctx = setup();
 

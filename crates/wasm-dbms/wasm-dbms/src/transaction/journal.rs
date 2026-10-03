@@ -184,7 +184,8 @@ mod tests {
         MemoryManager::init(HeapMemoryProvider::default())
     }
 
-    const ACL_PAGE: Page = 1;
+    /// Reserved page used as a scratch target by the journal tests.
+    const SCRATCH_PAGE: Page = 0;
 
     #[test]
     fn test_journal_begin_commit_clears_journal() {
@@ -195,7 +196,7 @@ mod tests {
         {
             let mut writer = JournaledWriter::new(&mut mm, &mut journal);
             writer
-                .write_at(ACL_PAGE, 0, &data)
+                .write_at(SCRATCH_PAGE, 0, &data)
                 .expect("Failed to write data");
         }
 
@@ -207,7 +208,7 @@ mod tests {
         let mut mm = make_mm();
 
         let original = FixedSizeData { a: 10, b: 20 };
-        mm.write_at(ACL_PAGE, 0, &original)
+        mm.write_at(SCRATCH_PAGE, 0, &original)
             .expect("Failed to write original data");
 
         let mut journal = Journal::new();
@@ -215,18 +216,18 @@ mod tests {
         {
             let mut writer = JournaledWriter::new(&mut mm, &mut journal);
             writer
-                .write_at(ACL_PAGE, 0, &overwrite)
+                .write_at(SCRATCH_PAGE, 0, &overwrite)
                 .expect("Failed to overwrite data");
         }
 
-        let read_back: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
+        let read_back: FixedSizeData = mm.read_at(SCRATCH_PAGE, 0).expect("Failed to read data");
         assert_eq!(read_back, overwrite);
 
         journal
             .rollback(&mut mm)
             .expect("Failed to rollback journal");
 
-        let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
+        let restored: FixedSizeData = mm.read_at(SCRATCH_PAGE, 0).expect("Failed to read data");
         assert_eq!(restored, original);
     }
 
@@ -235,14 +236,14 @@ mod tests {
         let mut mm = make_mm();
 
         let original = FixedSizeData { a: 42, b: 1337 };
-        mm.write_at(ACL_PAGE, 0, &original)
+        mm.write_at(SCRATCH_PAGE, 0, &original)
             .expect("Failed to write original data");
 
         let mut journal = Journal::new();
         {
             let mut writer = JournaledWriter::new(&mut mm, &mut journal);
             writer
-                .zero(ACL_PAGE, 0, &original)
+                .zero(SCRATCH_PAGE, 0, &original)
                 .expect("Failed to zero data");
         }
 
@@ -250,7 +251,7 @@ mod tests {
             .rollback(&mut mm)
             .expect("Failed to rollback journal");
 
-        let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
+        let restored: FixedSizeData = mm.read_at(SCRATCH_PAGE, 0).expect("Failed to read data");
         assert_eq!(restored, original);
     }
 
@@ -259,10 +260,10 @@ mod tests {
         let mut mm = make_mm();
 
         let data = FixedSizeData { a: 5, b: 10 };
-        mm.write_at(ACL_PAGE, 0, &data)
+        mm.write_at(SCRATCH_PAGE, 0, &data)
             .expect("Failed to write data");
 
-        let read_back: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
+        let read_back: FixedSizeData = mm.read_at(SCRATCH_PAGE, 0).expect("Failed to read data");
         assert_eq!(read_back, data);
     }
 
@@ -272,9 +273,9 @@ mod tests {
 
         let data_a = FixedSizeData { a: 1, b: 2 };
         let data_b = FixedSizeData { a: 3, b: 4 };
-        mm.write_at(ACL_PAGE, 0, &data_a)
+        mm.write_at(SCRATCH_PAGE, 0, &data_a)
             .expect("Failed to write data_a");
-        mm.write_at(ACL_PAGE, 6, &data_b)
+        mm.write_at(SCRATCH_PAGE, 6, &data_b)
             .expect("Failed to write data_b");
 
         let mut journal = Journal::new();
@@ -283,10 +284,10 @@ mod tests {
             let overwrite_a = FixedSizeData { a: 100, b: 200 };
             let overwrite_b = FixedSizeData { a: 300, b: 400 };
             writer
-                .write_at(ACL_PAGE, 0, &overwrite_a)
+                .write_at(SCRATCH_PAGE, 0, &overwrite_a)
                 .expect("Failed to overwrite data_a");
             writer
-                .write_at(ACL_PAGE, 6, &overwrite_b)
+                .write_at(SCRATCH_PAGE, 6, &overwrite_b)
                 .expect("Failed to overwrite data_b");
         }
 
@@ -294,8 +295,8 @@ mod tests {
             .rollback(&mut mm)
             .expect("Failed to rollback journal");
 
-        let restored_a: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        let restored_b: FixedSizeData = mm.read_at(ACL_PAGE, 6).expect("Failed to read data");
+        let restored_a: FixedSizeData = mm.read_at(SCRATCH_PAGE, 0).expect("Failed to read data");
+        let restored_b: FixedSizeData = mm.read_at(SCRATCH_PAGE, 6).expect("Failed to read data");
         assert_eq!(restored_a, data_a);
         assert_eq!(restored_b, data_b);
     }
@@ -305,7 +306,7 @@ mod tests {
         let mut mm = make_mm();
 
         let original = FixedSizeData { a: 10, b: 20 };
-        mm.write_at(ACL_PAGE, 0, &original)
+        mm.write_at(SCRATCH_PAGE, 0, &original)
             .expect("Failed to write original");
 
         let mut journal = Journal::new();
@@ -313,11 +314,11 @@ mod tests {
             let mut writer = JournaledWriter::new(&mut mm, &mut journal);
             let first = FixedSizeData { a: 50, b: 60 };
             writer
-                .write_at(ACL_PAGE, 0, &first)
+                .write_at(SCRATCH_PAGE, 0, &first)
                 .expect("Failed to write first overwrite");
             let second = FixedSizeData { a: 90, b: 100 };
             writer
-                .write_at(ACL_PAGE, 0, &second)
+                .write_at(SCRATCH_PAGE, 0, &second)
                 .expect("Failed to write second overwrite");
         }
 
@@ -325,7 +326,7 @@ mod tests {
             .rollback(&mut mm)
             .expect("Failed to rollback journal");
 
-        let restored: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
+        let restored: FixedSizeData = mm.read_at(SCRATCH_PAGE, 0).expect("Failed to read data");
         assert_eq!(restored, original);
     }
 
@@ -334,7 +335,7 @@ mod tests {
         let mut mm = make_mm();
 
         let original = FixedSizeData { a: 1, b: 2 };
-        mm.write_at(ACL_PAGE, 0, &original)
+        mm.write_at(SCRATCH_PAGE, 0, &original)
             .expect("Failed to write original");
 
         let mut journal = Journal::new();
@@ -342,13 +343,13 @@ mod tests {
         {
             let mut writer = JournaledWriter::new(&mut mm, &mut journal);
             writer
-                .write_at(ACL_PAGE, 0, &updated)
+                .write_at(SCRATCH_PAGE, 0, &updated)
                 .expect("Failed to write updated data");
         }
 
         journal.commit();
 
-        let read_back: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
+        let read_back: FixedSizeData = mm.read_at(SCRATCH_PAGE, 0).expect("Failed to read data");
         assert_eq!(read_back, updated);
     }
 
@@ -413,9 +414,9 @@ mod tests {
 
         let data_a = FixedSizeData { a: 11, b: 22 };
         let data_b = FixedSizeData { a: 33, b: 44 };
-        mm.write_at(ACL_PAGE, 0, &data_a)
+        mm.write_at(SCRATCH_PAGE, 0, &data_a)
             .expect("Failed to write data_a");
-        mm.write_at(ACL_PAGE, 6, &data_b)
+        mm.write_at(SCRATCH_PAGE, 6, &data_b)
             .expect("Failed to write data_b");
 
         let mut journal = Journal::new();
@@ -423,10 +424,10 @@ mod tests {
             let mut writer = JournaledWriter::new(&mut mm, &mut journal);
             let overwrite = FixedSizeData { a: 77, b: 88 };
             writer
-                .write_at(ACL_PAGE, 0, &overwrite)
+                .write_at(SCRATCH_PAGE, 0, &overwrite)
                 .expect("Failed to overwrite data_a");
             writer
-                .zero(ACL_PAGE, 6, &data_b)
+                .zero(SCRATCH_PAGE, 6, &data_b)
                 .expect("Failed to zero data_b");
         }
 
@@ -434,8 +435,8 @@ mod tests {
             .rollback(&mut mm)
             .expect("Failed to rollback journal");
 
-        let restored_a: FixedSizeData = mm.read_at(ACL_PAGE, 0).expect("Failed to read data");
-        let restored_b: FixedSizeData = mm.read_at(ACL_PAGE, 6).expect("Failed to read data");
+        let restored_a: FixedSizeData = mm.read_at(SCRATCH_PAGE, 0).expect("Failed to read data");
+        let restored_b: FixedSizeData = mm.read_at(SCRATCH_PAGE, 6).expect("Failed to read data");
         assert_eq!(restored_a, data_a);
         assert_eq!(restored_b, data_b);
     }
@@ -445,11 +446,11 @@ mod tests {
         let mut mm = make_mm();
 
         let original = DataWithAlignment { a: 10, b: 20 };
-        mm.write_at(ACL_PAGE, 0, &original)
+        mm.write_at(SCRATCH_PAGE, 0, &original)
             .expect("Failed to write original");
 
         let mut original_raw = vec![0u8; 32];
-        mm.read_at_raw(ACL_PAGE, 0, &mut original_raw)
+        mm.read_at_raw(SCRATCH_PAGE, 0, &mut original_raw)
             .expect("Failed to read raw");
 
         let mut journal = Journal::new();
@@ -457,7 +458,7 @@ mod tests {
             let mut writer = JournaledWriter::new(&mut mm, &mut journal);
             let overwrite = DataWithAlignment { a: 99, b: 100 };
             writer
-                .write_at(ACL_PAGE, 0, &overwrite)
+                .write_at(SCRATCH_PAGE, 0, &overwrite)
                 .expect("Failed to overwrite");
         }
 
@@ -466,7 +467,7 @@ mod tests {
             .expect("Failed to rollback journal");
 
         let mut restored_raw = vec![0u8; 32];
-        mm.read_at_raw(ACL_PAGE, 0, &mut restored_raw)
+        mm.read_at_raw(SCRATCH_PAGE, 0, &mut restored_raw)
             .expect("Failed to read raw");
         assert_eq!(restored_raw, original_raw);
     }

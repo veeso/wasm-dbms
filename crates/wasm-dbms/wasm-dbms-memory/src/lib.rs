@@ -16,8 +16,7 @@
 //! runtime (heap, file, IC stable memory, ...) and the higher-level
 //! DBMS engine. It defines the [`MemoryProvider`] trait that abstracts
 //! over the storage backend and the on-top-of-it data structures that
-//! the engine uses to persist tables, schema, indexes, and access
-//! control state.
+//! the engine uses to persist tables, schema, and indexes.
 //!
 //! All structures use 64 KiB pages so the on-disk layout is byte-for-byte
 //! identical across providers — a heap-built database can be dumped and
@@ -31,14 +30,6 @@
 //!   grow, page count).
 //! - [`HeapMemoryProvider`] — in-memory provider for tests and embedded
 //!   use cases.
-//!
-//! Access control:
-//!
-//! - [`AccessControl`] — pluggable access control trait.
-//! - [`AccessControlList`] — identity-based per-table permissions
-//!   persisted on a dedicated page.
-//! - [`NoAccessControl`] — zero-overhead provider for runtimes that do
-//!   not need access control.
 //!
 //! Engine-facing data structures:
 //!
@@ -63,7 +54,7 @@
 //!
 //! ```text
 //! +0:  Schema Registry            (1 page)
-//! +1:  ACL Table                  (1 page)
+//! +1:  Unclaimed Pages Ledger     (1 page)
 //! +N:  Per-table Page Ledger      (1 page)
 //! +N:  Per-table Free Segments    (1 page)
 //! +N:  Per-table Record Pages     (grown on demand)
@@ -98,7 +89,6 @@
 
 extern crate self as wasm_dbms_memory;
 
-mod acl;
 mod memory_access;
 mod memory_manager;
 mod provider;
@@ -106,7 +96,6 @@ mod schema_registry;
 pub mod table_registry;
 mod unclaimed_pages;
 
-pub use self::acl::{AccessControl, AccessControlList, NoAccessControl};
 pub use self::memory_access::MemoryAccess;
 pub use self::memory_manager::{MemoryManager, RESERVED_PAGES, align_up};
 pub use self::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};
@@ -119,7 +108,6 @@ pub use self::unclaimed_pages::{UNCLAIMED_PAGES_CAPACITY, UnclaimedPages};
 
 /// Prelude re-exports for convenient use.
 pub mod prelude {
-    pub use super::acl::{AccessControl, AccessControlList, NoAccessControl};
     pub use super::memory_access::MemoryAccess;
     pub use super::memory_manager::{MemoryManager, RESERVED_PAGES, align_up};
     pub use super::provider::{HeapMemoryProvider, MemoryProvider, WASM_PAGE_SIZE};

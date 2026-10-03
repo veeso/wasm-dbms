@@ -28,7 +28,7 @@ The original `atomic()` implementation relied on panic semantics:
 ```rust
 fn atomic<F, R>(&self, f: F) -> R
 where
-    F: FnOnce(&WasmDbmsDatabase<M, A>) -> DbmsResult<R>,
+    F: FnOnce(&WasmDbmsDatabase<M>) -> DbmsResult<R>,
 {
     match f(self) {
         Ok(res) => res,

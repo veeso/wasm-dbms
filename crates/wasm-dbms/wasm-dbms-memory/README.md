@@ -15,7 +15,7 @@
 Runtime-agnostic memory abstraction and page management for the wasm-dbms framework.
 
 This crate provides the storage layer used by `wasm-dbms`, handling page-level memory
-operations, schema persistence, access control, and record-level storage.
+operations, schema persistence, and record-level storage.
 
 ## Components
 
@@ -23,7 +23,6 @@ operations, schema persistence, access control, and record-level storage.
 - [`HeapMemoryProvider`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.HeapMemoryProvider.html) - In-memory implementation for testing
 - [`MemoryManager`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.MemoryManager.html) - Page-level memory operations
 - [`SchemaRegistry`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.SchemaRegistry.html) - Table schema persistence
-- [`AccessControlList`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.AccessControlList.html) - Identity-based access control
 - [`TableRegistry`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.TableRegistry.html) - Record-level storage and retrieval
 - [`AutoincrementLedger`](https://docs.rs/wasm-dbms-memory/latest/wasm_dbms_memory/struct.AutoincrementLedger.html) - Autoincrement counter tracking per column
 
@@ -35,7 +34,7 @@ The memory is organized into 64 KiB pages:
 +---------------------------------------------+
 | Schema Registry (1 page)                    |
 +---------------------------------------------+
-| ACL Table (1 page)                          |
+| Unclaimed Pages Ledger (1 page)             |
 +---------------------------------------------+
 | Table XX Page Ledger (1 page)               |
 | Table XX Free Segments Ledger               |

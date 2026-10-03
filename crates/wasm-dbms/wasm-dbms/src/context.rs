@@ -9,13 +9,8 @@
 
 use std::cell::{Cell, RefCell};
 
-use wasm_dbms_api::prelude::{
-    DbmsResult, IdentityPerms, PermGrant, PermRevoke, TableFingerprint, TablePerms, TransactionId,
-};
-use wasm_dbms_memory::prelude::{
-    AccessControl, AccessControlList, MemoryManager, MemoryProvider, SchemaRegistry,
-    TableRegistryPage,
-};
+use wasm_dbms_api::prelude::{DbmsResult, TransactionId};
+use wasm_dbms_memory::prelude::{MemoryManager, MemoryProvider, SchemaRegistry, TableRegistryPage};
 
 use crate::transaction::journal::Journal;
 use crate::transaction::session::TransactionSession;
@@ -26,9 +21,6 @@ use crate::transaction::session::TransactionSession;
 /// borrowing different components can coexist without requiring
 /// `&mut self` on the context.
 ///
-/// The access-control provider `A` defaults to [`AccessControlList`].
-/// Runtimes that do not need ACL can use [`NoAccessControl`](wasm_dbms_memory::NoAccessControl).
-///
 /// # Threading
 ///
 /// `DbmsContext` is `!Send` and `!Sync` because of the `RefCell`
@@ -37,19 +29,15 @@ use crate::transaction::session::TransactionSession;
 /// mutability via `RefCell` is sufficient and avoids the overhead of
 /// synchronization primitives. Embedders that need multi-threaded
 /// access should wrap the context in their own synchronization layer.
-pub struct DbmsContext<M, A = AccessControlList>
+pub struct DbmsContext<M>
 where
     M: MemoryProvider,
-    A: AccessControl,
 {
     /// Memory manager for page-level operations.
     pub(crate) mm: RefCell<MemoryManager<M>>,
 
     /// Schema registry mapping table names to page locations.
     pub(crate) schema_registry: RefCell<SchemaRegistry>,
-
-    /// Access-control provider storing allowed identities.
-    pub(crate) acl: RefCell<A>,
 
     /// Active transaction sessions.
     pub(crate) transaction_session: RefCell<TransactionSession>,
@@ -71,40 +59,14 @@ impl<M> DbmsContext<M>
 where
     M: MemoryProvider,
 {
-    /// Creates a new DBMS context with the default [`AccessControlList`],
-    /// initializing the memory manager and loading persisted state.
+    /// Creates a new DBMS context, initializing the memory manager and
+    /// loading persisted state.
     pub fn new(memory: M) -> Self {
         let mut mm = MemoryManager::init(memory);
         let schema_registry = SchemaRegistry::load(&mut mm).unwrap_or_default();
-        let acl = AccessControlList::load(&mut mm).unwrap_or_default();
-
         Self {
             mm: RefCell::new(mm),
             schema_registry: RefCell::new(schema_registry),
-            acl: RefCell::new(acl),
-            transaction_session: RefCell::new(TransactionSession::default()),
-            journal: RefCell::new(None),
-            drift: Cell::new(None),
-            migrating: Cell::new(false),
-        }
-    }
-}
-
-impl<M, A> DbmsContext<M, A>
-where
-    M: MemoryProvider,
-    A: AccessControl,
-{
-    /// Creates a new DBMS context with a custom access control provider.
-    pub fn with_acl(memory: M) -> Self {
-        let mut mm = MemoryManager::init(memory);
-        let schema_registry = SchemaRegistry::load(&mut mm).unwrap_or_default();
-        let acl = A::load(&mut mm).unwrap_or_default();
-
-        Self {
-            mm: RefCell::new(mm),
-            schema_registry: RefCell::new(schema_registry),
-            acl: RefCell::new(acl),
             transaction_session: RefCell::new(TransactionSession::default()),
             journal: RefCell::new(None),
             drift: Cell::new(None),
@@ -127,60 +89,6 @@ where
             .borrow()
             .table_registry_page_by_name(name)
             .is_some()
-    }
-
-    /// Returns whether `id` is granted `required` on `table`.
-    pub fn granted(&self, id: &A::Id, table: TableFingerprint, required: TablePerms) -> bool {
-        self.acl.borrow().granted(id, table, required)
-    }
-
-    /// Returns whether `id` carries the `admin` bypass flag.
-    pub fn granted_admin(&self, id: &A::Id) -> bool {
-        self.acl.borrow().granted_admin(id)
-    }
-
-    /// Returns whether `id` carries the `manage_acl` flag.
-    pub fn granted_manage_acl(&self, id: &A::Id) -> bool {
-        self.acl.borrow().granted_manage_acl(id)
-    }
-
-    /// Returns whether `id` carries the `migrate` flag.
-    pub fn granted_migrate(&self, id: &A::Id) -> bool {
-        self.acl.borrow().granted_migrate(id)
-    }
-
-    /// Applies a grant. **Does not** enforce `manage_acl` on the caller —
-    /// callers must check `granted_manage_acl` first or use the
-    /// `Dbms::grant` wrapper which self-enforces.
-    pub fn acl_grant(&self, id: A::Id, grant: PermGrant) -> DbmsResult<()> {
-        let mut acl = self.acl.borrow_mut();
-        let mut mm = self.mm.borrow_mut();
-        acl.grant(id, grant, &mut mm).map_err(Into::into)
-    }
-
-    /// Applies a revoke. Does not enforce `manage_acl` on the caller.
-    pub fn acl_revoke(&self, id: &A::Id, revoke: PermRevoke) -> DbmsResult<()> {
-        let mut acl = self.acl.borrow_mut();
-        let mut mm = self.mm.borrow_mut();
-        acl.revoke(id, revoke, &mut mm).map_err(Into::into)
-    }
-
-    /// Removes an identity entirely. Does not enforce `manage_acl` on the
-    /// caller.
-    pub fn acl_remove_identity(&self, id: &A::Id) -> DbmsResult<()> {
-        let mut acl = self.acl.borrow_mut();
-        let mut mm = self.mm.borrow_mut();
-        acl.remove_identity(id, &mut mm).map_err(Into::into)
-    }
-
-    /// Returns the [`IdentityPerms`] currently held by `id`.
-    pub fn acl_perms(&self, id: &A::Id) -> IdentityPerms {
-        self.acl.borrow().perms(id)
-    }
-
-    /// Returns every identity in the ACL together with its perms.
-    pub fn acl_identities(&self) -> Vec<(A::Id, IdentityPerms)> {
-        self.acl.borrow().identities()
     }
 
     /// Begins a new transaction for the given owner identity.
@@ -223,15 +131,13 @@ where
     }
 }
 
-impl<M, A> std::fmt::Debug for DbmsContext<M, A>
+impl<M> std::fmt::Debug for DbmsContext<M>
 where
     M: MemoryProvider,
-    A: AccessControl + std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DbmsContext")
             .field("schema_registry", &self.schema_registry)
-            .field("acl", &self.acl)
             .field("transaction_session", &self.transaction_session)
             .finish_non_exhaustive()
     }
@@ -246,25 +152,7 @@ mod tests {
     #[test]
     fn test_should_create_context() {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        assert!(ctx.acl_identities().is_empty());
-    }
-
-    #[test]
-    fn test_should_grant_admin_to_identity() {
-        let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        ctx.acl_grant(vec![1, 2, 3], PermGrant::Admin).unwrap();
-        assert!(ctx.granted_admin(&vec![1, 2, 3]));
-        assert!(!ctx.granted_admin(&vec![4, 5, 6]));
-    }
-
-    #[test]
-    fn test_should_remove_identity() {
-        let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        ctx.acl_grant(vec![1, 2, 3], PermGrant::ManageAcl).unwrap();
-        ctx.acl_grant(vec![4, 5, 6], PermGrant::Admin).unwrap();
-        ctx.acl_remove_identity(&vec![4, 5, 6]).unwrap();
-        assert!(!ctx.granted_admin(&vec![4, 5, 6]));
-        assert!(ctx.granted_manage_acl(&vec![1, 2, 3]));
+        assert!(!ctx.has_table("users"));
     }
 
     #[test]
