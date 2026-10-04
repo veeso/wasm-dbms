@@ -180,10 +180,10 @@ impl FreeSegmentsLedger {
     }
 
     /// Find a reusable free segment able to hold `required_size` bytes.
+    /// Sibling to [`Self::find_reusable_segment`].
     ///
     /// `required_size` must be the record's full physical footprint: the
     /// length header plus the body, padded to the table alignment.
-    /// Sibling to [`Self::find_reusable_segment`].
     pub fn find_reusable_segment_raw(
         &self,
         required_size: MSize,

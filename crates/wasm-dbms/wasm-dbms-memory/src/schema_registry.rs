@@ -172,6 +172,10 @@ impl SchemaRegistry {
             return Ok(pages);
         }
 
+        // Reject unsupported autoincrement columns before any page is claimed
+        // or the registry is touched.
+        AutoincrementLedger::validate_snapshot(snapshot)?;
+
         let schema_snapshot_page = mm.claim_page()?;
         let pages_list_page = mm.claim_page()?;
         let free_segments_page = mm.claim_page()?;
@@ -1218,6 +1222,40 @@ mod tests {
             SchemaRegistry::decode(Cow::Owned(buf)),
             Err(MemoryError::DecodeError(DecodeError::TooShort))
         ));
+    }
+
+    #[test]
+    fn test_decode_rejects_entry_truncated_mid_field() {
+        use std::borrow::Cow;
+
+        use wasm_dbms_api::prelude::DecodeError;
+
+        // One entry that passes the count check (25 bytes) but flags an
+        // autoincrement page that is missing.
+        let mut buf = vec![0u8; 8];
+        buf.extend_from_slice(&1u64.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 24]);
+        buf.push(1);
+        assert!(matches!(
+            SchemaRegistry::decode(Cow::Owned(buf)),
+            Err(MemoryError::DecodeError(DecodeError::TooShort))
+        ));
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_rejects_non_integer_autoincrement_without_side_effects() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let mut snapshot = dummy_snapshot("texts");
+        snapshot.columns[0].data_type = DataTypeSnapshot::Text;
+        snapshot.columns[0].auto_increment = true;
+        let pages_before = mm.pages_count();
+
+        let result = registry.register_table_from_snapshot(&snapshot, &mut mm);
+
+        assert!(matches!(result, Err(MemoryError::ConstraintViolation(_))));
+        assert!(registry.table_registry_page_by_name("texts").is_none());
+        assert_eq!(mm.pages_count(), pages_before);
     }
 
     #[test]
