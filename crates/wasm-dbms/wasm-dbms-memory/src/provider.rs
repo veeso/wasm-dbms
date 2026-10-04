@@ -43,14 +43,37 @@ pub struct HeapMemoryProvider {
     memory: Vec<u8>,
 }
 
+impl HeapMemoryProvider {
+    /// Returns the in-bounds byte range `offset..offset + len`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::OutOfBounds`] if the range overflows or ends
+    /// past the current memory size.
+    fn checked_range(&self, offset: u64, len: usize) -> MemoryResult<std::ops::Range<usize>> {
+        let end = offset
+            .checked_add(len as u64)
+            .filter(|end| *end <= self.size())
+            .ok_or(MemoryError::OutOfBounds)?;
+        // `end` is bounded by `self.memory.len()`, so both fit in `usize`.
+        Ok(offset as usize..end as usize)
+    }
+}
+
 impl MemoryProvider for HeapMemoryProvider {
     const PAGE_SIZE: u64 = WASM_PAGE_SIZE; // 64 KiB
 
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64> {
         let previous_size = self.size();
-        let additional_size = (new_pages * Self::PAGE_SIZE) as usize;
+        let new_size = new_pages
+            .checked_mul(Self::PAGE_SIZE)
+            .and_then(|additional| previous_size.checked_add(additional))
+            .and_then(|size| usize::try_from(size).ok())
+            .ok_or(MemoryError::FailedToAllocatePage)?;
         self.memory
-            .resize(previous_size as usize + additional_size, 0);
+            .try_reserve_exact(new_size - self.memory.len())
+            .map_err(|err| MemoryError::ProviderError(err.to_string()))?;
+        self.memory.resize(new_size, 0);
         Ok(previous_size)
     }
 
@@ -63,22 +86,14 @@ impl MemoryProvider for HeapMemoryProvider {
     }
 
     fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
-        // check if the read is within bounds
-        if offset + buf.len() as u64 > self.size() {
-            return Err(MemoryError::OutOfBounds);
-        }
-
-        buf.copy_from_slice(&self.memory[offset as usize..(offset as usize + buf.len())]);
+        let range = self.checked_range(offset, buf.len())?;
+        buf.copy_from_slice(&self.memory[range]);
         Ok(())
     }
 
     fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()> {
-        // check if the write is within bounds
-        if offset + buf.len() as u64 > self.size() {
-            return Err(MemoryError::OutOfBounds);
-        }
-
-        self.memory[offset as usize..(offset as usize + buf.len())].copy_from_slice(buf);
+        let range = self.checked_range(offset, buf.len())?;
+        self.memory[range].copy_from_slice(buf);
         Ok(())
     }
 }
@@ -131,6 +146,39 @@ mod tests {
         let result = provider.write(HeapMemoryProvider::PAGE_SIZE - 3, &data_to_write);
         assert!(result.is_err());
         assert!(matches!(result.err().unwrap(), MemoryError::OutOfBounds));
+    }
+
+    #[test]
+    fn test_should_reject_extreme_offsets_heap_memory() {
+        let mut provider = HeapMemoryProvider::default();
+        provider.grow(1).unwrap();
+
+        let mut buf = [0u8; 1];
+        assert!(matches!(
+            provider.read(u64::MAX, &mut buf),
+            Err(MemoryError::OutOfBounds)
+        ));
+        assert!(matches!(
+            provider.write(u64::MAX, &[1]),
+            Err(MemoryError::OutOfBounds)
+        ));
+    }
+
+    #[test]
+    fn test_should_reject_overflowing_growth_heap_memory() {
+        let mut provider = HeapMemoryProvider::default();
+        assert!(provider.grow(u64::MAX).is_err());
+        assert_eq!(provider.size(), 0);
+    }
+
+    #[test]
+    fn test_grow_returns_error_when_allocation_fails() {
+        let mut provider = HeapMemoryProvider::default();
+        provider.grow(1).unwrap();
+
+        // 2^40 pages = 2^56 bytes: representable, but never allocatable.
+        assert!(provider.grow(1 << 40).is_err());
+        assert_eq!(provider.size(), HeapMemoryProvider::PAGE_SIZE);
     }
 
     #[test]
