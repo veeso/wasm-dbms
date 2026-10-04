@@ -12,7 +12,8 @@
 use std::borrow::Cow;
 
 use wasm_dbms_api::prelude::{
-    DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryError, MemoryResult, Page, PageOffset,
+    DEFAULT_ALIGNMENT, DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult, Page,
+    PageOffset,
 };
 
 /// Bytes of the on-page header (`u32` length prefix).
@@ -104,7 +105,7 @@ impl Encode for UnclaimedPages {
         Self: Sized,
     {
         if data.len() < HEADER_SIZE as usize {
-            return Ok(Self::default());
+            return Err(MemoryError::DecodeError(DecodeError::TooShort));
         }
         let count = u32::from_le_bytes(data[0..4].try_into()?) as usize;
         if count > UNCLAIMED_PAGES_CAPACITY as usize {
@@ -112,13 +113,17 @@ impl Encode for UnclaimedPages {
                 capacity: UNCLAIMED_PAGES_CAPACITY,
             });
         }
-        let mut pages = Vec::with_capacity(count);
-        let mut cursor = HEADER_SIZE as usize;
-        for _ in 0..count {
-            let page = Page::from_le_bytes(data[cursor..cursor + 4].try_into()?);
-            pages.push(page);
-            cursor += 4;
+        // `count` is bounded by the capacity, so this cannot overflow.
+        let required = HEADER_SIZE as usize + count * ENTRY_SIZE as usize;
+        if data.len() < required {
+            return Err(MemoryError::DecodeError(DecodeError::TooShort));
         }
+        let pages = data[HEADER_SIZE as usize..required]
+            .as_chunks::<{ ENTRY_SIZE as usize }>()
+            .0
+            .iter()
+            .map(|entry| Ok(Page::from_le_bytes(*entry)))
+            .collect::<MemoryResult<Vec<_>>>()?;
         Ok(Self { pages })
     }
 
@@ -129,6 +134,8 @@ impl Encode for UnclaimedPages {
 
 #[cfg(test)]
 mod tests {
+    use wasm_dbms_api::prelude::DecodeError;
+
     use super::*;
 
     #[test]
@@ -169,6 +176,23 @@ mod tests {
         let buf = vec![0u8; 65536];
         let ledger = UnclaimedPages::decode(Cow::Owned(buf)).expect("decode");
         assert!(ledger.is_empty());
+    }
+
+    #[test]
+    fn test_should_reject_truncated_buffers() {
+        // Header shorter than 4 bytes.
+        let short_header = UnclaimedPages::decode(Cow::Borrowed(&[1u8, 0][..]));
+        assert!(matches!(
+            short_header,
+            Err(MemoryError::DecodeError(DecodeError::TooShort))
+        ));
+
+        // Header declares one entry, but no entry bytes follow.
+        let missing_entry = UnclaimedPages::decode(Cow::Borrowed(&[1u8, 0, 0, 0][..]));
+        assert!(matches!(
+            missing_entry,
+            Err(MemoryError::DecodeError(DecodeError::TooShort))
+        ));
     }
 
     #[test]

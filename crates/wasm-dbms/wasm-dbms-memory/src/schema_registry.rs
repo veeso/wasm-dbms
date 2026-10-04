@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use wasm_dbms_api::memory::MemoryError;
 use wasm_dbms_api::prelude::{
-    DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryResult, Page, PageOffset, TableFingerprint,
-    TableSchema, TableSchemaSnapshot, fingerprint_for_name,
+    DEFAULT_ALIGNMENT, DataSize, DecodeError, Encode, MSize, MemoryResult, Page, PageOffset,
+    TableFingerprint, TableSchema, TableSchemaSnapshot, fingerprint_for_name,
 };
 use xxhash_rust::xxh3::Xxh3;
 
@@ -292,6 +292,25 @@ fn compute_hash(mut snapshots: Vec<TableSchemaSnapshot>) -> u64 {
     hasher.digest()
 }
 
+/// Smallest encoded registry entry: fingerprint (8), four pages (16) and the
+/// autoincrement flag (1).
+const MIN_ENTRY_SIZE: usize = 25;
+
+/// Reads `N` bytes at `offset` and advances it.
+///
+/// # Errors
+///
+/// Returns [`DecodeError::TooShort`] if fewer than `N` bytes remain.
+fn read_array<const N: usize>(data: &[u8], offset: &mut usize) -> MemoryResult<[u8; N]> {
+    let end = offset
+        .checked_add(N)
+        .filter(|end| *end <= data.len())
+        .ok_or(MemoryError::DecodeError(DecodeError::TooShort))?;
+    let bytes = data[*offset..end].try_into()?;
+    *offset = end;
+    Ok(bytes)
+}
+
 impl Encode for SchemaRegistry {
     const SIZE: DataSize = DataSize::Dynamic;
 
@@ -327,34 +346,25 @@ impl Encode for SchemaRegistry {
         Self: Sized,
     {
         let mut offset = 0;
-        let schema_hash = u64::from_le_bytes(data[offset..offset + 8].try_into()?);
-        offset += 8;
-        // read len
-        let len = u64::from_le_bytes(
-            data[offset..offset + 8]
-                .try_into()
-                .expect("failed to read length"),
-        ) as usize;
-        offset += 8;
+        let schema_hash = u64::from_le_bytes(read_array(&data, &mut offset)?);
+        let len = u64::from_le_bytes(read_array(&data, &mut offset)?);
+        // Reject counts the payload cannot hold before allocating for them.
+        let max_entries = (data.len() - offset) / MIN_ENTRY_SIZE;
+        let len = usize::try_from(len)
+            .ok()
+            .filter(|len| *len <= max_entries)
+            .ok_or(MemoryError::DecodeError(DecodeError::TooShort))?;
         let mut tables = HashMap::with_capacity(len);
         // read each entry
         for _ in 0..len {
-            let fingerprint = u64::from_le_bytes(data[offset..offset + 8].try_into()?);
-            offset += 8;
-            let schema_snapshot_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
-            offset += 4;
-            let pages_list_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
-            offset += 4;
-            let free_segments_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
-            offset += 4;
-            let index_registry_page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
-            offset += 4;
-            let has_autoincrement = data[offset] == 1;
-            offset += 1;
-            let autoincrement_registry_page = if has_autoincrement {
-                let page = Page::from_le_bytes(data[offset..offset + 4].try_into()?);
-                offset += 4;
-                Some(page)
+            let fingerprint = u64::from_le_bytes(read_array(&data, &mut offset)?);
+            let schema_snapshot_page = Page::from_le_bytes(read_array(&data, &mut offset)?);
+            let pages_list_page = Page::from_le_bytes(read_array(&data, &mut offset)?);
+            let free_segments_page = Page::from_le_bytes(read_array(&data, &mut offset)?);
+            let index_registry_page = Page::from_le_bytes(read_array(&data, &mut offset)?);
+            let [has_autoincrement] = read_array::<1>(&data, &mut offset)?;
+            let autoincrement_registry_page = if has_autoincrement == 1 {
+                Some(Page::from_le_bytes(read_array(&data, &mut offset)?))
             } else {
                 None
             };
@@ -1185,6 +1195,42 @@ mod tests {
                 ref candidate,
                 ref existing,
             }) if candidate == "users" && existing == "imposter"
+        ));
+    }
+
+    #[test]
+    fn test_decode_rejects_truncated_schema_registry() {
+        use std::borrow::Cow;
+
+        use wasm_dbms_api::prelude::DecodeError;
+
+        // No header at all.
+        assert!(matches!(
+            SchemaRegistry::decode(Cow::Borrowed(&[][..])),
+            Err(MemoryError::DecodeError(DecodeError::TooShort))
+        ));
+
+        // Header declares one entry, but only 10 entry bytes follow.
+        let mut buf = vec![0u8; 8];
+        buf.extend_from_slice(&1u64.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 10]);
+        assert!(matches!(
+            SchemaRegistry::decode(Cow::Owned(buf)),
+            Err(MemoryError::DecodeError(DecodeError::TooShort))
+        ));
+    }
+
+    #[test]
+    fn test_decode_rejects_entry_count_larger_than_payload() {
+        use std::borrow::Cow;
+
+        use wasm_dbms_api::prelude::DecodeError;
+
+        let mut buf = vec![0u8; 8];
+        buf.extend_from_slice(&u64::MAX.to_le_bytes());
+        assert!(matches!(
+            SchemaRegistry::decode(Cow::Owned(buf)),
+            Err(MemoryError::DecodeError(DecodeError::TooShort))
         ));
     }
 
