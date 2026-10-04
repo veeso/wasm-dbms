@@ -775,7 +775,22 @@ where
         let node = &mut path[index];
         match &mut node.body {
             NodeBody::Leaf(leaf) => {
-                let split_at = leaf.entries.len() / 2;
+                let sizes = leaf
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        BTreeNode::<K>::leaf_entry_size_from_len(
+                            entry.key.encode().len(),
+                            page_size,
+                        )
+                    })
+                    .collect::<MemoryResult<Vec<_>>>()?;
+                let split_at =
+                    byte_balanced_split_index(&sizes, LEAF_HEADER_SIZE, page_size, false)
+                        .ok_or_else(|| MemoryError::KeyTooLarge {
+                            size: sizes.iter().sum::<usize>() as u64,
+                            max: (page_size - LEAF_HEADER_SIZE) as u64,
+                        })?;
                 let right_entries = leaf.entries.split_off(split_at);
                 let promote_key = right_entries
                     .first()
@@ -811,13 +826,6 @@ where
                 node.header.num_entries = leaf.entries.len() as u16;
                 node.dirty = true;
 
-                if right_leaf.would_overflow(page_size)? {
-                    return Err(MemoryError::KeyTooLarge {
-                        size: right_leaf.entries_byte_size(page_size)? as u64,
-                        max: (page_size - LEAF_HEADER_SIZE) as u64,
-                    });
-                }
-
                 right_leaf.flush(mm)?;
                 Ok(Promotion {
                     key: promote_key,
@@ -826,7 +834,21 @@ where
                 })
             }
             NodeBody::Internal(internal) => {
-                let mid = internal.entries.len() / 2;
+                let sizes = internal
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        BTreeNode::<K>::internal_entry_size_from_len(
+                            entry.key.encode().len(),
+                            page_size,
+                        )
+                    })
+                    .collect::<MemoryResult<Vec<_>>>()?;
+                let mid = byte_balanced_split_index(&sizes, INTERNAL_HEADER_SIZE, page_size, true)
+                    .ok_or_else(|| MemoryError::KeyTooLarge {
+                        size: sizes.iter().sum::<usize>() as u64,
+                        max: (page_size - INTERNAL_HEADER_SIZE) as u64,
+                    })?;
                 let median = internal.entries.remove(mid);
                 let left_rightmost_child = median.child_page;
                 let right_entries = internal.entries.split_off(mid);
@@ -846,13 +868,6 @@ where
                     }),
                     dirty: true,
                 };
-
-                if right_node.would_overflow(page_size)? {
-                    return Err(MemoryError::KeyTooLarge {
-                        size: right_node.entries_byte_size(page_size)? as u64,
-                        max: (page_size - INTERNAL_HEADER_SIZE) as u64,
-                    });
-                }
 
                 node.header.num_entries = internal.entries.len() as u16;
                 node.dirty = true;
@@ -898,6 +913,44 @@ where
         parent.header.num_entries = internal.entries.len() as u16;
         parent.dirty = true;
     }
+}
+
+/// Picks where to split an overflowing node, using encoded entry sizes.
+///
+/// `entry_sizes` holds the serialized size of every entry. For leaves
+/// (`promote_median == false`) the entry at the returned index becomes the
+/// first entry of the right node; for internal nodes it is promoted to the
+/// parent and belongs to neither half.
+///
+/// Returns the index that keeps both halves non-empty and within
+/// `page_size - header_size` bytes while balancing their byte sizes, or
+/// `None` if no such index exists.
+fn byte_balanced_split_index(
+    entry_sizes: &[usize],
+    header_size: usize,
+    page_size: usize,
+    promote_median: bool,
+) -> Option<usize> {
+    let capacity = page_size.checked_sub(header_size)?;
+    let total: usize = entry_sizes.iter().sum();
+    let mut left = 0usize;
+    let mut best: Option<(usize, usize)> = None;
+    for (index, &size) in entry_sizes.iter().enumerate() {
+        let right = if promote_median {
+            total - left - size
+        } else {
+            total - left
+        };
+        let right_non_empty = !promote_median || index + 1 < entry_sizes.len();
+        if index > 0 && right_non_empty && left <= capacity && right <= capacity {
+            let imbalance = left.abs_diff(right);
+            if best.is_none_or(|(_, best_imbalance)| imbalance < best_imbalance) {
+                best = Some((index, imbalance));
+            }
+        }
+        left += size;
+    }
+    best.map(|(index, _)| index)
 }
 
 #[cfg(test)]
@@ -1140,6 +1193,96 @@ mod tests {
 
         let root = BTreeNode::<Text>::read(tree.root_page(), &mut mm).expect("root read failed");
         assert!(matches!(root.body, NodeBody::Internal(_)));
+    }
+
+    #[test]
+    fn test_leaf_split_uses_encoded_size_for_skewed_keys() {
+        let mut mm = make_mm();
+        let mut tree = IndexTree::<Text>::init(&mut mm).expect("tree init failed");
+
+        for n in 0..8u32 {
+            tree.insert(
+                Text(format!("{n}:{}", "x".repeat(3_000))),
+                RecordAddress { page: n, offset: 0 },
+                &mut mm,
+            )
+            .expect("small key insert failed");
+        }
+        let big_key = Text("z".repeat(60_000));
+        let big_address = RecordAddress {
+            page: 99,
+            offset: 0,
+        };
+        tree.insert(big_key.clone(), big_address, &mut mm)
+            .expect("big key fits a leaf on its own");
+
+        assert_eq!(
+            tree.search(&big_key, &mut mm).expect("search big"),
+            vec![big_address]
+        );
+        for n in 0..8u32 {
+            let key = Text(format!("{n}:{}", "x".repeat(3_000)));
+            assert_eq!(
+                tree.search(&key, &mut mm).expect("search small"),
+                vec![RecordAddress { page: n, offset: 0 }]
+            );
+        }
+    }
+
+    #[test]
+    fn test_internal_split_uses_encoded_size_for_skewed_keys() {
+        let mut mm = make_mm();
+        let tree = IndexTree::<Text>::init(&mut mm).expect("tree init failed");
+        let page = mm.claim_page().expect("claim internal page");
+
+        let mut entries: Vec<InternalEntry<Text>> = (0..8usize)
+            .map(|index| InternalEntry {
+                key: padded_text_key(index, 3_000),
+                child_page: 100 + index as u32,
+            })
+            .collect();
+        entries.push(InternalEntry {
+            key: Text("z".repeat(60_000)),
+            child_page: 200,
+        });
+        let mut path = vec![BTreeNode {
+            page,
+            header: NodeHeader {
+                parent_page: None,
+                num_entries: entries.len() as u16,
+            },
+            body: NodeBody::Internal(InternalNodeBody {
+                entries,
+                rightmost_child: 201,
+            }),
+            dirty: true,
+        }];
+
+        let promotion = tree
+            .split_node(&mut path, 0, &mut mm)
+            .expect("size-aware internal split");
+
+        // Only splitting before the big key keeps both halves on one page.
+        assert_eq!(promotion.key, padded_text_key(7, 3_000));
+        let NodeBody::Internal(left) = &path[0].body else {
+            panic!("left half must stay internal");
+        };
+        assert_eq!(left.entries.len(), 7);
+        assert_eq!(left.rightmost_child, 107);
+        let right = BTreeNode::<Text>::read(promotion.right_page, &mut mm).expect("read right");
+        let NodeBody::Internal(right_body) = right.body else {
+            panic!("right half must be internal");
+        };
+        assert_eq!(right_body.entries.len(), 1);
+        assert_eq!(right_body.rightmost_child, 201);
+    }
+
+    #[test]
+    fn test_byte_balanced_split_index_returns_none_when_no_partition_fits() {
+        // Two entries of 40 bytes each cannot be split with a 30-byte budget.
+        assert_eq!(byte_balanced_split_index(&[40, 40], 0, 30, false), None);
+        // Promoting the median from three entries leaves 60 + 60 > 50.
+        assert_eq!(byte_balanced_split_index(&[60, 10, 60], 0, 50, true), None);
     }
 
     #[test]

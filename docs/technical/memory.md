@@ -801,10 +801,13 @@ Indexes are updated eagerly on every write operation:
   key + insert new key). If the record moved (size change), all indexes are updated
   with the new `RecordAddress`.
 
-When a leaf node overflows during insertion, it splits at its midpoint. The first
-key of the new right sibling is promoted to the parent internal node. If the parent
-also overflows, the split propagates upward. When the root splits, a new root is
-created and the tree height increases by one.
+When a node overflows during insertion, it splits at the entry boundary that best
+balances the encoded byte size of the two halves while keeping each half within
+one page. Splitting by byte size instead of entry count lets keys of very
+different lengths share a tree. For a leaf, the first key of the new right sibling
+is promoted to the parent internal node. If the parent also overflows, the split
+propagates upward. When the root splits, a new root is created and the tree height
+increases by one.
 
 When a leaf becomes empty after deletion (and is not the root), it is unlinked from
 the leaf chain and its parent is updated.
