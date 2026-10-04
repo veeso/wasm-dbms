@@ -880,10 +880,10 @@ where
 mod tests {
     use wasm_dbms_api::prelude::{
         ColumnSnapshot, DataTypeSnapshot, Database, IndexSnapshot, MigrationOp, MigrationPolicy,
-        TableSchema, TableSchemaSnapshot, Text, Uint32,
+        TableSchema, TableSchemaSnapshot, Text, Uint32, Value,
     };
     use wasm_dbms_macros::{DatabaseSchema, Table};
-    use wasm_dbms_memory::prelude::{HeapMemoryProvider, SchemaRegistry};
+    use wasm_dbms_memory::prelude::{HeapMemoryProvider, SchemaRegistry, TableRegistry};
 
     use super::*;
     use crate::context::DbmsContext;
@@ -985,6 +985,37 @@ mod tests {
             .stored_snapshots(&mut *ctx.mm.borrow_mut())
             .unwrap();
         assert!(snapshots.iter().any(|s| s.name == "fresh"));
+    }
+
+    #[test]
+    fn test_create_table_initializes_autoincrement_counters() {
+        let ctx = fresh_db();
+        let db = WasmDbmsDatabase::oneshot(&ctx, UserSchema);
+        let mut schema = fresh_snapshot("counters");
+        schema.columns[0].auto_increment = true;
+
+        apply(
+            &db,
+            vec![MigrationOp::CreateTable {
+                name: "counters".to_string(),
+                schema,
+            }],
+        )
+        .unwrap();
+
+        let pages = ctx
+            .schema_registry
+            .borrow()
+            .table_registry_page_by_name("counters")
+            .expect("counters must be registered");
+        let mut mm = ctx.mm.borrow_mut();
+        let mut table = TableRegistry::load(pages, &mut *mm).expect("load counters");
+        assert_eq!(
+            table
+                .next_autoincrement("id", &mut *mm)
+                .expect("first value"),
+            Some(Value::Uint32(Uint32(1)))
+        );
     }
 
     #[test]

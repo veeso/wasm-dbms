@@ -198,6 +198,9 @@ impl SchemaRegistry {
             snapshot.indexes.iter().map(|idx| idx.columns.clone()),
             mm,
         )?;
+        if let Some(autoinc_page) = pages.autoincrement_registry_page {
+            AutoincrementLedger::init_from_snapshot(autoinc_page, snapshot, mm)?;
+        }
         self.refresh_schema_hash(mm)?;
         self.save(mm)?;
 
@@ -1183,6 +1186,28 @@ mod tests {
                 ref existing,
             }) if candidate == "users" && existing == "imposter"
         ));
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_initializes_autoincrement_counters() {
+        use wasm_dbms_api::prelude::{Uint32, Value};
+
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let mut snapshot = dummy_snapshot("counters");
+        snapshot.columns[0].auto_increment = true;
+
+        let pages = registry
+            .register_table_from_snapshot(&snapshot, &mut mm)
+            .expect("register from snapshot");
+        let mut table = TableRegistry::load(pages, &mut mm).expect("load table");
+
+        assert_eq!(
+            table
+                .next_autoincrement("id", &mut mm)
+                .expect("first value"),
+            Some(Value::Uint32(Uint32(1)))
+        );
     }
 
     #[test]

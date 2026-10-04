@@ -2,8 +2,10 @@
 
 mod registry;
 
-use wasm_dbms_api::memory::{MemoryResult, Page};
-use wasm_dbms_api::prelude::{DataTypeKind, TableSchema, Value};
+use wasm_dbms_api::memory::{MemoryError, MemoryResult, Page};
+use wasm_dbms_api::prelude::{
+    DataTypeKind, DataTypeSnapshot, TableSchema, TableSchemaSnapshot, Value,
+};
 
 use self::registry::AutoincrementRegistry;
 use crate::MemoryAccess;
@@ -32,6 +34,38 @@ impl AutoincrementLedger {
             registry.init(auto_increment_column.name, zero);
         }
         // write the registry to the page
+        mm.write_at(page, 0, &registry)?;
+
+        Ok(Self { page, registry })
+    }
+
+    /// Initialize the [`AutoincrementLedger`] for the table described by
+    /// `snapshot`, and write it to the given page.
+    ///
+    /// Snapshot counterpart of [`Self::init`], used when a table is created
+    /// from a stored [`TableSchemaSnapshot`] rather than a compiled
+    /// [`TableSchema`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] if an autoincrement
+    /// column is not an integer, or any error raised while writing the
+    /// registry page.
+    pub fn init_from_snapshot(
+        page: Page,
+        snapshot: &TableSchemaSnapshot,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<Self> {
+        let mut registry = AutoincrementRegistry::default();
+        for column in snapshot.columns.iter().filter(|c| c.auto_increment) {
+            let zero = Self::snapshot_zero(&column.data_type).ok_or_else(|| {
+                MemoryError::ConstraintViolation(format!(
+                    "unsupported autoincrement type for column `{}`: {:?}",
+                    column.name, column.data_type
+                ))
+            })?;
+            registry.init(&column.name, zero);
+        }
         mm.write_at(page, 0, &registry)?;
 
         Ok(Self { page, registry })
@@ -68,6 +102,22 @@ impl AutoincrementLedger {
             DataTypeKind::Uint32 => Value::Uint32(0.into()),
             DataTypeKind::Uint64 => Value::Uint64(0.into()),
             data_type => panic!("unsupported autoincrement type: {data_type:?}"),
+        }
+    }
+
+    /// Returns the zero [`Value`] for a snapshot column type, or `None` if
+    /// the type cannot autoincrement.
+    fn snapshot_zero(data_type: &DataTypeSnapshot) -> Option<Value> {
+        match data_type {
+            DataTypeSnapshot::Int8 => Some(Value::Int8(0.into())),
+            DataTypeSnapshot::Int16 => Some(Value::Int16(0.into())),
+            DataTypeSnapshot::Int32 => Some(Value::Int32(0.into())),
+            DataTypeSnapshot::Int64 => Some(Value::Int64(0.into())),
+            DataTypeSnapshot::Uint8 => Some(Value::Uint8(0.into())),
+            DataTypeSnapshot::Uint16 => Some(Value::Uint16(0.into())),
+            DataTypeSnapshot::Uint32 => Some(Value::Uint32(0.into())),
+            DataTypeSnapshot::Uint64 => Some(Value::Uint64(0.into())),
+            _ => None,
         }
     }
 }
@@ -539,6 +589,34 @@ mod tests {
             .expect("failed to init ledger");
 
         assert_eq!(ledger.page, page);
+    }
+
+    #[test]
+    fn test_init_from_snapshot_rejects_non_integer_autoincrement() {
+        use wasm_dbms_api::prelude::{ColumnSnapshot, DataTypeSnapshot, TableSchemaSnapshot};
+
+        let mut mm = make_mm();
+        let page = mm.claim_page().expect("claim");
+        let snapshot = TableSchemaSnapshot {
+            version: TableSchemaSnapshot::latest_version(),
+            name: "texts".to_string(),
+            primary_key: "id".to_string(),
+            alignment: 32,
+            columns: vec![ColumnSnapshot {
+                name: "id".to_string(),
+                data_type: DataTypeSnapshot::Text,
+                nullable: false,
+                auto_increment: true,
+                unique: true,
+                primary_key: true,
+                foreign_key: None,
+                default: None,
+            }],
+            indexes: vec![],
+        };
+
+        let result = AutoincrementLedger::init_from_snapshot(page, &snapshot, &mut mm);
+        assert!(matches!(result, Err(MemoryError::ConstraintViolation(_))));
     }
 
     #[test]
