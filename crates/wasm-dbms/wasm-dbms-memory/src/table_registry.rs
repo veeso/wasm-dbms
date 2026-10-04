@@ -11,7 +11,7 @@ mod schema_snapshot_ledger;
 mod table_reader;
 mod write_at;
 
-use wasm_dbms_api::prelude::{Encode, MSize, MemoryResult, PageOffset, Value};
+use wasm_dbms_api::prelude::{Encode, MSize, MemoryError, MemoryResult, PageOffset, Value};
 
 pub use self::autoincrement_ledger::AutoincrementLedger;
 use self::free_segments_ledger::FreeSegmentsLedger;
@@ -186,9 +186,10 @@ impl TableRegistry {
     ) -> MemoryResult<RecordAddress> {
         use self::raw_record::RAW_RECORD_HEADER_SIZE;
 
+        let physical_size_msize = raw_record_footprint(bytes.len(), alignment, mm.page_size())?;
+        // The footprint fits in an `MSize`, so header + body does too.
         let length = bytes.len() as MSize;
         let total = (RAW_RECORD_HEADER_SIZE + length) as u64;
-        let physical_size_msize = align_up_msize(RAW_RECORD_HEADER_SIZE + length, alignment);
         let physical_size_u64 = physical_size_msize as u64;
 
         // Reuse a free segment only if the whole aligned record (header,
@@ -214,8 +215,7 @@ impl TableRegistry {
         full.extend_from_slice(&length.to_le_bytes());
         full.extend_from_slice(bytes);
         mm.write_at_raw(page, offset, &full)?;
-        let physical_size = align_up_msize(RAW_RECORD_HEADER_SIZE + length, alignment);
-        let padding = physical_size.saturating_sub(RAW_RECORD_HEADER_SIZE + length);
+        let padding = physical_size_msize - (RAW_RECORD_HEADER_SIZE + length);
         if padding > 0 {
             let padding_offset = offset + RAW_RECORD_HEADER_SIZE + length;
             mm.zero_raw(page, padding_offset, padding)?;
@@ -254,9 +254,7 @@ impl TableRegistry {
         alignment: PageOffset,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
-        use self::raw_record::RAW_RECORD_HEADER_SIZE;
-
-        let physical_size = align_up_msize(RAW_RECORD_HEADER_SIZE + body_len, alignment);
+        let physical_size = raw_record_footprint(body_len as usize, alignment, mm.page_size())?;
         mm.zero_raw(address.page, address.offset, physical_size)?;
         self.free_segments_ledger.insert_free_segment_raw(
             address.page,
@@ -436,14 +434,34 @@ impl TableRegistry {
     }
 }
 
-/// Round `value` up to the next multiple of `alignment`. Runtime sibling
-/// to the const [`align_up`](crate::align_up) helper. Used by the raw
-/// insert/delete path where alignment comes from a stored snapshot.
-fn align_up_msize(value: MSize, alignment: PageOffset) -> MSize {
-    if alignment == 0 {
-        return value;
-    }
-    value.div_ceil(alignment) * alignment
+/// Computes the on-page footprint of a raw record with a `body_len`-byte
+/// body: the 2-byte length header plus the body, rounded up to `alignment`.
+/// Used by the raw insert/delete path where alignment comes from a stored
+/// snapshot.
+///
+/// # Errors
+///
+/// Returns [`MemoryError::DataTooLarge`] when the footprint does not fit in
+/// an [`MSize`], i.e. the record cannot be stored on a single page.
+fn raw_record_footprint(
+    body_len: usize,
+    alignment: PageOffset,
+    page_size: u64,
+) -> MemoryResult<MSize> {
+    use self::raw_record::RAW_RECORD_HEADER_SIZE;
+
+    let unaligned = (body_len as u64).saturating_add(RAW_RECORD_HEADER_SIZE as u64);
+    let aligned = if alignment == 0 {
+        unaligned
+    } else {
+        unaligned
+            .div_ceil(alignment as u64)
+            .saturating_mul(alignment as u64)
+    };
+    MSize::try_from(aligned).map_err(|_| MemoryError::DataTooLarge {
+        page_size,
+        requested: aligned,
+    })
 }
 
 /// Test utilities shared across the table_registry submodules.
@@ -1718,5 +1736,46 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, COUNT);
+    }
+
+    #[test]
+    fn test_insert_raw_rejects_footprint_of_a_full_page() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        // 2 + 65_503 = 65_505 bytes, aligned to 32 = 65_536: not an MSize.
+        let result = registry.insert_raw(&vec![0u8; 65_503], 32, &mut mm);
+        assert!(matches!(
+            result,
+            Err(MemoryError::DataTooLarge {
+                requested: 65_536,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_insert_raw_accepts_largest_representable_footprint() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        // 2 + 65_502 = 65_504 bytes, already a multiple of 32.
+        let payload = vec![7u8; 65_502];
+        let address = registry
+            .insert_raw(&payload, 32, &mut mm)
+            .expect("65_504-byte footprint fits");
+        assert_eq!(
+            registry.read_raw_at(address, &mut mm).expect("read back"),
+            payload
+        );
+    }
+
+    #[test]
+    fn test_delete_raw_rejects_unrepresentable_footprint() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        let result = registry.delete_raw(RecordAddress::new(0, 0), MSize::MAX, 32, &mut mm);
+        assert!(matches!(result, Err(MemoryError::DataTooLarge { .. })));
     }
 }
