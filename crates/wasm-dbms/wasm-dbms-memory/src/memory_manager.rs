@@ -192,12 +192,16 @@ where
         self.check_alignment::<E>(offset)?;
 
         let encoded = data.encode();
+        // The padded footprint, not just the encoded bytes, must fit in the
+        // page: padding is written too and would otherwise spill into the
+        // next page.
+        let padded_len = align_up::<E>(encoded.len());
 
-        if offset as u64 + encoded.len() as u64 > P::PAGE_SIZE {
+        if offset as u64 + padded_len as u64 > P::PAGE_SIZE {
             return Err(MemoryError::SegmentationFault {
                 page,
                 offset,
-                data_size: encoded.len() as u64,
+                data_size: padded_len as u64,
                 page_size: P::PAGE_SIZE,
             });
         }
@@ -206,7 +210,7 @@ where
         self.provider.write(absolute_offset, encoded.as_ref())?;
 
         // Zero padding bytes if any.
-        let padding = align_up::<E>(encoded.len()) - encoded.len();
+        let padding = padded_len - encoded.len();
         if padding > 0 {
             let padding_offset = absolute_offset + encoded.len() as u64;
             let padding_buffer = vec![0u8; padding];
@@ -517,6 +521,23 @@ mod tests {
     }
 
     #[test]
+    fn test_rejected_padded_write_does_not_touch_the_next_page() {
+        let mut mm = make_mm();
+        let first = mm.claim_page().expect("claim first");
+        let next = mm.claim_page().expect("claim next");
+        mm.write_at_raw(next, 0, &[0xAA; 4])
+            .expect("seed next page");
+
+        // 6 bytes at 65_530 fit, but padding to 10 bytes would reach 65_540.
+        let result = mm.write_at(first, 65_530, &TenAlignedData([3; 6]));
+        assert!(matches!(result, Err(MemoryError::SegmentationFault { .. })));
+
+        let mut buf = [0u8; 4];
+        mm.read_at_raw(next, 0, &mut buf).expect("read next page");
+        assert_eq!(buf, [0xAA; 4]);
+    }
+
+    #[test]
     fn test_should_claim_new_page_by_growing() {
         let mut mm = make_mm();
         let initial_last_page = mm.last_page().unwrap();
@@ -680,6 +701,31 @@ mod tests {
             let a = u16::from_le_bytes([data[0], data[1]]);
             let b = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
             Ok(DataWithAlignment { a, b })
+        }
+
+        fn size(&self) -> MSize {
+            6
+        }
+    }
+
+    /// Dynamic 6-byte value whose alignment (10) does not divide the page
+    /// size, so its padded footprint can cross the page end.
+    #[derive(Debug, Clone, PartialEq)]
+    struct TenAlignedData([u8; 6]);
+
+    impl Encode for TenAlignedData {
+        const SIZE: DataSize = DataSize::Dynamic;
+        const ALIGNMENT: PageOffset = 10;
+
+        fn encode(&'_ self) -> Cow<'_, [u8]> {
+            Cow::Owned(self.0.to_vec())
+        }
+
+        fn decode(data: Cow<[u8]>) -> MemoryResult<Self>
+        where
+            Self: Sized,
+        {
+            Ok(Self(data[0..6].try_into()?))
         }
 
         fn size(&self) -> MSize {

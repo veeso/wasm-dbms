@@ -39,7 +39,9 @@ impl PageLedger {
     where
         R: Encode,
     {
-        let required_size = record.size() as u64;
+        // Reserve the padded footprint: the memory manager rejects writes
+        // whose padding would cross the page end.
+        let required_size = align_up::<R>(record.size() as usize) as u64;
         let page_size = mm.page_size();
         // check if record can fit in a page
         if required_size > page_size {
