@@ -191,10 +191,12 @@ impl TableRegistry {
         let physical_size_msize = align_up_msize(RAW_RECORD_HEADER_SIZE + length, alignment);
         let physical_size_u64 = physical_size_msize as u64;
 
-        // Reuse a free segment if one fits.
+        // Reuse a free segment only if the whole aligned record (header,
+        // body and padding) fits; comparing the body length alone lets the
+        // write spill into the next live record.
         let (page, offset) = if let Some(segment) = self
             .free_segments_ledger
-            .find_reusable_segment_raw(length, mm)?
+            .find_reusable_segment_raw(physical_size_msize, mm)?
         {
             let page = segment.segment.page;
             let offset = segment.segment.offset;
@@ -1087,6 +1089,61 @@ mod tests {
             "Expected free segment to have size: {} but got: {}",
             previous_size - 64,
             free_segment_after.size
+        );
+    }
+
+    #[test]
+    fn test_raw_reuse_preserves_the_next_live_record() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        // 1-byte body: 2 + 1 = 3 bytes, aligned to a 32-byte slot.
+        let deleted = registry
+            .insert_raw(&[1], 32, &mut mm)
+            .expect("insert deleted");
+        let live = registry
+            .insert_raw(&[2; 10], 32, &mut mm)
+            .expect("insert live");
+        registry
+            .delete_raw(deleted, 1, 32, &mut mm)
+            .expect("delete");
+
+        // 31-byte body fits the 32-byte segment by body length only:
+        // with the header it needs 33 bytes (64 once aligned).
+        registry
+            .insert_raw(&[9; 31], 32, &mut mm)
+            .expect("insert replacement");
+
+        assert_eq!(
+            registry.read_raw_at(live, &mut mm).expect("read live"),
+            vec![2; 10]
+        );
+    }
+
+    #[test]
+    fn test_raw_reuse_selects_segment_when_full_footprint_fits() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        // 30-byte body: 2 + 30 = 32 bytes, exactly one aligned slot.
+        let deleted = registry
+            .insert_raw(&[1; 30], 32, &mut mm)
+            .expect("insert deleted");
+        let live = registry
+            .insert_raw(&[2; 10], 32, &mut mm)
+            .expect("insert live");
+        registry
+            .delete_raw(deleted, 30, 32, &mut mm)
+            .expect("delete");
+
+        let reused = registry
+            .insert_raw(&[9; 30], 32, &mut mm)
+            .expect("insert replacement");
+
+        assert_eq!(reused, deleted);
+        assert_eq!(
+            registry.read_raw_at(live, &mut mm).expect("read live"),
+            vec![2; 10]
         );
     }
 
