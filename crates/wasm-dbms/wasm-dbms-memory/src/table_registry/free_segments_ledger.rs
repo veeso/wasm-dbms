@@ -179,7 +179,10 @@ impl FreeSegmentsLedger {
         table.insert_free_segment(page, offset, physical_size, mm)
     }
 
-    /// Find a reusable free segment for a record of `required_size` bytes.
+    /// Find a reusable free segment able to hold `required_size` bytes.
+    ///
+    /// `required_size` must be the record's full physical footprint: the
+    /// length header plus the body, padded to the table alignment.
     /// Sibling to [`Self::find_reusable_segment`].
     pub fn find_reusable_segment_raw(
         &self,
