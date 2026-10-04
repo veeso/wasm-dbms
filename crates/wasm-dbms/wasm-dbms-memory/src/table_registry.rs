@@ -1646,4 +1646,25 @@ mod tests {
         }
         assert_eq!(count, 10);
     }
+
+    #[test]
+    fn test_reader_skips_deleted_fixed_size_record() {
+        use wasm_dbms_api::prelude::Uint32;
+
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        let first = registry.insert(Uint32(11), &mut mm).expect("insert 11");
+        registry.insert(Uint32(22), &mut mm).expect("insert 22");
+        registry
+            .delete(Uint32(11), first, &mut mm)
+            .expect("delete 11");
+
+        let mut reader = registry.read::<Uint32, _>(&mut mm);
+        let mut rows = Vec::new();
+        while let Some(next) = reader.try_next().expect("scan") {
+            rows.push(next.record);
+        }
+        assert_eq!(rows, vec![Uint32(22)]);
+    }
 }
