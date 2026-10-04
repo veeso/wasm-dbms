@@ -127,15 +127,17 @@ where
             if let Some((next_segment_offset, next_segment_size)) =
                 self.find_next_record_position(&self.buffer, offset as usize)?
             {
-                // found a record; return it
-                let new_offset = next_segment_offset + next_segment_size as PageOffset;
-                let new_position = if new_offset as usize >= self.page_size {
+                // Found a record; compute the end in `usize` so a record
+                // ending exactly at the page boundary cannot wrap the
+                // `PageOffset` cursor back to the start of the page.
+                let new_offset = next_segment_offset as usize + next_segment_size as usize;
+                let new_position = if new_offset >= self.page_size {
                     // move to next page
                     self.next_page(page)
                 } else {
                     Some(Position {
                         page,
-                        offset: new_offset,
+                        offset: new_offset as PageOffset,
                     })
                 };
                 return Ok(Some(FoundRecord {
@@ -292,6 +294,32 @@ mod tests {
             ids.push(next.record.id);
         }
         assert_eq!(ids, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_should_read_record_ending_at_page_boundary() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut table_registry = mock_table_registry(0, &mut mm);
+
+        // Raw footprint: 2 (header) + 12 (fixed fields) + 32_754 (email)
+        // = 32_768, so two records fill a 64 KiB page exactly.
+        for id in 0..2 {
+            let user = User {
+                id,
+                name: String::new(),
+                email: "x".repeat(32_754),
+                age: 20,
+            };
+            table_registry.insert(user, &mut mm).expect("insert");
+        }
+        assert_eq!(table_registry.page_ledger.pages().len(), 1);
+
+        let mut reader = mocked(&table_registry, &mut mm);
+        let first = reader.try_next().expect("first").expect("first row");
+        assert_eq!((first.record.id, first.offset), (0, 0));
+        let second = reader.try_next().expect("second").expect("second row");
+        assert_eq!((second.record.id, second.offset), (1, 32_768));
+        assert!(reader.try_next().expect("end").is_none());
     }
 
     #[test]
