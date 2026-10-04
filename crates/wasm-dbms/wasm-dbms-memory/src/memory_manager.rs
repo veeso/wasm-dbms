@@ -179,7 +179,17 @@ where
             }
         ];
 
-        self.read_at_raw(page, offset, &mut buf)?;
+        let read = self.read_at_raw(page, offset, &mut buf)?;
+        // A short read means the value crosses the page end; decoding the
+        // zero-initialized tail would fabricate data.
+        if read < buf.len() {
+            return Err(MemoryError::SegmentationFault {
+                page,
+                offset,
+                data_size: buf.len() as u64,
+                page_size: P::PAGE_SIZE,
+            });
+        }
 
         D::decode(std::borrow::Cow::Owned(buf))
     }
@@ -336,6 +346,18 @@ mod tests {
 
     fn make_mm() -> MemoryManager<HeapMemoryProvider> {
         MemoryManager::init(HeapMemoryProvider::default())
+    }
+
+    #[test]
+    fn test_fixed_read_rejects_a_value_truncated_at_the_page_end() {
+        let mut mm = make_mm();
+        let page = mm.claim_page().expect("claim");
+        mm.write_at_raw(page, 65_532, &[1, 2, 3, 4])
+            .expect("write tail");
+
+        // 65_532 is 6-aligned, but only 4 of the 6 bytes are on the page.
+        let value: MemoryResult<crate::RecordAddress> = mm.read_at(page, 65_532);
+        assert!(matches!(value, Err(MemoryError::SegmentationFault { .. })));
     }
 
     #[test]
