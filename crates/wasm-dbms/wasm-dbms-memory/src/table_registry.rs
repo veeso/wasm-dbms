@@ -1667,4 +1667,56 @@ mod tests {
         }
         assert_eq!(rows, vec![Uint32(22)]);
     }
+
+    /// Dynamic 4-byte record with alignment 10 (raw footprint 6, padded
+    /// to 10), so the last slot of a page fits unpadded but not padded.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct TenAlignedRecord(u32);
+
+    impl Encode for TenAlignedRecord {
+        const SIZE: DataSize = DataSize::Dynamic;
+        const ALIGNMENT: PageOffset = 10;
+
+        fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
+            std::borrow::Cow::Owned(self.0.to_le_bytes().to_vec())
+        }
+
+        fn decode(data: std::borrow::Cow<[u8]>) -> MemoryResult<Self>
+        where
+            Self: Sized,
+        {
+            if data.len() < 4 {
+                return Err(MemoryError::DecodeError(DecodeError::TooShort));
+            }
+            Ok(Self(u32::from_le_bytes(data[0..4].try_into().unwrap())))
+        }
+
+        fn size(&self) -> MSize {
+            4
+        }
+    }
+
+    #[test]
+    fn test_insert_moves_to_new_page_when_padding_would_cross_page_end() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        // 6_553 padded slots fill bytes 0..65_530; record 6_554 fits there
+        // unpadded (65_536) but not padded (65_540).
+        const COUNT: u32 = 6_554;
+        for id in 0..COUNT {
+            registry
+                .insert(TenAlignedRecord(id), &mut mm)
+                .unwrap_or_else(|e| panic!("failed to insert record {id}: {e}"));
+        }
+        assert_eq!(registry.page_ledger.pages().len(), 2);
+
+        let mut reader = registry.read::<TenAlignedRecord, _>(&mut mm);
+        let mut count = 0;
+        while let Some(next) = reader.try_next().expect("scan") {
+            assert_eq!(next.record, TenAlignedRecord(count));
+            count += 1;
+        }
+        assert_eq!(count, COUNT);
+    }
 }
