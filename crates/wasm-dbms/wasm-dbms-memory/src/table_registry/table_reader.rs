@@ -159,16 +159,11 @@ where
         Ok(None)
     }
 
-    /// Gets the next page after the given current page.
+    /// Gets the next page after the given current page, in ledger order.
     fn next_page(&self, current_page: Page) -> Option<Position> {
         self.page_ledger
-            .pages()
-            .iter()
-            .find(|p| p.page > current_page)
-            .map(|page_record| Position {
-                page: page_record.page,
-                offset: 0,
-            })
+            .next_page_after(current_page)
+            .map(|page| Position { page, offset: 0 })
     }
 
     /// Finds the next record segment position.
@@ -259,6 +254,44 @@ mod tests {
             "should not have next page, but got {:?}",
             next_page
         );
+    }
+
+    #[test]
+    fn test_should_scan_reclaimed_pages_in_ledger_order() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut table_registry = mock_table_registry(0, &mut mm);
+
+        // Reclaim two pages so they are handed back in descending order.
+        let low = mm.claim_page().expect("claim low");
+        let high = mm.claim_page().expect("claim high");
+        mm.unclaim_page(low).expect("unclaim low");
+        mm.unclaim_page(high).expect("unclaim high");
+
+        // Each record is larger than half a page, so the second one needs a
+        // new page: the ledger becomes [high, low].
+        for id in 0..2 {
+            let user = User {
+                id,
+                name: String::new(),
+                email: "x".repeat(40_000),
+                age: 20,
+            };
+            table_registry.insert(user, &mut mm).expect("insert");
+        }
+        let ledger_pages: Vec<Page> = table_registry
+            .page_ledger
+            .pages()
+            .iter()
+            .map(|record| record.page)
+            .collect();
+        assert_eq!(ledger_pages, vec![high, low]);
+
+        let mut reader = mocked(&table_registry, &mut mm);
+        let mut ids = Vec::new();
+        while let Some(next) = reader.try_next().expect("scan") {
+            ids.push(next.record.id);
+        }
+        assert_eq!(ids, vec![0, 1]);
     }
 
     #[test]

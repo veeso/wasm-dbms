@@ -125,13 +125,8 @@ where
 
     fn next_page(&self, current: Page) -> Option<Cursor> {
         self.page_ledger
-            .pages()
-            .iter()
-            .find(|p| p.page > current)
-            .map(|p| Cursor {
-                page: p.page,
-                offset: 0,
-            })
+            .next_page_after(current)
+            .map(|page| Cursor { page, offset: 0 })
     }
 }
 
@@ -257,5 +252,48 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_raw_reader_scans_reclaimed_pages_in_ledger_order() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let schema_snapshot_page = mm.claim_page().unwrap();
+        let pages_list_page = mm.claim_page().unwrap();
+        let free_segments_page = mm.claim_page().unwrap();
+        let index_registry_page = mm.claim_page().unwrap();
+        write_dummy_schema_snapshot(schema_snapshot_page, &mut mm);
+
+        let mut registry = TableRegistry::load(
+            TableRegistryPage {
+                schema_snapshot_page,
+                pages_list_page,
+                free_segments_page,
+                index_registry_page,
+                autoincrement_registry_page: None,
+            },
+            &mut mm,
+        )
+        .unwrap();
+
+        // Reclaim two pages so they are handed back in descending order.
+        let low = mm.claim_page().unwrap();
+        let high = mm.claim_page().unwrap();
+        mm.unclaim_page(low).unwrap();
+        mm.unclaim_page(high).unwrap();
+
+        let alignment = 32u16;
+        registry
+            .insert_raw(&vec![1u8; 40_000], alignment, &mut mm)
+            .unwrap();
+        registry
+            .insert_raw(&vec![2u8; 40_000], alignment, &mut mm)
+            .unwrap();
+
+        let mut reader = RawTableReader::new(&registry.page_ledger, alignment, &mut mm);
+        let mut first_bytes = Vec::new();
+        while let Some(row) = reader.try_next().unwrap() {
+            first_bytes.push(row.bytes[0]);
+        }
+        assert_eq!(first_bytes, vec![1, 2]);
     }
 }

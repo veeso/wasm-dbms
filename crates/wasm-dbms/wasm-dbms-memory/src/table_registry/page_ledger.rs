@@ -181,6 +181,20 @@ impl PageLedger {
         &self.pages.pages
     }
 
+    /// Returns the page that follows `current` in ledger order, if any.
+    ///
+    /// Scans must follow ledger order rather than numeric page order:
+    /// reclaimed pages are reused LIFO, so a table can own pages in
+    /// descending numeric order.
+    pub fn next_page_after(&self, current: Page) -> Option<Page> {
+        let pages = &self.pages.pages;
+        pages
+            .iter()
+            .position(|record| record.page == current)
+            .and_then(|index| pages.get(index + 1))
+            .map(|record| record.page)
+    }
+
     /// Returns how many pages dropping this ledger would release.
     pub fn releasable_pages_count(&self) -> usize {
         self.pages.pages.len() + 1
