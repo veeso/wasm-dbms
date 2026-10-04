@@ -788,7 +788,7 @@ where
                 let split_at =
                     byte_balanced_split_index(&sizes, LEAF_HEADER_SIZE, page_size, false)
                         .ok_or_else(|| MemoryError::KeyTooLarge {
-                            size: sizes.iter().sum::<usize>() as u64,
+                            size: sizes.iter().copied().max().unwrap_or(0) as u64,
                             max: (page_size - LEAF_HEADER_SIZE) as u64,
                         })?;
                 let right_entries = leaf.entries.split_off(split_at);
@@ -846,7 +846,7 @@ where
                     .collect::<MemoryResult<Vec<_>>>()?;
                 let mid = byte_balanced_split_index(&sizes, INTERNAL_HEADER_SIZE, page_size, true)
                     .ok_or_else(|| MemoryError::KeyTooLarge {
-                        size: sizes.iter().sum::<usize>() as u64,
+                        size: sizes.iter().copied().max().unwrap_or(0) as u64,
                         max: (page_size - INTERNAL_HEADER_SIZE) as u64,
                     })?;
                 let median = internal.entries.remove(mid);

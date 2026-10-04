@@ -122,8 +122,8 @@ impl Encode for UnclaimedPages {
             .as_chunks::<{ ENTRY_SIZE as usize }>()
             .0
             .iter()
-            .map(|entry| Ok(Page::from_le_bytes(*entry)))
-            .collect::<MemoryResult<Vec<_>>>()?;
+            .map(|entry| Page::from_le_bytes(*entry))
+            .collect();
         Ok(Self { pages })
     }
 

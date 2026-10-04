@@ -72,7 +72,7 @@ impl MemoryProvider for HeapMemoryProvider {
             .ok_or(MemoryError::FailedToAllocatePage)?;
         self.memory
             .try_reserve_exact(new_size - self.memory.len())
-            .map_err(|err| MemoryError::ProviderError(err.to_string()))?;
+            .map_err(|_| MemoryError::FailedToAllocatePage)?;
         self.memory.resize(new_size, 0);
         Ok(previous_size)
     }

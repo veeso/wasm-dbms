@@ -56,19 +56,41 @@ impl AutoincrementLedger {
         snapshot: &TableSchemaSnapshot,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<Self> {
+        Self::validate_snapshot(snapshot)?;
+
         let mut registry = AutoincrementRegistry::default();
         for column in snapshot.columns.iter().filter(|c| c.auto_increment) {
-            let zero = Self::snapshot_zero(&column.data_type).ok_or_else(|| {
-                MemoryError::ConstraintViolation(format!(
-                    "unsupported autoincrement type for column `{}`: {:?}",
-                    column.name, column.data_type
-                ))
-            })?;
-            registry.init(&column.name, zero);
+            if let Some(zero) = Self::snapshot_zero(&column.data_type) {
+                registry.init(&column.name, zero);
+            }
         }
         mm.write_at(page, 0, &registry)?;
 
         Ok(Self { page, registry })
+    }
+
+    /// Checks that every autoincrement column of `snapshot` has an integer
+    /// type, so [`Self::init_from_snapshot`] cannot fail on it.
+    ///
+    /// Callers should run this before allocating any page for the table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] if an autoincrement
+    /// column is not an integer.
+    pub fn validate_snapshot(snapshot: &TableSchemaSnapshot) -> MemoryResult<()> {
+        match snapshot
+            .columns
+            .iter()
+            .filter(|c| c.auto_increment)
+            .find(|c| Self::snapshot_zero(&c.data_type).is_none())
+        {
+            Some(column) => Err(MemoryError::ConstraintViolation(format!(
+                "unsupported autoincrement type for column `{}`: {:?}",
+                column.name, column.data_type
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// Load the [`AutoincrementLedger`] from the given page.
