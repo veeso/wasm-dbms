@@ -193,8 +193,10 @@ where
             if data_len != 0 {
                 break;
             }
-            // move to next alignment
-            offset += E::ALIGNMENT as usize;
+            // Move to the next slot; slots are laid out with the raw-record
+            // alignment, which includes the length header for fixed-size
+            // types.
+            offset += <RawRecord<E> as Encode>::ALIGNMENT as usize;
         }
 
         let data_offset = offset + RAW_RECORD_HEADER_SIZE as usize;
