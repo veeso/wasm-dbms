@@ -534,11 +534,7 @@ fn collect_sanitizes(data: &DataStruct) -> syn::Result<Sanitizers> {
     for field in &data.fields {
         for attr in &field.attrs {
             if attr.path().is_ident("sanitizer") {
-                let sanitizer = if let Some(sanitizer) = parse_sanitizer_meta(attr)? {
-                    sanitizer
-                } else {
-                    parse_sanitizer_expr(attr)?
-                };
+                let sanitizer = parse_sanitizer(attr)?;
 
                 let ident = field.ident.clone().ok_or_else(|| {
                     syn::Error::new_spanned(field, "validate can only be used on named fields")
@@ -552,55 +548,30 @@ fn collect_sanitizes(data: &DataStruct) -> syn::Result<Sanitizers> {
     Ok(sanitizers)
 }
 
-fn parse_sanitizer_meta(attr: &syn::Attribute) -> syn::Result<Option<Sanitizer>> {
-    let syn::Meta::List(meta_list) = &attr.meta else {
-        return Ok(None);
+/// Parses a `#[sanitizer(...)]` attribute.
+///
+/// Supported forms are:
+///
+/// - `#[sanitizer(TrimSanitizer)]`: unit struct.
+/// - `#[sanitizer(RoundToScaleSanitizer(2))]`: tuple struct with positional arguments.
+/// - `#[sanitizer(ClampSanitizer, min = 0, max = 100)]`: struct with named arguments.
+fn parse_sanitizer(attr: &syn::Attribute) -> syn::Result<Sanitizer> {
+    let exprs = attr.parse_args_with(
+        syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
+    )?;
+    let mut exprs = exprs.into_iter();
+
+    let Some(first) = exprs.next() else {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "expected a sanitizer, e.g. `#[sanitizer(TrimSanitizer)]`",
+        ));
     };
 
-    let mut path: Option<syn::Path> = None;
-    let mut args = HashMap::new();
-
-    meta_list.parse_nested_meta(|meta| {
-        // FIRST: sanitizer path (must NOT be name = value)
-        if path.is_none() {
-            if meta.input.peek(syn::Token![=]) {
-                return Err(syn::Error::new_spanned(
-                    meta.path,
-                    "first sanitizer argument must be a path",
-                ));
-            }
-
-            path = Some(meta.path.clone());
-            return Ok(());
-        }
-
-        // named args: min = 0
-        let ident = meta
-            .path
-            .get_ident()
-            .ok_or_else(|| syn::Error::new_spanned(&meta.path, "expected identifier"))?;
-
-        let value = meta.value()?.parse::<syn::Expr>()?;
-        args.insert(ident.clone(), value);
-
-        Ok(())
-    })?;
-
-    if let Some(path) = path
-        && !args.is_empty()
-    {
-        Ok(Some(Sanitizer::NamedArgs { name: path, args }))
-    } else {
-        Ok(None)
-    }
-}
-
-fn parse_sanitizer_expr(attr: &syn::Attribute) -> syn::Result<Sanitizer> {
-    match attr.parse_args::<syn::Expr>()? {
-        syn::Expr::Path(expr) => Ok(Sanitizer::Unit { name: expr.path }),
-
+    let name = match first {
+        syn::Expr::Path(expr) => expr.path,
         syn::Expr::Call(call) => {
-            let path = match *call.func {
+            let name = match *call.func {
                 syn::Expr::Path(p) => p.path,
                 other => {
                     return Err(syn::Error::new_spanned(
@@ -609,14 +580,48 @@ fn parse_sanitizer_expr(attr: &syn::Attribute) -> syn::Result<Sanitizer> {
                     ));
                 }
             };
+            if let Some(extra) = exprs.next() {
+                return Err(syn::Error::new_spanned(
+                    extra,
+                    "tuple sanitizers cannot be combined with named arguments",
+                ));
+            }
 
-            Ok(Sanitizer::Tuple {
-                name: path,
+            return Ok(Sanitizer::Tuple {
+                name,
                 args: call.args.into_iter().collect(),
-            })
+            });
         }
+        syn::Expr::Assign(assign) => {
+            return Err(syn::Error::new_spanned(
+                assign,
+                "first sanitizer argument must be a path",
+            ));
+        }
+        other => return Err(syn::Error::new_spanned(other, "invalid sanitizer syntax")),
+    };
 
-        other => Err(syn::Error::new_spanned(other, "invalid sanitizer syntax")),
+    // named args: min = 0
+    let mut args = HashMap::new();
+    for expr in exprs {
+        let syn::Expr::Assign(assign) = expr else {
+            return Err(syn::Error::new_spanned(
+                expr,
+                "expected a named sanitizer argument, e.g. `min = 0`",
+            ));
+        };
+        let ident = match assign.left.as_ref() {
+            syn::Expr::Path(p) => p.path.get_ident().cloned(),
+            _ => None,
+        }
+        .ok_or_else(|| syn::Error::new_spanned(&assign.left, "expected identifier"))?;
+        args.insert(ident, *assign.right);
+    }
+
+    if args.is_empty() {
+        Ok(Sanitizer::Unit { name })
+    } else {
+        Ok(Sanitizer::NamedArgs { name, args })
     }
 }
 
