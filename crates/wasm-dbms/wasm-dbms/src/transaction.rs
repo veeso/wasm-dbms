@@ -40,10 +40,14 @@ impl Transaction {
     ///
     /// `rows` is a list of `(primary_key, current_row)` pairs for each affected record.
     /// The current row is needed to track old indexed values in the overlay.
+    ///
+    /// The operation recorded for commit is restricted to the primary keys in `rows`, so that
+    /// commit updates exactly the rows captured when the update was staged, and not rows
+    /// which started matching the original filter afterwards.
+    /// See <https://github.com/veeso/wasm-dbms/issues/118>.
     pub fn update<T>(
         &mut self,
         patch: T::Update,
-        filter: Option<Filter>,
         rows: Vec<(Value, Vec<(ColumnDef, Value)>)>,
     ) -> DbmsResult<()>
     where
@@ -55,15 +59,17 @@ impl Transaction {
             .map(|(col, val)| (col.name, val.clone()))
             .collect();
 
+        let mut captured_pks = Vec::with_capacity(rows.len());
         for (pk, current_row) in rows {
             self.overlay
-                .update::<T>(pk, overlay_patch.clone(), &current_row);
+                .update::<T>(pk.clone(), overlay_patch.clone(), &current_row);
+            captured_pks.push(pk);
         }
 
         self.operations.push(TransactionOp::Update {
             table: T::table_name(),
             patch: patch_values,
-            filter,
+            filter: Some(Filter::in_list(T::primary_key(), captured_pks)),
         });
         Ok(())
     }
@@ -72,23 +78,29 @@ impl Transaction {
     ///
     /// `rows` is a list of `(primary_key, current_row)` pairs for each affected record.
     /// The current row is needed to track removed indexed values in the overlay.
+    ///
+    /// The operation recorded for commit is restricted to the primary keys in `rows`, so that
+    /// commit deletes exactly the rows captured when the delete was staged, and not rows
+    /// which started matching the original filter afterwards.
+    /// See <https://github.com/veeso/wasm-dbms/issues/118>.
     pub fn delete<T>(
         &mut self,
         behaviour: DeleteBehavior,
-        filter: Option<Filter>,
         rows: Vec<(Value, Vec<(ColumnDef, Value)>)>,
     ) -> DbmsResult<()>
     where
         T: TableSchema,
     {
+        let mut captured_pks = Vec::with_capacity(rows.len());
         for (pk, current_row) in rows {
-            self.overlay.delete::<T>(pk, &current_row);
+            self.overlay.delete::<T>(pk.clone(), &current_row);
+            captured_pks.push(pk);
         }
 
         self.operations.push(TransactionOp::Delete {
             table: T::table_name(),
             behaviour,
-            filter,
+            filter: Some(Filter::in_list(T::primary_key(), captured_pks)),
         });
         Ok(())
     }
@@ -180,17 +192,50 @@ mod tests {
             (Item::columns()[0], Value::Uint32(Uint32(1))),
             (Item::columns()[1], Value::Text(Text("foo".to_string()))),
         ];
-        tx.update::<Item>(
-            patch,
-            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-            vec![(Value::Uint32(Uint32(1)), current_row)],
-        )
-        .unwrap();
+        tx.update::<Item>(patch, vec![(Value::Uint32(Uint32(1)), current_row)])
+            .unwrap();
         assert_eq!(tx.operations.len(), 1);
         assert!(matches!(
             &tx.operations[0],
             TransactionOp::Update { table: "items", .. }
         ));
+    }
+
+    #[test]
+    fn test_transaction_update_restricts_commit_filter_to_captured_primary_keys() {
+        let mut tx = Transaction::default();
+        let patch = ItemUpdateRequest::from_values(
+            &[(Item::columns()[1], Value::Text(Text("bar".to_string())))],
+            Some(Filter::eq("name", Value::Text(Text("foo".to_string())))),
+        );
+        let rows = vec![
+            (
+                Value::Uint32(Uint32(1)),
+                vec![
+                    (Item::columns()[0], Value::Uint32(Uint32(1))),
+                    (Item::columns()[1], Value::Text(Text("foo".to_string()))),
+                ],
+            ),
+            (
+                Value::Uint32(Uint32(3)),
+                vec![
+                    (Item::columns()[0], Value::Uint32(Uint32(3))),
+                    (Item::columns()[1], Value::Text(Text("foo".to_string()))),
+                ],
+            ),
+        ];
+        tx.update::<Item>(patch, rows).unwrap();
+
+        let TransactionOp::Update { filter, .. } = &tx.operations[0] else {
+            panic!("expected an update operation");
+        };
+        assert_eq!(
+            filter,
+            &Some(Filter::in_list(
+                "id",
+                vec![Value::Uint32(Uint32(1)), Value::Uint32(Uint32(3))],
+            ))
+        );
     }
 
     #[test]
@@ -202,19 +247,24 @@ mod tests {
         ];
         tx.delete::<Item>(
             DeleteBehavior::Restrict,
-            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
             vec![(Value::Uint32(Uint32(1)), current_row)],
         )
         .unwrap();
         assert_eq!(tx.operations.len(), 1);
-        assert!(matches!(
-            &tx.operations[0],
-            TransactionOp::Delete {
-                table: "items",
-                behaviour: DeleteBehavior::Restrict,
-                ..
-            }
-        ));
+        let TransactionOp::Delete {
+            table,
+            behaviour,
+            filter,
+        } = &tx.operations[0]
+        else {
+            panic!("expected a delete operation");
+        };
+        assert_eq!(*table, "items");
+        assert!(matches!(behaviour, DeleteBehavior::Restrict));
+        assert_eq!(
+            filter,
+            &Some(Filter::in_list("id", vec![Value::Uint32(Uint32(1))]))
+        );
     }
 
     #[test]
@@ -238,7 +288,6 @@ mod tests {
         tx.insert::<Item>(insert_values.clone()).unwrap();
         tx.delete::<Item>(
             DeleteBehavior::Cascade,
-            None,
             vec![(Value::Uint32(Uint32(1)), insert_values)],
         )
         .unwrap();
