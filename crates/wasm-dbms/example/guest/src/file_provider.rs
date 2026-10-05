@@ -52,6 +52,21 @@ impl FileMemoryProvider {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Checks that the byte range `offset..offset + len` lies within the
+    /// allocated memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::OutOfBounds`] if the range overflows or ends
+    /// past the current memory size.
+    fn check_bounds(&self, offset: u64, len: usize) -> MemoryResult<()> {
+        offset
+            .checked_add(len as u64)
+            .filter(|end| *end <= self.size)
+            .map(|_| ())
+            .ok_or(MemoryError::OutOfBounds)
+    }
 }
 
 impl MemoryProvider for FileMemoryProvider {
@@ -67,7 +82,11 @@ impl MemoryProvider for FileMemoryProvider {
 
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64> {
         let previous_size = self.size;
-        let new_size = previous_size + new_pages * Self::PAGE_SIZE;
+        // Reject unrepresentable sizes before touching the file.
+        let new_size = new_pages
+            .checked_mul(Self::PAGE_SIZE)
+            .and_then(|additional| previous_size.checked_add(additional))
+            .ok_or(MemoryError::FailedToAllocatePage)?;
         self.file
             .set_len(new_size)
             .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
@@ -76,9 +95,7 @@ impl MemoryProvider for FileMemoryProvider {
     }
 
     fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
-        if offset + buf.len() as u64 > self.size {
-            return Err(MemoryError::OutOfBounds);
-        }
+        self.check_bounds(offset, buf.len())?;
 
         // `File` implements `Read` for `&File`, so shared access is
         // sufficient here.
@@ -93,9 +110,7 @@ impl MemoryProvider for FileMemoryProvider {
     }
 
     fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()> {
-        if offset + buf.len() as u64 > self.size {
-            return Err(MemoryError::OutOfBounds);
-        }
+        self.check_bounds(offset, buf.len())?;
 
         self.file
             .seek(SeekFrom::Start(offset))
@@ -229,6 +244,56 @@ mod tests {
             provider.read(100, &mut buf).unwrap();
             assert_eq!(buf, vec![0xAA, 0xBB, 0xCC]);
         }
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn test_grow_overflow_leaves_file_unchanged() {
+        let path = temp_path("grow_overflow");
+        cleanup(&path);
+
+        let mut provider = FileMemoryProvider::new(&path).unwrap();
+        provider.grow(1).unwrap();
+        provider.write(0, b"persistent data").unwrap();
+        let original = std::fs::read(&path).unwrap();
+
+        // The byte delta fits in `u64`, but adding it to the current size
+        // does not.
+        let result = provider.grow(u64::MAX / WASM_PAGE_SIZE);
+        assert!(matches!(result, Err(MemoryError::FailedToAllocatePage)));
+
+        // The page-to-byte conversion itself overflows.
+        let result = provider.grow(u64::MAX);
+        assert!(matches!(result, Err(MemoryError::FailedToAllocatePage)));
+
+        assert_eq!(provider.size(), WASM_PAGE_SIZE);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn test_offset_overflow_leaves_file_unchanged() {
+        let path = temp_path("offset_overflow");
+        cleanup(&path);
+
+        let mut provider = FileMemoryProvider::new(&path).unwrap();
+        provider.grow(1).unwrap();
+        provider.write(0, b"persistent data").unwrap();
+        let original = std::fs::read(&path).unwrap();
+
+        let mut buf = [0u8; 2];
+        assert!(matches!(
+            provider.read(u64::MAX, &mut buf),
+            Err(MemoryError::OutOfBounds)
+        ));
+        assert!(matches!(
+            provider.write(u64::MAX, &[0xFF, 0xFF]),
+            Err(MemoryError::OutOfBounds)
+        ));
+
+        assert_eq!(std::fs::read(&path).unwrap(), original);
 
         cleanup(&path);
     }
