@@ -271,6 +271,11 @@ When extracting JSON values, they're converted to DBMS types:
 | Array          | `Value::Json`    |
 | Object         | `Value::Json`    |
 
+Numeric comparisons use the numeric magnitude. An extracted number compared with any integer
+value (`Int8` to `Int64`, `Uint8` to `Uint64`) or with a `Decimal` matches as you would expect
+from the numbers alone: `1.5` is greater than `Value::Int64(1)`, and `1` is equal to
+`Value::Decimal(1.0)`. This applies to `Eq`, `Ne`, `Gt`, `Lt`, `Ge`, `Le` and `In`.
+
 **Comparison examples:**
 
 ```rust

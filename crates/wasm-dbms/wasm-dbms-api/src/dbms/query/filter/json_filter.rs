@@ -7,6 +7,8 @@ mod contains;
 mod extract;
 pub mod path;
 
+use std::cmp::Ordering;
+
 use serde::{Deserialize, Serialize};
 
 use self::contains::json_contains;
@@ -54,21 +56,52 @@ impl JsonCmp {
     /// # Returns
     ///
     /// `true` if the value matches the comparison operation, `false` otherwise.
+    ///
+    /// Numeric values (every integer variant and [`Value::Decimal`]) are compared by
+    /// magnitude, regardless of their variant, for every operator including `Eq`, `Ne`
+    /// and `In`. Other values are compared with the [`Value`] ordering.
     pub fn matches(&self, value: Option<Value>) -> bool {
         match (value, self) {
             (None, JsonCmp::IsNull) => true,
             (None, _) => false,
             (Some(v), JsonCmp::IsNull) => v.is_null(),
             (Some(v), JsonCmp::NotNull) => !v.is_null(),
-            (Some(v), JsonCmp::Eq(target)) => v == *target,
-            (Some(v), JsonCmp::Ne(target)) => v != *target,
-            (Some(v), JsonCmp::Gt(target)) => v > *target,
-            (Some(v), JsonCmp::Lt(target)) => v < *target,
-            (Some(v), JsonCmp::Ge(target)) => v >= *target,
-            (Some(v), JsonCmp::Le(target)) => v <= *target,
-            (Some(v), JsonCmp::In(list)) => list.contains(&v),
+            (Some(v), JsonCmp::Eq(target)) => compare_values(&v, target).is_eq(),
+            (Some(v), JsonCmp::Ne(target)) => compare_values(&v, target).is_ne(),
+            (Some(v), JsonCmp::Gt(target)) => compare_values(&v, target).is_gt(),
+            (Some(v), JsonCmp::Lt(target)) => compare_values(&v, target).is_lt(),
+            (Some(v), JsonCmp::Ge(target)) => compare_values(&v, target).is_ge(),
+            (Some(v), JsonCmp::Le(target)) => compare_values(&v, target).is_le(),
+            (Some(v), JsonCmp::In(list)) => {
+                list.iter().any(|target| compare_values(&v, target).is_eq())
+            }
         }
     }
+}
+
+/// Compares two values, using the numeric magnitude when both are numeric.
+fn compare_values(left: &Value, right: &Value) -> Ordering {
+    match (numeric_magnitude(left), numeric_magnitude(right)) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        _ => left.cmp(right),
+    }
+}
+
+/// Returns the exact magnitude of an integer or decimal value, `None` for other values.
+fn numeric_magnitude(value: &Value) -> Option<rust_decimal::Decimal> {
+    let magnitude = match value {
+        Value::Decimal(v) => v.0,
+        Value::Int8(v) => v.0.into(),
+        Value::Int16(v) => v.0.into(),
+        Value::Int32(v) => v.0.into(),
+        Value::Int64(v) => v.0.into(),
+        Value::Uint8(v) => v.0.into(),
+        Value::Uint16(v) => v.0.into(),
+        Value::Uint32(v) => v.0.into(),
+        Value::Uint64(v) => v.0.into(),
+        _ => return None,
+    };
+    Some(magnitude)
 }
 
 /// JSON-specific filter operations.
@@ -334,6 +367,123 @@ mod tests {
         let json = j(json!({"user": {"age": 25}}));
         let filter = JsonFilter::extract_gt("user.age", Value::Int64(18.into()));
         assert!(filter.matches(&json).unwrap());
+    }
+
+    #[test]
+    fn test_filter_extract_relational_ops_compare_numeric_magnitude() {
+        let decimal =
+            |n: i64, scale: u32| Value::Decimal(rust_decimal::Decimal::new(n, scale).into());
+
+        let fractional = j(json!({"n": 1.5}));
+        assert!(
+            JsonFilter::extract_gt("n", Value::Int64(1.into()))
+                .matches(&fractional)
+                .unwrap()
+        );
+        assert!(
+            !JsonFilter::extract_lt("n", Value::Int64(1.into()))
+                .matches(&fractional)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_lt("n", Value::Uint8(2.into()))
+                .matches(&fractional)
+                .unwrap()
+        );
+
+        let integer = j(json!({"n": 1}));
+        assert!(
+            !JsonFilter::extract_gt("n", decimal(100, 0))
+                .matches(&integer)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_lt("n", decimal(100, 0))
+                .matches(&integer)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_ge("n", decimal(1, 0))
+                .matches(&integer)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_le("n", decimal(1, 0))
+                .matches(&integer)
+                .unwrap()
+        );
+
+        let ten = j(json!({"n": 10}));
+        assert!(
+            JsonFilter::extract_gt("n", Value::Int32(2.into()))
+                .matches(&ten)
+                .unwrap()
+        );
+        assert!(
+            !JsonFilter::extract_lt("n", Value::Int32(2.into()))
+                .matches(&ten)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_ge("n", Value::Uint64(10.into()))
+                .matches(&ten)
+                .unwrap()
+        );
+        assert!(
+            !JsonFilter::extract_gt("n", Value::Int8((-1).into()))
+                .matches(&j(json!({"n": -2})))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_filter_extract_equality_and_in_compare_numeric_magnitude() {
+        let decimal =
+            |n: i64, scale: u32| Value::Decimal(rust_decimal::Decimal::new(n, scale).into());
+
+        let integer = j(json!({"n": 1}));
+        assert!(
+            JsonFilter::extract_eq("n", Value::Int32(1.into()))
+                .matches(&integer)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_eq("n", decimal(100, 2))
+                .matches(&integer)
+                .unwrap()
+        );
+        assert!(
+            !JsonFilter::extract_ne("n", Value::Uint16(1.into()))
+                .matches(&integer)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_in("n", vec![Value::Text("1".into()), decimal(10, 1)])
+                .matches(&integer)
+                .unwrap()
+        );
+
+        let fractional = j(json!({"n": 1.5}));
+        assert!(
+            !JsonFilter::extract_eq("n", Value::Int64(1.into()))
+                .matches(&fractional)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_ne("n", Value::Int64(1.into()))
+                .matches(&fractional)
+                .unwrap()
+        );
+        assert!(
+            !JsonFilter::extract_in("n", vec![Value::Int64(1.into()), Value::Uint32(2.into())])
+                .matches(&fractional)
+                .unwrap()
+        );
+        assert!(
+            JsonFilter::extract_in("n", vec![Value::Int64(1.into()), decimal(15, 1)])
+                .matches(&fractional)
+                .unwrap()
+        );
     }
 
     #[test]
