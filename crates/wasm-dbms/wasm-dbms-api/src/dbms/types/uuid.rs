@@ -49,12 +49,45 @@ impl<'de> Deserialize<'de> for Uuid {
     where
         D: serde::Deserializer<'de>,
     {
-        // deserialize bytes
-        let bytes: &[u8] = serde::Deserialize::deserialize(deserializer)?;
-        if bytes.len() != UUID_SIZE {
-            return Err(serde::de::Error::custom("Invalid UUID length"));
+        deserializer.deserialize_bytes(UuidBytesVisitor)
+    }
+}
+
+/// Visitor accepting the 16 UUID bytes either as a byte buffer or as a sequence of `u8`,
+/// so that every format can read back what [`Uuid`]'s [`Serialize`] implementation emits.
+struct UuidBytesVisitor;
+
+impl<'de> serde::de::Visitor<'de> for UuidBytesVisitor {
+    type Value = Uuid;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{UUID_SIZE} UUID bytes")
+    }
+
+    fn visit_bytes<E>(self, bytes: &[u8]) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let bytes: [u8; UUID_SIZE] = bytes
+            .try_into()
+            .map_err(|_| E::invalid_length(bytes.len(), &self))?;
+        Ok(Uuid(uuid::Uuid::from_bytes(bytes)))
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let mut bytes = [0u8; UUID_SIZE];
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = seq
+                .next_element()?
+                .ok_or_else(|| serde::de::Error::invalid_length(index, &self))?;
         }
-        Ok(Uuid(uuid::Uuid::from_bytes(bytes.try_into().unwrap())))
+        if seq.next_element::<u8>()?.is_some() {
+            return Err(serde::de::Error::invalid_length(UUID_SIZE + 1, &self));
+        }
+        Ok(Uuid(uuid::Uuid::from_bytes(bytes)))
     }
 }
 
@@ -104,6 +137,24 @@ mod tests {
         let encoded = original_uuid.encode();
         let decoded = Uuid::decode(encoded).unwrap();
         assert_eq!(original_uuid, decoded)
+    }
+
+    #[test]
+    fn test_uuid_serde_json_round_trip() {
+        let original_uuid = Uuid(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("valid uuid"),
+        );
+        let json = serde_json::to_string(&original_uuid).expect("serialize uuid");
+        let decoded: Uuid = serde_json::from_str(&json).expect("deserialize uuid");
+        assert_eq!(original_uuid, decoded);
+    }
+
+    #[test]
+    fn test_uuid_serde_json_rejects_wrong_length() {
+        let too_short = serde_json::to_string(&[0u8; 15]).expect("serialize bytes");
+        let too_long = serde_json::to_string(&[0u8; 17]).expect("serialize bytes");
+        assert!(serde_json::from_str::<Uuid>(&too_short).is_err());
+        assert!(serde_json::from_str::<Uuid>(&too_long).is_err());
     }
 
     #[cfg(feature = "candid")]
