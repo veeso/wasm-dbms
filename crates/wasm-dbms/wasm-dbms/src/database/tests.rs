@@ -1172,6 +1172,109 @@ fn test_select_range_on_indexed_column() {
     );
 }
 
+/// Seeds `name_indexed_users` with the names `b`, `m`, and `z`.
+fn seed_name_indexed_bounds(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>) {
+    insert_name_indexed_user(db, 1, "b", 20);
+    insert_name_indexed_user(db, 2, "m", 25);
+    insert_name_indexed_user(db, 3, "z", 30);
+}
+
+/// Selects `name_indexed_users` with `filter` and returns the sorted names.
+fn select_name_indexed_names(
+    db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+    filter: Filter,
+) -> Vec<String> {
+    let mut names: Vec<String> = db
+        .select::<NameIndexedUser>(Query::builder().all().and_where(filter).build())
+        .unwrap()
+        .into_iter()
+        .map(|row| row.name.expect("name should be selected").0)
+        .collect();
+    names.sort();
+    names
+}
+
+fn name_text(value: &str) -> Value {
+    Value::Text(Text(value.to_string()))
+}
+
+#[test]
+fn test_select_indexed_and_intersects_repeated_bounds_in_both_orders() {
+    let ctx = setup_name_indexed();
+    let db = WasmDbmsDatabase::oneshot(&ctx, NameIndexedTestSchema);
+    seed_name_indexed_bounds(&db);
+
+    let cases: [(Filter, Filter, &[&str]); 7] = [
+        (
+            Filter::ge("name", name_text("b")),
+            Filter::ge("name", name_text("m")),
+            &["m", "z"],
+        ),
+        (
+            Filter::gt("name", name_text("b")),
+            Filter::gt("name", name_text("m")),
+            &["z"],
+        ),
+        (
+            Filter::le("name", name_text("z")),
+            Filter::le("name", name_text("m")),
+            &["b", "m"],
+        ),
+        (
+            Filter::lt("name", name_text("z")),
+            Filter::lt("name", name_text("m")),
+            &["b"],
+        ),
+        (
+            Filter::ge("name", name_text("m")),
+            Filter::gt("name", name_text("m")),
+            &["z"],
+        ),
+        (
+            Filter::le("name", name_text("m")),
+            Filter::lt("name", name_text("m")),
+            &["b"],
+        ),
+        (
+            Filter::ge("name", name_text("c")),
+            Filter::le("name", name_text("y")),
+            &["m"],
+        ),
+    ];
+
+    for (left, right, expected) in cases {
+        for filter in [
+            left.clone().and(right.clone()),
+            right.clone().and(left.clone()),
+        ] {
+            assert_eq!(
+                select_name_indexed_names(&db, filter.clone()),
+                expected.to_vec(),
+                "unexpected rows for {filter:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_select_indexed_and_with_disjoint_bounds_returns_nothing() {
+    let ctx = setup_name_indexed();
+    let db = WasmDbmsDatabase::oneshot(&ctx, NameIndexedTestSchema);
+    seed_name_indexed_bounds(&db);
+
+    let lower = Filter::ge("name", name_text("n"));
+    let upper = Filter::le("name", name_text("m"));
+    for filter in [
+        lower.clone().and(upper.clone()),
+        upper.clone().and(lower.clone()),
+    ] {
+        assert!(
+            select_name_indexed_names(&db, filter.clone()).is_empty(),
+            "disjoint bounds must not match rows for {filter:?}"
+        );
+    }
+}
+
 #[test]
 fn test_select_in_on_indexed_column() {
     let ctx = setup_name_indexed();
