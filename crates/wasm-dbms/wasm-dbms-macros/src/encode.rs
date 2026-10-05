@@ -111,9 +111,11 @@ fn impl_size(struct_data: &DataStruct) -> TokenStream2 {
         }
     });
 
+    // Saturate instead of overflowing: a record whose size does not fit an
+    // `MSize` reports `MSize::MAX`, which storage rejects before encoding.
     quote::quote! {
         fn size(&self) -> ::wasm_dbms_api::prelude::MSize {
-            0 #( + #items )*
+            ::wasm_dbms_api::prelude::MSize::MIN #( .saturating_add(#items) )*
         }
     }
 }

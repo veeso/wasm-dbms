@@ -32,8 +32,7 @@ impl Encode for Text {
     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         let mut bytes = Vec::with_capacity(2 + self.0.len());
         // put 2 bytes for length
-        let len = self.0.len() as u16;
-        bytes.extend_from_slice(&len.to_le_bytes());
+        bytes.extend_from_slice(&crate::memory::length_prefix(self.0.len()));
         bytes.extend_from_slice(self.0.as_bytes());
         std::borrow::Cow::Owned(bytes)
     }
@@ -68,7 +67,7 @@ impl Encode for Text {
     }
 
     fn size(&self) -> crate::memory::MSize {
-        2 + self.0.len() as crate::memory::MSize
+        crate::memory::saturating_size(2, self.0.len())
     }
 }
 
@@ -114,5 +113,29 @@ mod tests {
         let buf = candid::encode_one(&src).expect("Candid encoding failed");
         let decoded: Text = candid::decode_one(&buf).expect("Candid decoding failed");
         assert_eq!(src, decoded);
+    }
+
+    #[test]
+    fn test_text_round_trips_at_largest_encodable_length() {
+        // 2-byte length prefix + 65_533 bytes = MSize::MAX
+        let original = Text("x".repeat(65_533));
+        assert_eq!(original.size(), crate::memory::MSize::MAX);
+
+        let encoded = original.encode();
+        assert_eq!(encoded.len(), original.size() as usize);
+        let decoded = Text::decode(encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_text_size_saturates_when_payload_does_not_fit() {
+        for len in [65_534, 65_535, 65_536, 65_538, 131_072] {
+            let text = Text("x".repeat(len));
+            assert_eq!(
+                text.size(),
+                crate::memory::MSize::MAX,
+                "size must saturate for a {len}-byte payload"
+            );
+        }
     }
 }

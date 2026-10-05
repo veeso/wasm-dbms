@@ -2,6 +2,7 @@ mod encode;
 mod error;
 
 pub use self::encode::{DEFAULT_ALIGNMENT, DataSize, Encode};
+pub(crate) use self::encode::{length_prefix, saturating_size};
 pub use self::error::{DecodeError, MemoryError};
 
 /// Type identifying a memory page number.

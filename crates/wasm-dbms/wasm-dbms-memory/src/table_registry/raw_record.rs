@@ -73,7 +73,9 @@ where
     }
 
     fn size(&self) -> MSize {
-        RAW_RECORD_HEADER_SIZE + self.length // 1 (start) + 2 bytes for length + data size
+        // 2 bytes for length + data size; saturates for records that cannot
+        // be stored, which `TableRegistry` rejects before writing.
+        RAW_RECORD_HEADER_SIZE.saturating_add(self.length)
     }
 }
 

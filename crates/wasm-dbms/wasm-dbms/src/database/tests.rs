@@ -319,6 +319,116 @@ fn test_update_record() {
     assert_eq!(rows[0].name, Some(Text("alicia".to_string())));
 }
 
+// -- oversized values --
+
+/// Builds an insert request for a user whose name is `name_len` bytes long.
+fn user_insert_with_name_len(id: u32, name_len: usize) -> UserInsertRequest {
+    UserInsertRequest::from_values(&[
+        (User::columns()[0], Value::Uint32(Uint32(id))),
+        (User::columns()[1], Value::Text(Text("x".repeat(name_len)))),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn test_insert_rejects_oversized_text_before_storage() {
+    use wasm_dbms_api::prelude::{DbmsError, MemoryError};
+
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+    // 65_533 bytes still fits the Text prefix but not a record page;
+    // 65_534 and 65_536 do not fit the 2-byte length prefix at all.
+    for name_len in [65_533, 65_534, 65_536, 70_000] {
+        let result = db.insert::<User>(user_insert_with_name_len(1, name_len));
+        assert!(
+            matches!(
+                result,
+                Err(DbmsError::Memory(MemoryError::DataTooLarge { .. }))
+            ),
+            "{name_len}-byte name: expected DataTooLarge, got {result:?}"
+        );
+    }
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert!(rows.is_empty());
+
+    // the table is still usable afterwards
+    insert_user(&db, 1, "alice");
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn test_insert_round_trips_largest_storable_text() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+    // id(4) + prefix(2) + name + record header(2), padded to 32, must fit
+    // an MSize: 4 + 2 + 65_494 + 2 = 65_502 -> 65_504.
+    let name = "x".repeat(65_494);
+    let insert = UserInsertRequest::from_values(&[
+        (User::columns()[0], Value::Uint32(Uint32(1))),
+        (User::columns()[1], Value::Text(Text(name.clone()))),
+    ])
+    .unwrap();
+    db.insert::<User>(insert).unwrap();
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows[0].name, Some(Text(name)));
+}
+
+#[test]
+fn test_update_rejects_oversized_text_and_keeps_original_row() {
+    use wasm_dbms_api::prelude::{DbmsError, MemoryError};
+
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[1], Value::Text(Text("x".repeat(70_000))))],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    let result = db.update::<User>(patch);
+    assert!(
+        matches!(
+            result,
+            Err(DbmsError::Memory(MemoryError::DataTooLarge { .. }))
+        ),
+        "expected DataTooLarge, got {result:?}"
+    );
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, Some(Text("alice".to_string())));
+}
+
+#[test]
+fn test_transaction_commit_rejects_oversized_text() {
+    use wasm_dbms_api::prelude::{DbmsError, MemoryError};
+
+    let ctx = setup();
+    let owner = vec![1, 2, 3];
+    let tx_id = ctx.begin_transaction(owner);
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+    db.insert::<User>(user_insert_with_name_len(1, 70_000))
+        .unwrap();
+    let result = db.commit();
+    assert!(
+        matches!(
+            result,
+            Err(DbmsError::Memory(MemoryError::DataTooLarge { .. }))
+        ),
+        "expected DataTooLarge, got {result:?}"
+    );
+
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert!(rows.is_empty());
+}
+
 #[test]
 fn test_update_no_matching_records() {
     let ctx = setup();

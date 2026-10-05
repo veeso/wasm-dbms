@@ -214,6 +214,9 @@ impl Value {
 ///
 /// For `Null`, only the discriminant byte is written.
 /// For `Custom`, the encoding is `[discriminant] + [tag_len: u16 LE] + [tag_bytes] + [data_len: u16 LE] + [encoded_bytes]`.
+///
+/// [`Encode::size`] saturates at [`MSize::MAX`] when a value does not fit the
+/// 2-byte length prefixes; storage rejects such values before encoding.
 impl Encode for Value {
     const SIZE: DataSize = DataSize::Dynamic;
     const ALIGNMENT: PageOffset = DEFAULT_ALIGNMENT;
@@ -239,14 +242,12 @@ impl Encode for Value {
             Value::Uuid(v) => encode_with_discriminant(discriminant::UUID, v.encode()),
             Value::Custom(cv) => {
                 let tag_bytes = cv.type_tag.as_bytes();
-                let tag_len = tag_bytes.len() as u16;
-                let data_len = cv.encoded.len() as u16;
                 let total = 1 + 2 + tag_bytes.len() + 2 + cv.encoded.len();
                 let mut buf = Vec::with_capacity(total);
                 buf.push(discriminant::CUSTOM);
-                buf.extend_from_slice(&tag_len.to_le_bytes());
+                buf.extend_from_slice(&crate::memory::length_prefix(tag_bytes.len()));
                 buf.extend_from_slice(tag_bytes);
-                buf.extend_from_slice(&data_len.to_le_bytes());
+                buf.extend_from_slice(&crate::memory::length_prefix(cv.encoded.len()));
                 buf.extend_from_slice(&cv.encoded);
                 Cow::Owned(buf)
             }
@@ -287,7 +288,7 @@ impl Encode for Value {
     }
 
     fn size(&self) -> MSize {
-        1 + match self {
+        let inner = match self {
             Value::Blob(v) => Encode::size(v),
             Value::Boolean(v) => Encode::size(v),
             Value::Date(v) => Encode::size(v),
@@ -307,9 +308,17 @@ impl Encode for Value {
             Value::Uuid(v) => Encode::size(v),
             Value::Custom(cv) => {
                 // tag_len(2) + tag_bytes + data_len(2) + encoded_bytes
-                (2 + cv.type_tag.len() + 2 + cv.encoded.len()) as MSize
+                crate::memory::saturating_size(
+                    2,
+                    cv.type_tag
+                        .len()
+                        .saturating_add(2)
+                        .saturating_add(cv.encoded.len()),
+                )
             }
-        }
+        };
+        // discriminant(1)
+        inner.saturating_add(1)
     }
 }
 
@@ -396,7 +405,8 @@ impl Encode for Vec<Value> {
     fn size(&self) -> MSize {
         let mut total: MSize = 4; // count
         for value in self {
-            total += 4 + Encode::size(value); // size prefix + encoded value
+            // size prefix + encoded value
+            total = total.saturating_add(4).saturating_add(Encode::size(value));
         }
         total
     }
@@ -813,5 +823,65 @@ mod tests {
         ];
         let encoded = Encode::encode(&original);
         assert_eq!(Encode::size(&original) as usize, encoded.len());
+    }
+
+    // -- Encoded size limits --
+
+    fn custom_value(encoded_len: usize) -> Value {
+        Value::Custom(crate::dbms::custom_value::CustomValue {
+            type_tag: "t".to_string(),
+            encoded: vec![0xCD; encoded_len],
+            display: String::new(),
+        })
+    }
+
+    #[test]
+    fn test_value_round_trips_at_largest_encodable_length() {
+        // discriminant(1) + prefix(2) + 65_532 = MSize::MAX
+        let text = Value::Text(types::Text("x".repeat(65_532)));
+        // discriminant(1) + prefix(2) + 65_532 = MSize::MAX
+        let blob = Value::Blob(types::Blob(vec![0xAB; 65_532]));
+        // discriminant(1) + tag_len(2) + "t"(1) + data_len(2) + 65_529 = MSize::MAX
+        let custom = custom_value(65_529);
+
+        for value in [text, blob, custom] {
+            assert_eq!(Encode::size(&value), MSize::MAX);
+            let encoded = Encode::encode(&value);
+            assert_eq!(encoded.len(), MSize::MAX as usize);
+            let decoded = Value::decode(encoded).unwrap();
+            assert_eq!(decoded, value);
+        }
+    }
+
+    #[test]
+    fn test_value_size_saturates_when_payload_does_not_fit() {
+        let values = [
+            Value::Text(types::Text("x".repeat(65_533))),
+            Value::Text(types::Text("x".repeat(65_536))),
+            Value::Blob(types::Blob(vec![0xAB; 65_533])),
+            Value::Blob(types::Blob(vec![0xAB; 65_536])),
+            Value::Json(types::Json::from(serde_json::json!("x".repeat(65_534)))),
+            custom_value(65_530),
+            custom_value(65_536),
+            custom_value(131_072),
+        ];
+        for value in &values {
+            assert_eq!(
+                Encode::size(value),
+                MSize::MAX,
+                "size must saturate for {}",
+                value.type_name()
+            );
+        }
+    }
+
+    #[test]
+    fn test_vec_value_size_saturates_when_payload_does_not_fit() {
+        // each value fits on its own, the composite key does not
+        let original = vec![
+            Value::Text(types::Text("x".repeat(40_000))),
+            Value::Text(types::Text("y".repeat(40_000))),
+        ];
+        assert_eq!(Encode::size(&original), MSize::MAX);
     }
 }

@@ -261,10 +261,9 @@ impl Encode for Json {
     const ALIGNMENT: PageOffset = DEFAULT_ALIGNMENT;
 
     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
-        let mut bytes = Vec::with_capacity(self.size() as usize);
+        let mut bytes = Vec::with_capacity(LEN_SIZE as usize + self.repr.len());
         // put 2 bytes for length
-        let len = self.repr.len() as u16;
-        bytes.extend_from_slice(&len.to_le_bytes());
+        bytes.extend_from_slice(&crate::memory::length_prefix(self.repr.len()));
         bytes.extend_from_slice(self.repr.as_bytes());
         std::borrow::Cow::Owned(bytes)
     }
@@ -306,7 +305,7 @@ impl Encode for Json {
     }
 
     fn size(&self) -> MSize {
-        self.repr.len() as MSize + LEN_SIZE
+        crate::memory::saturating_size(LEN_SIZE, self.repr.len())
     }
 }
 
@@ -1284,5 +1283,31 @@ mod tests {
         let json = j(json!(null));
         let value: DbmsValue = json.into();
         assert_eq!(value.type_name(), "Json");
+    }
+
+    #[test]
+    fn test_encode_decode_at_largest_encodable_length() {
+        // `"…"` adds 2 quote bytes: 2-byte prefix + 2 + 65_531 = MSize::MAX
+        let json = j(json!("x".repeat(65_531)));
+        assert_eq!(json.size(), MSize::MAX);
+
+        let encoded = json.encode();
+        assert_eq!(encoded.len(), json.size() as usize);
+        let decoded = Json::decode(encoded).unwrap();
+        assert_eq!(decoded, json);
+    }
+
+    #[test]
+    fn test_size_saturates_when_payload_does_not_fit() {
+        // repr lengths 65_534, 65_535, 65_536 and 65_538
+        for len in [65_532, 65_533, 65_534, 65_536] {
+            let json = j(json!("x".repeat(len)));
+            assert_eq!(
+                json.size(),
+                MSize::MAX,
+                "size must saturate for a {}-byte repr",
+                len + 2
+            );
+        }
     }
 }
