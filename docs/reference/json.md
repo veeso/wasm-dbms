@@ -271,6 +271,10 @@ When extracting JSON values, they're converted to DBMS types:
 | Array          | `Value::Json`    |
 | Object         | `Value::Json`    |
 
+A number too large to fit a `Decimal`, such as `1e100`, is extracted as a `Value::Json` holding
+that number. It is still a present, non-null value: `has_key` and `extract_not_null` match it,
+and `extract_is_null` does not.
+
 Numeric comparisons use the numeric magnitude. An extracted number compared with any integer
 value (`Int8` to `Int64`, `Uint8` to `Uint64`) or with a `Decimal` matches as you would expect
 from the numbers alone: `1.5` is greater than `Value::Int64(1)`, and `1` is equal to
