@@ -58,6 +58,10 @@ All validators are available in `wasm_dbms_api::prelude`.
 
 ### String Length Validators
 
+String lengths are counted in Unicode characters (scalar values), not bytes: `"🙂"` and `"é"`
+each have length 1. A character written with a combining mark, such as `e` followed by U+0301,
+counts as two.
+
 **MaxStrlenValidator** - Maximum string length
 
 ```rust
