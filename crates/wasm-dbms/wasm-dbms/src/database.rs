@@ -1140,7 +1140,7 @@ where
         if self.transaction.is_some() {
             let rows = self.existing_rows_for_filter::<T>(filter.clone())?;
             let count = rows.len() as u64;
-            self.with_transaction_mut(|tx| tx.update::<T>(patch, filter, rows))?;
+            self.with_transaction_mut(|tx| tx.update::<T>(patch, rows))?;
 
             return Ok(count);
         }
@@ -1237,7 +1237,7 @@ where
             let rows = self.existing_rows_for_filter::<T>(filter.clone())?;
             let count = rows.len() as u64;
 
-            self.with_transaction_mut(|tx| tx.delete::<T>(behaviour, filter, rows))?;
+            self.with_transaction_mut(|tx| tx.delete::<T>(behaviour, rows))?;
 
             return Ok(count);
         }

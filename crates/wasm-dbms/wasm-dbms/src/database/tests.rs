@@ -684,6 +684,125 @@ fn test_transaction_insert_pk_update_then_reinsert_old_pk_yields_both_rows() {
     assert_eq!(rows[1].name, Some(Text("alice".to_string())));
 }
 
+// -- transactional update applies only to rows captured at staging (#118) --
+
+#[test]
+fn test_transaction_update_commit_ignores_rows_inserted_after_staging() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "old");
+
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[1], Value::Text(Text("new".to_string())))],
+        Some(Filter::eq("name", Value::Text(Text("old".to_string())))),
+    );
+    let staged = tx_db.update::<User>(patch).unwrap();
+    assert_eq!(staged, 1);
+
+    // another caller inserts a row matching the staged filter before commit
+    insert_user(&db, 2, "old");
+
+    tx_db.commit().unwrap();
+
+    let rows = db
+        .select::<User>(Query::builder().all().order_by_asc("id").build())
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].name, Some(Text("new".to_string())));
+    assert_eq!(rows[1].id, Some(Uint32(2)));
+    assert_eq!(rows[1].name, Some(Text("old".to_string())));
+
+    let updated = db
+        .select::<User>(
+            Query::builder()
+                .all()
+                .and_where(Filter::eq("name", Value::Text(Text("new".to_string()))))
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(updated.len() as u64, staged);
+}
+
+#[test]
+fn test_transaction_update_commit_includes_rows_inserted_in_same_transaction() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "old");
+
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    insert_user(&tx_db, 2, "old");
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[1], Value::Text(Text("new".to_string())))],
+        Some(Filter::eq("name", Value::Text(Text("old".to_string())))),
+    );
+    let staged = tx_db.update::<User>(patch).unwrap();
+    assert_eq!(staged, 2);
+
+    // a row inserted outside the transaction after staging must stay untouched
+    insert_user(&db, 3, "old");
+
+    tx_db.commit().unwrap();
+
+    let rows = db
+        .select::<User>(Query::builder().all().order_by_asc("id").build())
+        .unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].name, Some(Text("new".to_string())));
+    assert_eq!(rows[1].name, Some(Text("new".to_string())));
+    assert_eq!(rows[2].name, Some(Text("old".to_string())));
+}
+
+#[test]
+fn test_transaction_update_matching_no_rows_does_not_update_later_insertions() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[1], Value::Text(Text("new".to_string())))],
+        Some(Filter::eq("name", Value::Text(Text("old".to_string())))),
+    );
+    assert_eq!(tx_db.update::<User>(patch).unwrap(), 0);
+
+    insert_user(&db, 1, "old");
+
+    tx_db.commit().unwrap();
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, Some(Text("old".to_string())));
+}
+
+#[test]
+fn test_transaction_delete_commit_ignores_rows_inserted_after_staging() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "old");
+
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    let staged = tx_db
+        .delete::<User>(
+            DeleteBehavior::Restrict,
+            Some(Filter::eq("name", Value::Text(Text("old".to_string())))),
+        )
+        .unwrap();
+    assert_eq!(staged, 1);
+
+    insert_user(&db, 2, "old");
+
+    tx_db.commit().unwrap();
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(2)));
+}
+
 // -- select_raw --
 
 #[test]
