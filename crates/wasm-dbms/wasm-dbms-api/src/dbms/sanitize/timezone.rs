@@ -12,12 +12,23 @@ use crate::prelude::{DateTime, DbmsError, DbmsResult, Sanitize, Value};
 /// # Example
 ///
 /// ```rust
-/// use wasm_dbms_api::prelude::{CollapseWhitespaceSanitizer, Value, Sanitize as _};
+/// use wasm_dbms_api::prelude::{DateTime, Sanitize as _, TimezoneSanitizer, Value};
 ///
-/// let value = Value::Text("  Hello,       World!  ".into());
-/// let sanitizer = CollapseWhitespaceSanitizer;
+/// let value = Value::DateTime(DateTime {
+///     year: 2024,
+///     month: 6,
+///     day: 15,
+///     hour: 12,
+///     timezone_offset_minutes: 0,
+///     ..DateTime::default()
+/// });
+/// let sanitizer = TimezoneSanitizer(60);
 /// let sanitized_value = sanitizer.sanitize(value).unwrap();
-/// assert_eq!(sanitized_value, Value::Text("Hello, World!".into()));
+/// let Value::DateTime(sanitized) = sanitized_value else {
+///     unreachable!();
+/// };
+/// assert_eq!(sanitized.hour, 13);
+/// assert_eq!(sanitized.timezone_offset_minutes, 60);
 /// ```
 pub struct TimezoneSanitizer(pub i16);
 
@@ -52,12 +63,23 @@ impl Sanitize for TimezoneSanitizer {
 /// # Example
 ///
 /// ```rust
-/// use wasm_dbms_api::prelude::{CollapseWhitespaceSanitizer, Value, Sanitize as _};
+/// use wasm_dbms_api::prelude::{DateTime, Sanitize as _, UtcSanitizer, Value};
 ///
-/// let value = Value::Text("  Hello,       World!  ".into());
-/// let sanitizer = CollapseWhitespaceSanitizer;
+/// let value = Value::DateTime(DateTime {
+///     year: 2024,
+///     month: 6,
+///     day: 15,
+///     hour: 12,
+///     timezone_offset_minutes: 60,
+///     ..DateTime::default()
+/// });
+/// let sanitizer = UtcSanitizer;
 /// let sanitized_value = sanitizer.sanitize(value).unwrap();
-/// assert_eq!(sanitized_value, Value::Text("Hello, World!".into()));
+/// let Value::DateTime(sanitized) = sanitized_value else {
+///     unreachable!();
+/// };
+/// assert_eq!(sanitized.hour, 11);
+/// assert_eq!(sanitized.timezone_offset_minutes, 0);
 /// ```
 pub struct UtcSanitizer;
 
@@ -114,8 +136,8 @@ fn us_to_datetime(mut ts: i64) -> DbmsResult<DateTime> {
     let (year, month, day) = civil_from_days(days);
     let year = u16::try_from(year).map_err(|_| {
         DbmsError::Sanitize(format!(
-            "converted year {year} is outside the supported range 0..={}",
-            u16::MAX
+            "converted year {year} is outside the supported range 0..={max_year}",
+            max_year = u16::MAX
         ))
     })?;
 
@@ -444,7 +466,10 @@ mod tests {
             let input = dt(2024, 6, 15, 12, 0, 0, 0, offset);
             let outcome = std::panic::catch_unwind(|| sanitizer.sanitize(Value::DateTime(input)));
             let result = outcome.unwrap_or_else(|_| {
-                panic!("sanitizer {} panicked on offset {offset}", sanitizer.0)
+                panic!(
+                    "sanitizer {sanitizer} panicked on offset {offset}",
+                    sanitizer = sanitizer.0
+                )
             });
             let err = result.expect_err("extreme offsets should be rejected");
             assert!(matches!(err, DbmsError::Sanitize(_)), "{err:?}");

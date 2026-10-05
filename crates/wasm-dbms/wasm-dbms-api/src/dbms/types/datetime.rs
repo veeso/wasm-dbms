@@ -33,17 +33,17 @@ impl fmt::Display for DateTime {
         let offset_minutes = self.timezone_offset_minutes.unsigned_abs();
         write!(
             f,
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}{}{:02}:{:02}",
-            self.year,
-            self.month,
-            self.day,
-            self.hour,
-            self.minute,
-            self.second,
-            self.microsecond,
-            offset_sign,
-            offset_minutes / 60,
-            offset_minutes % 60
+            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.\
+             {microsecond:06}{offset_sign}{offset_hours:02}:{offset_minutes:02}",
+            year = self.year,
+            month = self.month,
+            day = self.day,
+            hour = self.hour,
+            minute = self.minute,
+            second = self.second,
+            microsecond = self.microsecond,
+            offset_hours = offset_minutes / 60,
+            offset_minutes = offset_minutes % 60,
         )
     }
 }

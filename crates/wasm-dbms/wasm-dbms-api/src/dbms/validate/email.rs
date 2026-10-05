@@ -2,8 +2,15 @@ use lazy_regex::{Lazy, Regex, lazy_regex};
 
 use crate::prelude::{Validate, Value};
 
-static EMAIL_REGEX: Lazy<Regex> =
-    lazy_regex!(r"^[A-Za-z0-9]{1}[A-Za-z0-9._%+-]*@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$");
+/// Email address pattern.
+///
+/// - The local part starts with a letter or digit and is a sequence of dot-separated atoms,
+///   so it never contains consecutive dots or ends with a dot.
+/// - Each domain label starts and ends with a letter or digit; hyphens are only allowed inside.
+/// - The top-level domain has at least two letters.
+static EMAIL_REGEX: Lazy<Regex> = lazy_regex!(
+    r"^[A-Za-z0-9][A-Za-z0-9_%+-]*(\.[A-Za-z0-9_%+-]+)*@([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$"
+);
 
 /// A validator for email addresses.
 ///
@@ -60,6 +67,9 @@ mod tests {
             "a@b.co",
             "test_email@domain.travel",
             "user99@domain.co.uk",
+            "a.b.c@x-y.z-w.io",
+            "user_name.last-name@a1.b2.example",
+            "u@1-2.example.com",
         ];
         let invalid_emails = vec![
             "",
@@ -70,12 +80,15 @@ mod tests {
             "user@gmail.",
             "user@.com",
             "user@@gmail.com",
-            //"user@gmail..com",
-            //"user..name@gmail.com",
+            "user@gmail..com",
+            "user..name@gmail.com",
             ".user@gmail.com",
-            //"user.@gmail.com",
-            //"user@-gmail.com",
-            //"user@gmail-.com",
+            "user.@gmail.com",
+            "user@-gmail.com",
+            "user@gmail-.com",
+            "user@sub.-domain.com",
+            "user@sub-.domain.com",
+            "user@domain.-com",
             "user@111.222.333.444",
             "user@[127.0.0.1]",
             "\"user\"@gmail.com",
