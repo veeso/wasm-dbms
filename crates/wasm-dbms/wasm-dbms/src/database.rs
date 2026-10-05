@@ -112,6 +112,28 @@ where
         f(tx)
     }
 
+    /// Validates captured row versions and combines them into one commit filter.
+    fn validated_transaction_filter(
+        &self,
+        table: &'static str,
+        filters: Vec<Filter>,
+    ) -> DbmsResult<Option<Filter>> {
+        for filter in &filters {
+            let rows = self.schema.select(
+                self,
+                table,
+                Query::builder().all().filter(Some(filter.clone())).build(),
+            )?;
+            if rows.len() != 1 {
+                return Err(DbmsError::Query(QueryError::ConstraintViolation(format!(
+                    "transaction conflict on table '{table}'"
+                ))));
+            }
+        }
+
+        Ok(filters.into_iter().reduce(Filter::or))
+    }
+
     /// Returns the cached drift flag, computing and caching it on first call.
     ///
     /// `O(tables × snapshot bytes)` on the first invocation; `O(1)` thereafter.
@@ -1303,16 +1325,29 @@ where
                 TransactionOp::Delete {
                     table,
                     behaviour,
-                    filter,
+                    filters,
                 } => self
-                    .schema
-                    .delete(self, table, behaviour, filter)
-                    .map(|_| ()),
+                    .validated_transaction_filter(table, filters)
+                    .and_then(|filter| match filter {
+                        Some(filter) => self
+                            .schema
+                            .delete(self, table, behaviour, Some(filter))
+                            .map(|_| ()),
+                        None => Ok(()),
+                    }),
                 TransactionOp::Update {
                     table,
                     patch,
-                    filter,
-                } => self.schema.update(self, table, &patch, filter).map(|_| ()),
+                    filters,
+                } => self
+                    .validated_transaction_filter(table, filters)
+                    .and_then(|filter| match filter {
+                        Some(filter) => self
+                            .schema
+                            .update(self, table, &patch, Some(filter))
+                            .map(|_| ()),
+                        None => Ok(()),
+                    }),
             };
 
             if let Err(err) = result {

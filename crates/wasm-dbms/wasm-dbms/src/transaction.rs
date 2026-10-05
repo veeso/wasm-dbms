@@ -41,9 +41,9 @@ impl Transaction {
     /// `rows` is a list of `(primary_key, current_row)` pairs for each affected record.
     /// The current row is needed to track old indexed values in the overlay.
     ///
-    /// The operation recorded for commit is restricted to the primary keys in `rows`, so that
-    /// commit updates exactly the rows captured when the update was staged, and not rows
-    /// which started matching the original filter afterwards.
+    /// The operation recorded for commit is restricted to the complete row versions in `rows`,
+    /// so that commit updates exactly the rows captured when the update was staged. A row that
+    /// changed or was replaced after staging no longer matches and causes a commit conflict.
     /// See <https://github.com/veeso/wasm-dbms/issues/118>.
     pub fn update<T>(
         &mut self,
@@ -59,17 +59,17 @@ impl Transaction {
             .map(|(col, val)| (col.name, val.clone()))
             .collect();
 
-        let mut captured_pks = Vec::with_capacity(rows.len());
+        let mut filters = Vec::with_capacity(rows.len());
         for (pk, current_row) in rows {
             self.overlay
                 .update::<T>(pk.clone(), overlay_patch.clone(), &current_row);
-            captured_pks.push(pk);
+            filters.push(Self::captured_row_filter::<T>(pk, &current_row));
         }
 
         self.operations.push(TransactionOp::Update {
             table: T::table_name(),
             patch: patch_values,
-            filter: Some(Filter::in_list(T::primary_key(), captured_pks)),
+            filters,
         });
         Ok(())
     }
@@ -79,9 +79,9 @@ impl Transaction {
     /// `rows` is a list of `(primary_key, current_row)` pairs for each affected record.
     /// The current row is needed to track removed indexed values in the overlay.
     ///
-    /// The operation recorded for commit is restricted to the primary keys in `rows`, so that
-    /// commit deletes exactly the rows captured when the delete was staged, and not rows
-    /// which started matching the original filter afterwards.
+    /// The operation recorded for commit is restricted to the complete row versions in `rows`,
+    /// so that commit deletes exactly the rows captured when the delete was staged. A row that
+    /// changed or was replaced after staging no longer matches and causes a commit conflict.
     /// See <https://github.com/veeso/wasm-dbms/issues/118>.
     pub fn delete<T>(
         &mut self,
@@ -91,18 +91,31 @@ impl Transaction {
     where
         T: TableSchema,
     {
-        let mut captured_pks = Vec::with_capacity(rows.len());
+        let mut filters = Vec::with_capacity(rows.len());
         for (pk, current_row) in rows {
             self.overlay.delete::<T>(pk.clone(), &current_row);
-            captured_pks.push(pk);
+            filters.push(Self::captured_row_filter::<T>(pk, &current_row));
         }
 
         self.operations.push(TransactionOp::Delete {
             table: T::table_name(),
             behaviour,
-            filter: Some(Filter::in_list(T::primary_key(), captured_pks)),
+            filters,
         });
         Ok(())
+    }
+
+    /// Builds an optimistic-concurrency filter for one captured row version.
+    fn captured_row_filter<T>(primary_key: Value, row: &[(ColumnDef, Value)]) -> Filter
+    where
+        T: TableSchema,
+    {
+        row.iter()
+            .filter(|(column, _)| column.name != T::primary_key())
+            .fold(
+                Filter::eq(T::primary_key(), primary_key),
+                |filter, (column, value)| filter.and(Filter::eq(column.name, value.clone())),
+            )
     }
 
     /// Returns a reference to the overlay.
@@ -126,22 +139,19 @@ pub enum TransactionOp {
     Delete {
         table: &'static str,
         behaviour: DeleteBehavior,
-        filter: Option<Filter>,
+        filters: Vec<Filter>,
     },
     Update {
         table: &'static str,
         patch: Vec<(ColumnDef, Value)>,
-        filter: Option<Filter>,
+        filters: Vec<Filter>,
     },
 }
 
 #[cfg(test)]
 mod tests {
 
-    use wasm_dbms_api::prelude::{
-        Database as _, InsertRecord as _, Query, TableSchema as _, Text, Uint32, UpdateRecord as _,
-        Value,
-    };
+    use wasm_dbms_api::prelude::{Database as _, InsertRecord as _, Query, Text, Uint32, Value};
     use wasm_dbms_macros::{DatabaseSchema, Table};
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
@@ -202,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transaction_update_restricts_commit_filter_to_captured_primary_keys() {
+    fn test_transaction_update_restricts_commit_filters_to_captured_row_versions() {
         let mut tx = Transaction::default();
         let patch = ItemUpdateRequest::from_values(
             &[(Item::columns()[1], Value::Text(Text("bar".to_string())))],
@@ -226,15 +236,17 @@ mod tests {
         ];
         tx.update::<Item>(patch, rows).unwrap();
 
-        let TransactionOp::Update { filter, .. } = &tx.operations[0] else {
+        let TransactionOp::Update { filters, .. } = &tx.operations[0] else {
             panic!("expected an update operation");
         };
         assert_eq!(
-            filter,
-            &Some(Filter::in_list(
-                "id",
-                vec![Value::Uint32(Uint32(1)), Value::Uint32(Uint32(3))],
-            ))
+            filters,
+            &vec![
+                Filter::eq("id", Value::Uint32(Uint32(1)))
+                    .and(Filter::eq("name", Value::Text(Text("foo".to_string())),)),
+                Filter::eq("id", Value::Uint32(Uint32(3)))
+                    .and(Filter::eq("name", Value::Text(Text("foo".to_string())),)),
+            ]
         );
     }
 
@@ -254,7 +266,7 @@ mod tests {
         let TransactionOp::Delete {
             table,
             behaviour,
-            filter,
+            filters,
         } = &tx.operations[0]
         else {
             panic!("expected a delete operation");
@@ -262,8 +274,11 @@ mod tests {
         assert_eq!(*table, "items");
         assert!(matches!(behaviour, DeleteBehavior::Restrict));
         assert_eq!(
-            filter,
-            &Some(Filter::in_list("id", vec![Value::Uint32(Uint32(1))]))
+            filters,
+            &vec![
+                Filter::eq("id", Value::Uint32(Uint32(1)))
+                    .and(Filter::eq("name", Value::Text(Text("foo".to_string())),))
+            ]
         );
     }
 

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub use self::json_filter::{JsonCmp, JsonFilter};
 use crate::dbms::query::QueryResult;
 use crate::dbms::table::ColumnDef;
-use crate::dbms::types::Text;
+use crate::dbms::types::{DataTypeKind, Text};
 use crate::dbms::value::Value;
 use crate::prelude::QueryError;
 
@@ -184,6 +184,87 @@ impl Filter {
         };
 
         Ok(res)
+    }
+
+    /// Validates joined-row column references and typed filter operands against table schemas.
+    ///
+    /// This validation is independent of row data, so invalid filters are rejected even when a
+    /// join produces no rows. Missing column names retain the normal non-matching semantics.
+    pub fn validate_joined(&self, table_groups: &[(&str, &[ColumnDef])]) -> QueryResult<()> {
+        match self {
+            Filter::Eq(field, _)
+            | Filter::Ne(field, _)
+            | Filter::Gt(field, _)
+            | Filter::Lt(field, _)
+            | Filter::Ge(field, _)
+            | Filter::In(field, _)
+            | Filter::Le(field, _)
+            | Filter::NotNull(field)
+            | Filter::IsNull(field) => {
+                Self::resolve_joined_column_def(field, table_groups)?;
+            }
+            Filter::Json(field, _) => {
+                let column = Self::resolve_joined_column_def(field, table_groups)?;
+                if !column.is_some_and(|column| column.data_type == DataTypeKind::Json) {
+                    return Err(QueryError::InvalidQuery(format!(
+                        "Column '{field}' is not a Json type"
+                    )));
+                }
+            }
+            Filter::Like(field, pattern) => {
+                let column = Self::resolve_joined_column_def(field, table_groups)?;
+                match column.map(|column| column.data_type) {
+                    Some(DataTypeKind::Text) => {
+                        like::Like::parse(pattern).map_err(|error| {
+                            QueryError::InvalidQuery(format!(
+                                "Invalid LIKE pattern {pattern}: {error}"
+                            ))
+                        })?;
+                    }
+                    Some(_) => {
+                        return Err(QueryError::InvalidQuery(
+                            "LIKE operator can only be applied to Text values".to_string(),
+                        ));
+                    }
+                    None => {}
+                }
+            }
+            Filter::And(left, right) | Filter::Or(left, right) => {
+                left.validate_joined(table_groups)?;
+                right.validate_joined(table_groups)?;
+            }
+            Filter::Not(inner) => inner.validate_joined(table_groups)?,
+        }
+
+        Ok(())
+    }
+
+    /// Resolves a column reference against joined table schemas.
+    fn resolve_joined_column_def<'a>(
+        field: &str,
+        table_groups: &'a [(&str, &[ColumnDef])],
+    ) -> QueryResult<Option<&'a ColumnDef>> {
+        if let Some((table, column)) = field.split_once('.') {
+            let group = table_groups
+                .iter()
+                .find(|(table_name, _)| *table_name == table)
+                .ok_or_else(|| {
+                    QueryError::InvalidQuery(format!("Table '{table}' not in query scope"))
+                })?;
+            Ok(group.1.iter().find(|column_def| column_def.name == column))
+        } else {
+            let mut found = table_groups
+                .iter()
+                .flat_map(|(_, columns)| columns.iter())
+                .filter(|column| column.name == field);
+            let column = found.next();
+            if column.is_some() && found.next().is_some() {
+                return Err(QueryError::InvalidQuery(format!(
+                    "Ambiguous column '{field}': exists in multiple joined tables, qualify with table name"
+                )));
+            }
+            Ok(column)
+        }
     }
 
     /// Resolves a column reference against joined table groups.
