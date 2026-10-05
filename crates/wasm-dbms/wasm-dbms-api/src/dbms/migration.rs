@@ -16,10 +16,12 @@
 //! `MigrationPolicy`, `MigrationError`) and the per-table extension hook
 //! [`Migrate`]. The diff algorithm and apply logic live in the engine crate.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
-use crate::dbms::table::{ColumnSnapshot, DataTypeSnapshot, IndexSnapshot, TableSchema};
+use crate::dbms::table::{
+    ColumnSnapshot, DataTypeSnapshot, ForeignKeySnapshot, IndexSnapshot, TableSchema,
+};
 use crate::dbms::value::Value;
 use crate::error::DbmsResult;
 
@@ -168,7 +170,33 @@ pub struct ColumnChanges {
     pub primary_key: Option<bool>,
     /// New foreign-key state. `Some(None)` means the foreign key was dropped;
     /// `Some(Some(fk))` means it was added or replaced.
-    pub foreign_key: Option<Option<crate::dbms::table::ForeignKeySnapshot>>,
+    ///
+    /// In human-readable formats such as JSON, `None` omits the field,
+    /// `Some(None)` is written as `null`, and `Some(Some(fk))` as the snapshot.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_foreign_key_change"
+    )]
+    pub foreign_key: Option<Option<ForeignKeySnapshot>>,
+}
+
+/// Deserializes [`ColumnChanges::foreign_key`].
+///
+/// Human-readable formats only reach this function when the field is present,
+/// so a `null` value means the foreign key is removed. Binary formats such as
+/// Candid encode both option layers and use the default decoding.
+fn deserialize_foreign_key_change<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<ForeignKeySnapshot>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    if deserializer.is_human_readable() {
+        Option::<ForeignKeySnapshot>::deserialize(deserializer).map(Some)
+    } else {
+        Option::<Option<ForeignKeySnapshot>>::deserialize(deserializer)
+    }
 }
 
 impl ColumnChanges {
@@ -296,7 +324,9 @@ pub enum MigrationError {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::dbms::table::{ColumnSnapshot, DataTypeSnapshot};
+    use crate::dbms::table::{
+        ColumnSnapshot, DataTypeSnapshot, ForeignKeySnapshot, OnDeleteSnapshot,
+    };
 
     #[test]
     fn test_should_default_migration_policy_to_non_destructive() {
@@ -374,6 +404,90 @@ mod test {
                 default: None,
             },
         };
+    }
+
+    fn sample_foreign_key() -> ForeignKeySnapshot {
+        ForeignKeySnapshot {
+            table: "users".into(),
+            column: "id".into(),
+            on_delete: OnDeleteSnapshot::Cascade,
+        }
+    }
+
+    /// Keep, remove, and set states of [`ColumnChanges::foreign_key`].
+    fn foreign_key_states() -> [ColumnChanges; 3] {
+        [
+            ColumnChanges {
+                nullable: Some(true),
+                ..Default::default()
+            },
+            ColumnChanges {
+                foreign_key: Some(None),
+                ..Default::default()
+            },
+            ColumnChanges {
+                foreign_key: Some(Some(sample_foreign_key())),
+                ..Default::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn test_should_json_roundtrip_column_changes_foreign_key_states() {
+        for changes in foreign_key_states() {
+            let json = serde_json::to_string(&changes).expect("failed to serialize");
+            let decoded: ColumnChanges =
+                serde_json::from_str(&json).expect("failed to deserialize");
+            assert_eq!(decoded, changes, "json: {json}");
+            assert!(!decoded.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_should_serialize_column_changes_foreign_key_states_distinctly() {
+        let [keep, remove, set] = foreign_key_states()
+            .map(|changes| serde_json::to_value(&changes).expect("failed to serialize"));
+        assert_ne!(keep, remove);
+        assert_ne!(remove, set);
+        assert_ne!(keep, set);
+        assert!(keep.get("foreign_key").is_none());
+        assert_eq!(remove.get("foreign_key"), Some(&serde_json::Value::Null));
+        assert!(set["foreign_key"].is_object());
+    }
+
+    #[test]
+    fn test_should_json_deserialize_column_changes_foreign_key_states() {
+        let keep: ColumnChanges = serde_json::from_str(
+            r#"{"nullable":null,"unique":null,"auto_increment":null,"primary_key":null}"#,
+        )
+        .expect("failed to deserialize keep");
+        assert_eq!(keep.foreign_key, None);
+        assert!(keep.is_empty());
+
+        let remove: ColumnChanges = serde_json::from_str(
+            r#"{"nullable":null,"unique":null,"auto_increment":null,"primary_key":null,"foreign_key":null}"#,
+        )
+        .expect("failed to deserialize remove");
+        assert_eq!(remove.foreign_key, Some(None));
+        assert!(!remove.is_empty());
+
+        let set: ColumnChanges = serde_json::from_str(
+            r#"{"nullable":null,"unique":null,"auto_increment":null,"primary_key":null,"foreign_key":{"table":"users","column":"id","on_delete":"Cascade"}}"#,
+        )
+        .expect("failed to deserialize set");
+        assert_eq!(set.foreign_key, Some(Some(sample_foreign_key())));
+    }
+
+    #[cfg(feature = "candid")]
+    #[test]
+    fn test_should_candid_roundtrip_column_changes_foreign_key_states() {
+        let mut states = foreign_key_states().to_vec();
+        states.push(ColumnChanges::default());
+        for changes in states {
+            let encoded = candid::encode_one(&changes).expect("failed to encode");
+            let decoded: ColumnChanges = candid::decode_one(&encoded).expect("failed to decode");
+            assert_eq!(decoded, changes);
+        }
     }
 
     #[cfg(feature = "candid")]

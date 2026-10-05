@@ -242,6 +242,8 @@ pub struct ColumnChanges {
 }
 ```
 
+In JSON, `ColumnChanges::foreign_key` has three distinct forms: the field is omitted when the foreign key is unchanged, `null` when it is dropped, and a foreign-key snapshot object when it is added or replaced.
+
 ### Apply Order
 
 Ops are sorted into a deterministic order so an `AddColumn` referencing a new FK target finds its target table already created, and so tightenings run only after data is in place:
