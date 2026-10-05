@@ -113,6 +113,12 @@ pub phone: Text,  // Must be valid phone number
 pub content_type: Text,  // e.g., "application/json", "image/png"
 ```
 
+The value must be `type/subtype`, where both names follow the
+[RFC 6838 section 4.2](https://www.rfc-editor.org/rfc/rfc6838#section-4.2)
+restricted-name grammar: 1 to 127 characters, starting with an ASCII letter or
+digit, followed by ASCII letters, digits, or any of `! # $ & - ^ _ . +`.
+Parameters such as `; charset=utf-8` are not accepted.
+
 **RgbColorValidator** - Valid RGB color format
 
 ```rust
