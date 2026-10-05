@@ -3824,3 +3824,61 @@ fn nullable_foreign_key_accepts_null_and_eager_loads_present_relation() {
     assert_eq!(manager.id, Some(Uint32(1)));
     assert_eq!(manager.name, Some(Text("boss".to_string())));
 }
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "qualified_types"]
+pub struct QualifiedTypes {
+    #[primary_key]
+    #[autoincrement]
+    pub id: wasm_dbms_api::prelude::Uint32,
+    pub name: ::wasm_dbms_api::prelude::Text,
+    pub nickname: wasm_dbms_api::prelude::Nullable<wasm_dbms_api::prelude::Text>,
+    pub score: Nullable<wasm_dbms_api::prelude::Uint32>,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(QualifiedTypes = "qualified_types")]
+pub struct QualifiedTypesTestSchema;
+
+#[test]
+fn qualified_field_types_map_to_built_in_columns() {
+    use wasm_dbms_api::prelude::DataTypeKind;
+
+    let kinds: Vec<(&str, DataTypeKind, bool)> = QualifiedTypes::columns()
+        .iter()
+        .map(|column| (column.name, column.data_type, column.nullable))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            ("id", DataTypeKind::Uint32, false),
+            ("name", DataTypeKind::Text, false),
+            ("nickname", DataTypeKind::Text, true),
+            ("score", DataTypeKind::Uint32, true),
+        ]
+    );
+
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    QualifiedTypesTestSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, QualifiedTypesTestSchema);
+
+    let insert = QualifiedTypesInsertRequest::from_values(&[
+        (
+            QualifiedTypes::columns()[1],
+            Value::Text(Text("alice".to_string())),
+        ),
+        (QualifiedTypes::columns()[2], Value::Null),
+        (QualifiedTypes::columns()[3], Value::Uint32(Uint32(7))),
+    ])
+    .unwrap();
+    db.insert::<QualifiedTypes>(insert).unwrap();
+
+    let rows = db
+        .select::<QualifiedTypes>(Query::builder().build())
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].id.is_some());
+    assert_eq!(rows[0].name, Some(Text("alice".to_string())));
+    assert_eq!(rows[0].nickname, Some(Nullable::Null));
+    assert_eq!(rows[0].score, Some(Nullable::Value(Uint32(7))));
+}

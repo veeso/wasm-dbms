@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::ToTokens as _;
+use proc_macro2::TokenStream as TokenStream2;
 use syn::{DataStruct, Ident};
 
 const MIN_ALIGNMENT: u16 = 8;
@@ -38,7 +37,7 @@ pub struct Field {
     /// Name of the field
     pub name: Ident,
     /// Type of the field
-    pub ty: syn::Path,
+    pub ty: syn::Type,
     /// Data type kind of the field; e.g. `DataTypeKind::Int32` or `DataTypeKind::Custom("tag")`
     pub data_type_kind: syn::Expr,
     /// Whether the field is a foreign key
@@ -55,9 +54,9 @@ pub struct Field {
     pub unique: bool,
     /// Whether the field uses `#[custom_type]`
     pub custom_type: bool,
-    /// For custom types: the inner type ident (with Nullable stripped).
+    /// For custom types: the inner type path (with Nullable stripped).
     /// Used in codegen for CustomDataType::TYPE_TAG and Encode::decode lookups.
-    pub custom_type_ident: Option<syn::Ident>,
+    pub custom_type_path: Option<syn::Path>,
     /// Sanitize struct to use for this field
     pub sanitize: Option<Sanitizer>,
     /// Validate struct to use for this field
@@ -640,8 +639,6 @@ fn get_fields(
             .as_ref()
             .cloned()
             .ok_or(syn::Error::new_spanned(field, "All fields must be named"))?;
-        let field_type = &field.ty;
-        let field_type_name = field_type.to_token_stream();
         let primary_key = &name == primary_key;
 
         let is_fk = foreign_keys.iter().any(|fk| fk.field == name);
@@ -649,30 +646,17 @@ fn get_fields(
         let sanitize = sanitizes.get(&name).cloned();
         let validate = validates.get(&name).cloned();
 
-        let nullable = nullable(field);
-        // if is nullable the data type is the inner type
-        // Step 1: estrai il nome (con gestione Nullable)
-        let field_type_name_str = if nullable {
-            let type_str = field_type_name.to_string();
-            let inner = type_str
-                .strip_prefix("Nullable <")
-                .and_then(|s| s.strip_suffix('>'))
-                .ok_or_else(|| syn::Error::new_spanned(field, "invalid Nullable type syntax"))?
-                .trim();
-            inner.to_string()
-        } else {
-            field_type_name.to_string()
-        };
-
-        // get full type for `ty`
-        let ty: syn::Path = syn::parse_quote! {
-            #field_type
-        };
+        // Step 1: inspect the field type; if nullable the data type is the inner type
+        let FieldType {
+            nullable,
+            inner: inner_type,
+        } = parse_field_type(&field.ty)?;
+        let ty = field.ty.clone();
 
         // Step 2: detect field attributes
         let custom_type = is_custom_type(field);
         let unique = unique(field);
-        let autoincrement = autoincrement(field)?;
+        let autoincrement = autoincrement(field, &inner_type)?;
 
         // Validate: #[custom_type] and #[foreign_key] cannot be combined
         if custom_type && is_fk {
@@ -690,13 +674,12 @@ fn get_fields(
         }
 
         // Step 3: build data_type_kind and value_type
-        let field_type_ident = syn::Ident::new(&field_type_name_str, Span::call_site());
-        let (data_type_kind, value_type, custom_type_ident): (
+        let (data_type_kind, value_type, custom_type_path): (
             syn::Expr,
             Option<syn::Path>,
-            Option<syn::Ident>,
+            Option<syn::Path>,
         ) = if custom_type {
-            let custom_ident = field_type_ident.clone();
+            let custom_ident = inner_type.clone();
             let dtk: syn::Expr = syn::parse_quote! {
                 ::wasm_dbms_api::prelude::DataTypeKind::Custom {
                     tag: <#custom_ident as ::wasm_dbms_api::prelude::CustomDataType>::TYPE_TAG,
@@ -707,6 +690,7 @@ fn get_fields(
             };
             (dtk, None, Some(custom_ident))
         } else {
+            let field_type_ident = built_in_type_ident(&inner_type)?;
             let dtk: syn::Path = syn::parse_quote! {
                 ::wasm_dbms_api::prelude::DataTypeKind::#field_type_ident
             };
@@ -737,7 +721,7 @@ fn get_fields(
             unique,
             primary_key,
             custom_type,
-            custom_type_ident,
+            custom_type_path,
             sanitize,
             validate,
             value_type,
@@ -829,11 +813,80 @@ fn parse_renamed_from(field: &syn::Field) -> syn::Result<Vec<String>> {
     Ok(names)
 }
 
-/// If the type of field is `Nullable<T>`, returns `true`, else `false`.
-fn nullable(field: &syn::Field) -> bool {
-    let field_type = &field.ty;
-    let field_type_name = field_type.to_token_stream();
-    field_type_name.to_string().starts_with("Nullable <")
+/// Field type inspected through its syn structure.
+struct FieldType {
+    /// Whether the field type is `Nullable<T>`
+    nullable: bool,
+    /// Path of the data type, with `Nullable` stripped
+    inner: syn::Path,
+}
+
+/// Inspects a field type, which must be a path to a data type, optionally wrapped in `Nullable`.
+///
+/// Both imported (`Uint32`) and qualified (`wasm_dbms_api::prelude::Uint32`) spellings are
+/// accepted; types that are not paths, such as tuples or references, are rejected.
+fn parse_field_type(ty: &syn::Type) -> syn::Result<FieldType> {
+    let path = type_path(ty)?;
+    let Some(last) = path.segments.last() else {
+        return Err(unsupported_field_type(ty));
+    };
+
+    if last.ident != "Nullable" {
+        return Ok(FieldType {
+            nullable: false,
+            inner: path.clone(),
+        });
+    }
+
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "`Nullable` requires a type argument, e.g. `Nullable<Text>`",
+        ));
+    };
+    let mut args = args.args.iter();
+    let (Some(syn::GenericArgument::Type(inner)), None) = (args.next(), args.next()) else {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "`Nullable` requires a single type argument, e.g. `Nullable<Text>`",
+        ));
+    };
+
+    Ok(FieldType {
+        nullable: true,
+        inner: type_path(inner)?.clone(),
+    })
+}
+
+/// Returns the path of `ty`, or an error if the type is not a plain path.
+fn type_path(ty: &syn::Type) -> syn::Result<&syn::Path> {
+    match ty {
+        syn::Type::Path(syn::TypePath { qself: None, path }) => Ok(path),
+        syn::Type::Group(group) => type_path(&group.elem),
+        syn::Type::Paren(paren) => type_path(&paren.elem),
+        _ => Err(unsupported_field_type(ty)),
+    }
+}
+
+/// Returns the data type identifier of a built-in field type (e.g. `Uint32`), taken from the
+/// last path segment.
+fn built_in_type_ident(path: &syn::Path) -> syn::Result<Ident> {
+    match path.segments.last() {
+        Some(last) if last.arguments.is_none() => Ok(last.ident.clone()),
+        _ => Err(syn::Error::new_spanned(
+            path,
+            "unsupported field type; expected a wasm-dbms data type such as `Uint32` or `Text`, \
+             or a `#[custom_type]`",
+        )),
+    }
+}
+
+fn unsupported_field_type(ty: &syn::Type) -> syn::Error {
+    syn::Error::new_spanned(
+        ty,
+        "unsupported field type; expected a wasm-dbms data type such as `Uint32` or \
+         `Nullable<Text>`",
+    )
 }
 
 /// Returns `true` if the field has a `#[custom_type]` attribute.
@@ -853,7 +906,7 @@ fn unique(field: &syn::Field) -> bool {
 }
 
 /// Check whethers the field has a `#[autoincrement]` attribute; only valid for integer primary keys
-fn autoincrement(field: &syn::Field) -> syn::Result<bool> {
+fn autoincrement(field: &syn::Field, inner_type: &syn::Path) -> syn::Result<bool> {
     let autoincrement = field
         .attrs
         .iter()
@@ -864,12 +917,13 @@ fn autoincrement(field: &syn::Field) -> syn::Result<bool> {
     }
 
     // Validate that autoincrement is only used on integer primary keys
-    let field_type = &field.ty;
-    let field_type_name = field_type.to_token_stream().to_string();
-    let is_integer = matches!(
-        field_type_name.as_str(),
-        "Int8" | "Int16" | "Int32" | "Int64" | "Uint8" | "Uint16" | "Uint32" | "Uint64"
-    );
+    let is_integer = inner_type.segments.last().is_some_and(|last| {
+        last.arguments.is_none()
+            && matches!(
+                last.ident.to_string().as_str(),
+                "Int8" | "Int16" | "Int32" | "Int64" | "Uint8" | "Uint16" | "Uint32" | "Uint64"
+            )
+    });
     if !is_integer {
         return Err(syn::Error::new_spanned(
             field,
@@ -878,4 +932,84 @@ fn autoincrement(field: &syn::Field) -> syn::Result<bool> {
     }
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use quote::ToTokens as _;
+
+    use super::*;
+
+    fn metadata_for(input: syn::DeriveInput) -> syn::Result<TableMetadata> {
+        let syn::Data::Struct(data) = &input.data else {
+            panic!("test input must be a struct");
+        };
+        collect_table_metadata(&input.ident, data, &input.attrs)
+    }
+
+    fn data_type_kind(field: &Field) -> String {
+        field.data_type_kind.to_token_stream().to_string()
+    }
+
+    #[test]
+    fn test_should_resolve_qualified_and_imported_built_in_types() {
+        let metadata = metadata_for(syn::parse_quote! {
+            #[table = "qualified"]
+            struct Qualified {
+                #[primary_key]
+                #[autoincrement]
+                id: wasm_dbms_api::prelude::Uint32,
+                name: ::wasm_dbms_api::prelude::Text,
+                nickname: wasm_dbms_api::prelude::Nullable<wasm_dbms_api::prelude::Text>,
+                score: Nullable<Uint32>,
+            }
+        })
+        .expect("qualified types should be supported");
+
+        let kinds: Vec<(String, String, bool)> = metadata
+            .fields
+            .iter()
+            .map(|field| {
+                (
+                    field.name.to_string(),
+                    data_type_kind(field),
+                    field.nullable,
+                )
+            })
+            .collect();
+        let kind = |name: &str| format!(":: wasm_dbms_api :: prelude :: DataTypeKind :: {name}");
+        assert_eq!(
+            kinds,
+            vec![
+                ("id".to_string(), kind("Uint32"), false),
+                ("name".to_string(), kind("Text"), false),
+                ("nickname".to_string(), kind("Text"), true),
+                ("score".to_string(), kind("Uint32"), true),
+            ]
+        );
+        assert!(metadata.fields[0].auto_increment);
+    }
+
+    #[test]
+    fn test_should_reject_unsupported_field_types_with_error() {
+        let unsupported: [syn::Type; 4] = [
+            syn::parse_quote! { (u8, u8) },
+            syn::parse_quote! { &'static str },
+            syn::parse_quote! { [u8; 4] },
+            syn::parse_quote! { Nullable },
+        ];
+
+        for ty in unsupported {
+            let ty_str = ty.to_token_stream().to_string();
+            let result = metadata_for(syn::parse_quote! {
+                #[table = "unsupported"]
+                struct Unsupported {
+                    #[primary_key]
+                    id: Uint32,
+                    value: #ty,
+                }
+            });
+            assert!(result.is_err(), "`{ty_str}` should be rejected");
+        }
+    }
 }

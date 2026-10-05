@@ -158,9 +158,9 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
 
         if field.custom_type {
             let custom_ident = field
-                .custom_type_ident
+                .custom_type_path
                 .as_ref()
-                .expect("custom_type field must have custom_type_ident");
+                .expect("custom_type field must have custom_type_path");
             if field.nullable {
                 match_arms.push(quote::quote! {
                     #field_name_str => {

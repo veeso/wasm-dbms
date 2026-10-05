@@ -222,9 +222,9 @@ fn to_values(fields: &[Field]) -> TokenStream2 {
         if field.custom_type {
             // Custom type handling -- use the inner type ident (Nullable stripped) for trait lookups
             let custom_ident = field
-                .custom_type_ident
+                .custom_type_path
                 .as_ref()
-                .expect("custom_type field must have custom_type_ident");
+                .expect("custom_type field must have custom_type_path");
             if field.nullable {
                 columns.push(quote::quote! {
                     (Self::columns()[#index], match #self_field {
