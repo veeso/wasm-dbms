@@ -43,21 +43,15 @@ where
 
     /// Attempts to get the next row, applying overlay changes.
     pub fn try_next(&mut self) -> DbmsResult<Option<Vec<(ColumnDef, Value)>>> {
-        loop {
-            let next_base_row = self
-                .table_reader
-                .try_next()?
-                .map(|row| row.record.to_values());
-
-            let Some(next_row) = next_base_row.or_else(|| self.next_overlay_row()) else {
-                return Ok(None);
-            };
-
+        while let Some(base_row) = self.table_reader.try_next()? {
             // NOTE: None from patch_row means deleted, not end-of-stream
-            if let Some(patched) = self.table_overlay.patch_row(next_row) {
+            if let Some(patched) = self.table_overlay.patch_row(base_row.record.to_values()) {
                 return Ok(Some(patched));
             }
         }
+
+        // Inserted rows are already patched by `TableOverlay::iter_inserted`.
+        Ok(self.next_overlay_row())
     }
 
     /// Gets the next row from the pre-collected inserted records.
