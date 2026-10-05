@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::memory::{DecodeError, MemoryError};
+use crate::memory::{DecodeError, MSize, MemoryError, MemoryResult, saturating_size};
 use crate::prelude::{DataSize, Encode, PageOffset, Value};
 
 /// Current binary version of the [`TableSchemaSnapshot`] format.
@@ -186,10 +186,213 @@ pub enum OnDeleteSnapshot {
     Cascade = 0x02,
 }
 
+/// Largest value of a one-byte length or count field in the snapshot format.
+const U8_FIELD_MAX: usize = u8::MAX as usize;
+
+/// Largest value of a two-byte length or count field in the snapshot format.
+const U16_FIELD_MAX: usize = u16::MAX as usize;
+
+/// Checks that `len` fits a snapshot field whose largest value is `max`.
+///
+/// `field` is only evaluated on error, to describe the offending metadata.
+///
+/// # Errors
+///
+/// Returns [`MemoryError::ConstraintViolation`] when `len` exceeds `max`.
+fn check_field_len<F>(field: F, len: usize, max: usize) -> MemoryResult<usize>
+where
+    F: FnOnce() -> String,
+{
+    if len > max {
+        return Err(MemoryError::ConstraintViolation(format!(
+            "{} is {len}, but the schema snapshot format allows at most {max}",
+            field()
+        )));
+    }
+    Ok(len)
+}
+
+/// Narrows a length already checked by [`TableSchemaSnapshot::validate_encoding`]
+/// to its one-byte field, saturating instead of wrapping.
+fn u8_len(len: usize) -> u8 {
+    u8::try_from(len).unwrap_or(u8::MAX)
+}
+
+/// Narrows a length already checked by [`TableSchemaSnapshot::validate_encoding`]
+/// to its two-byte little-endian field, saturating instead of wrapping.
+fn u16_len(len: usize) -> [u8; 2] {
+    u16::try_from(len).unwrap_or(u16::MAX).to_le_bytes()
+}
+
 impl TableSchemaSnapshot {
     /// Returns the latest version of the snapshot format.
     pub fn latest_version() -> u8 {
         SCHEMA_SNAPSHOT_VERSION
+    }
+
+    /// Checks that every name, count and nested payload fits its on-disk
+    /// field, so the snapshot round-trips exactly through [`Encode`].
+    ///
+    /// Table, primary key, column, foreign key, custom type and index column
+    /// names, and the number of columns of each index, are limited to 255
+    /// bytes or entries. Column and index counts, each encoded column, index
+    /// and default value, and the whole snapshot are limited to 65 535 bytes
+    /// or entries.
+    ///
+    /// Must be called before the snapshot is persisted: [`Encode::encode`]
+    /// cannot report an error and its output is unspecified for a snapshot
+    /// that fails this check.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] naming the first field
+    /// that exceeds its limit.
+    pub fn validate_encoding(&self) -> MemoryResult<()> {
+        // version(1) + name_len(1) + name + pk_len(1) + pk + alignment(4)
+        let mut total = 1
+            + 1
+            + check_field_len(
+                || "table name length".to_string(),
+                self.name.len(),
+                U8_FIELD_MAX,
+            )?
+            + 1
+            + check_field_len(
+                || format!("table `{}` primary key name length", self.name),
+                self.primary_key.len(),
+                U8_FIELD_MAX,
+            )?
+            + 4;
+
+        // columns_len(2) + sum(col_size_prefix(2) + col bytes)
+        check_field_len(
+            || format!("table `{}` column count", self.name),
+            self.columns.len(),
+            U16_FIELD_MAX,
+        )?;
+        total += 2;
+        for column in &self.columns {
+            total += 2 + check_field_len(
+                || format!("column `{}.{}` encoded length", self.name, column.name),
+                column.checked_encoded_len(&self.name)?,
+                U16_FIELD_MAX,
+            )?;
+        }
+
+        // indexes_len(2) + sum(idx_size_prefix(2) + idx bytes)
+        check_field_len(
+            || format!("table `{}` index count", self.name),
+            self.indexes.len(),
+            U16_FIELD_MAX,
+        )?;
+        total += 2;
+        for index in &self.indexes {
+            total += 2 + check_field_len(
+                || format!("table `{}` index encoded length", self.name),
+                index.checked_encoded_len(&self.name)?,
+                U16_FIELD_MAX,
+            )?;
+        }
+
+        check_field_len(
+            || format!("table `{}` schema snapshot length", self.name),
+            total,
+            MSize::MAX as usize,
+        )
+        .map(|_| ())
+    }
+}
+
+impl IndexSnapshot {
+    /// Returns the exact encoded length after checking every one-byte field.
+    fn checked_encoded_len(&self, table: &str) -> MemoryResult<usize> {
+        check_field_len(
+            || format!("table `{table}` index column count"),
+            self.columns.len(),
+            U8_FIELD_MAX,
+        )?;
+        // columns_len(1) + sum(col_len(1) + col bytes) + unique(1)
+        let mut len = 2;
+        for column in &self.columns {
+            len += 1 + check_field_len(
+                || format!("table `{table}` index column `{column}` name length"),
+                column.len(),
+                U8_FIELD_MAX,
+            )?;
+        }
+        Ok(len)
+    }
+}
+
+impl ForeignKeySnapshot {
+    /// Returns the exact encoded length after checking every one-byte field.
+    fn checked_encoded_len(&self, column: &str) -> MemoryResult<usize> {
+        // table_len(1) + table + column_len(1) + column + on_delete(1)
+        Ok(1 + check_field_len(
+            || format!("column `{column}` foreign key table name length"),
+            self.table.len(),
+            U8_FIELD_MAX,
+        )? + 1
+            + check_field_len(
+                || format!("column `{column}` foreign key column name length"),
+                self.column.len(),
+                U8_FIELD_MAX,
+            )?
+            + 1)
+    }
+}
+
+impl DataTypeSnapshot {
+    /// Returns the exact encoded length after checking every one-byte field.
+    fn checked_encoded_len(&self, column: &str) -> MemoryResult<usize> {
+        match self {
+            DataTypeSnapshot::Custom(meta) => {
+                let ws_bytes = match meta.wire_size {
+                    WireSize::Fixed(_) => 1 + 4,
+                    WireSize::LengthPrefixed => 1,
+                };
+                // tag(1) + wire_size header + name_len(1) + name bytes
+                Ok(1 + ws_bytes
+                    + 1
+                    + check_field_len(
+                        || format!("column `{column}` custom type tag length"),
+                        meta.tag.len(),
+                        U8_FIELD_MAX,
+                    )?)
+            }
+            _ => Ok(1),
+        }
+    }
+}
+
+impl ColumnSnapshot {
+    /// Returns the exact encoded length after checking every nested field.
+    fn checked_encoded_len(&self, table: &str) -> MemoryResult<usize> {
+        // name_len(1) + name + data_type + flags(1) + fk_flag(1) + default_flag(1)
+        let mut len =
+            1 + check_field_len(
+                || format!("table `{table}` column name length"),
+                self.name.len(),
+                U8_FIELD_MAX,
+            )? + self.data_type.checked_encoded_len(&self.name)?
+                + 3;
+        if let Some(fk) = &self.foreign_key {
+            // fk_size_prefix(2) + fk bytes
+            len += 2 + check_field_len(
+                || format!("column `{}` foreign key encoded length", self.name),
+                fk.checked_encoded_len(&self.name)?,
+                U16_FIELD_MAX,
+            )?;
+        }
+        if let Some(value) = &self.default {
+            // default_size_prefix(2) + value bytes
+            len += 2 + check_field_len(
+                || format!("column `{}` default value encoded length", self.name),
+                Encode::encode(value).len(),
+                U16_FIELD_MAX,
+            )?;
+        }
+        Ok(len)
     }
 }
 
@@ -200,19 +403,15 @@ impl Encode for IndexSnapshot {
 
     fn size(&self) -> crate::prelude::MSize {
         // 1 byte for columns_len + (1 + column bytes) * columns_len + 1 byte for the unique tag
-        1 + self
-            .columns
-            .iter()
-            .map(|col| 1 + col.len() as crate::prelude::MSize)
-            .sum::<crate::prelude::MSize>()
-            + 1
+        let columns: usize = self.columns.iter().map(|col| 1 + col.len()).sum();
+        saturating_size(2, columns)
     }
 
     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         let mut bytes = Vec::with_capacity(self.size() as usize);
-        bytes.push(self.columns.len() as u8);
+        bytes.push(u8_len(self.columns.len()));
         for col in &self.columns {
-            bytes.push(col.len() as u8);
+            bytes.push(u8_len(col.len()));
             bytes.extend_from_slice(col.as_bytes());
         }
         bytes.push(self.unique as u8);
@@ -260,17 +459,14 @@ impl Encode for ForeignKeySnapshot {
 
     fn size(&self) -> crate::prelude::MSize {
         // 1 byte for the table_len + table bytes + 1 byte for the column_len + column bytes + 1 byte for the on_delete tag
-        1 + self.table.len() as crate::prelude::MSize
-            + 1
-            + self.column.len() as crate::prelude::MSize
-            + 1
+        saturating_size(3, self.table.len().saturating_add(self.column.len()))
     }
 
     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         let mut bytes = Vec::with_capacity(self.size() as usize);
-        bytes.push(self.table.len() as u8);
+        bytes.push(u8_len(self.table.len()));
         bytes.extend_from_slice(self.table.as_bytes());
-        bytes.push(self.column.len() as u8);
+        bytes.push(u8_len(self.column.len()));
         bytes.extend_from_slice(self.column.as_bytes());
         bytes.push(self.on_delete as u8);
 
@@ -336,7 +532,7 @@ impl Encode for DataTypeSnapshot {
                     // 1 ws_tag
                     WireSize::LengthPrefixed => 1,
                 };
-                1 + ws_bytes + 1 + meta.tag.len() as crate::prelude::MSize
+                saturating_size(1 + ws_bytes + 1, meta.tag.len())
             }
             // single tag byte
             _ => 1,
@@ -379,7 +575,7 @@ impl Encode for DataTypeSnapshot {
                         bytes.push(0x02u8);
                     }
                 }
-                bytes.push(meta.tag.len() as u8);
+                bytes.push(u8_len(meta.tag.len()));
                 bytes.extend_from_slice(meta.tag.as_bytes());
                 std::borrow::Cow::Owned(bytes)
             }
@@ -470,22 +666,21 @@ impl Encode for ColumnSnapshot {
         // name_len(1) + name + data_type + flags(1)
         // + fk_flag(1) + (fk_size_prefix(2) + fk bytes)?
         // + default_flag(1) + (default_size_prefix(2) + value bytes)?
-        let mut total: crate::prelude::MSize =
-            1 + self.name.len() as crate::prelude::MSize + self.data_type.size() + 1;
+        let mut total = 1 + self.name.len() + self.data_type.size() as usize + 1;
         total += 1;
         if let Some(fk) = &self.foreign_key {
-            total += 2 + fk.size();
+            total += 2 + fk.size() as usize;
         }
         total += 1;
         if let Some(value) = &self.default {
-            total += 2 + Encode::size(value);
+            total += 2 + Encode::size(value) as usize;
         }
-        total
+        saturating_size(0, total)
     }
 
     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         let mut bytes = Vec::with_capacity(self.size() as usize);
-        bytes.push(self.name.len() as u8);
+        bytes.push(u8_len(self.name.len()));
         bytes.extend_from_slice(self.name.as_bytes());
 
         bytes.extend_from_slice(&self.data_type.encode());
@@ -509,7 +704,7 @@ impl Encode for ColumnSnapshot {
             Some(fk) => {
                 bytes.push(1);
                 let encoded = fk.encode();
-                bytes.extend_from_slice(&(encoded.len() as u16).to_le_bytes());
+                bytes.extend_from_slice(&u16_len(encoded.len()));
                 bytes.extend_from_slice(&encoded);
             }
             None => bytes.push(0),
@@ -519,7 +714,7 @@ impl Encode for ColumnSnapshot {
             Some(value) => {
                 bytes.push(1);
                 let encoded = Encode::encode(value);
-                bytes.extend_from_slice(&(encoded.len() as u16).to_le_bytes());
+                bytes.extend_from_slice(&u16_len(encoded.len()));
                 bytes.extend_from_slice(&encoded);
             }
             None => bytes.push(0),
@@ -658,46 +853,40 @@ impl Encode for TableSchemaSnapshot {
         // + alignment(4)
         // + columns_len(2) + sum(col_size_prefix(2) + col bytes)
         // + indexes_len(2) + sum(idx_size_prefix(2) + idx bytes)
-        let mut total: crate::prelude::MSize = 1
-            + 1
-            + self.name.len() as crate::prelude::MSize
-            + 1
-            + self.primary_key.len() as crate::prelude::MSize
-            + 4
-            + 2;
+        let mut total = 1 + 1 + self.name.len() + 1 + self.primary_key.len() + 4 + 2;
         for c in &self.columns {
-            total += 2 + c.size();
+            total += 2 + c.size() as usize;
         }
         total += 2;
         for i in &self.indexes {
-            total += 2 + i.size();
+            total += 2 + i.size() as usize;
         }
-        total
+        saturating_size(0, total)
     }
 
     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         let mut bytes = Vec::with_capacity(self.size() as usize);
         bytes.push(self.version);
 
-        bytes.push(self.name.len() as u8);
+        bytes.push(u8_len(self.name.len()));
         bytes.extend_from_slice(self.name.as_bytes());
 
-        bytes.push(self.primary_key.len() as u8);
+        bytes.push(u8_len(self.primary_key.len()));
         bytes.extend_from_slice(self.primary_key.as_bytes());
 
         bytes.extend_from_slice(&self.alignment.to_le_bytes());
 
-        bytes.extend_from_slice(&(self.columns.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(&u16_len(self.columns.len()));
         for c in &self.columns {
             let encoded = c.encode();
-            bytes.extend_from_slice(&(encoded.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(&u16_len(encoded.len()));
             bytes.extend_from_slice(&encoded);
         }
 
-        bytes.extend_from_slice(&(self.indexes.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(&u16_len(self.indexes.len()));
         for i in &self.indexes {
             let encoded = i.encode();
-            bytes.extend_from_slice(&(encoded.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(&u16_len(encoded.len()));
             bytes.extend_from_slice(&encoded);
         }
 
@@ -1187,5 +1376,161 @@ mod tests {
             TableSchemaSnapshot::latest_version(),
             SCHEMA_SNAPSHOT_VERSION
         );
+    }
+
+    // -- Format limits --
+
+    /// Snapshot with one fully populated column and one index, whose
+    /// one-byte fields are mutated by the boundary tests below.
+    fn limits_snapshot() -> TableSchemaSnapshot {
+        TableSchemaSnapshot {
+            version: TableSchemaSnapshot::latest_version(),
+            name: "t".to_string(),
+            primary_key: "id".to_string(),
+            alignment: 32,
+            columns: vec![ColumnSnapshot {
+                name: "id".to_string(),
+                data_type: DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+                    tag: "tag".to_string(),
+                    wire_size: WireSize::Fixed(4),
+                })),
+                nullable: false,
+                auto_increment: false,
+                unique: true,
+                primary_key: true,
+                foreign_key: Some(ForeignKeySnapshot {
+                    table: "other".to_string(),
+                    column: "id".to_string(),
+                    on_delete: OnDeleteSnapshot::Restrict,
+                }),
+                default: None,
+            }],
+            indexes: vec![IndexSnapshot {
+                columns: vec!["id".to_string()],
+                unique: true,
+            }],
+        }
+    }
+
+    /// Every one-byte length or count field, set to `len`.
+    fn one_byte_field_cases(len: usize) -> Vec<(&'static str, TableSchemaSnapshot)> {
+        let name = "x".repeat(len);
+        let mut cases = Vec::new();
+
+        let mut s = limits_snapshot();
+        s.name = name.clone();
+        cases.push(("table name", s));
+
+        let mut s = limits_snapshot();
+        s.primary_key = name.clone();
+        cases.push(("primary key", s));
+
+        let mut s = limits_snapshot();
+        s.columns[0].name = name.clone();
+        cases.push(("column name", s));
+
+        let mut s = limits_snapshot();
+        s.columns[0].data_type = DataTypeSnapshot::Custom(Box::new(CustomDataTypeSnapshot {
+            tag: name.clone(),
+            wire_size: WireSize::LengthPrefixed,
+        }));
+        cases.push(("custom type tag", s));
+
+        let mut s = limits_snapshot();
+        s.columns[0].foreign_key.as_mut().unwrap().table = name.clone();
+        cases.push(("foreign key table", s));
+
+        let mut s = limits_snapshot();
+        s.columns[0].foreign_key.as_mut().unwrap().column = name.clone();
+        cases.push(("foreign key column", s));
+
+        let mut s = limits_snapshot();
+        s.indexes[0].columns = vec![name];
+        cases.push(("index column name", s));
+
+        let mut s = limits_snapshot();
+        s.indexes[0].columns = (0..len).map(|i| format!("c{i}")).collect();
+        cases.push(("index column count", s));
+
+        cases
+    }
+
+    #[test]
+    fn test_table_schema_snapshot_round_trips_one_byte_fields_at_255() {
+        for (field, snap) in one_byte_field_cases(255) {
+            snap.validate_encoding()
+                .unwrap_or_else(|err| panic!("{field} of 255 must be accepted: {err}"));
+            assert_eq!(
+                roundtrip(snap.clone()),
+                snap,
+                "{field} of 255 must round-trip"
+            );
+        }
+    }
+
+    #[test]
+    fn test_table_schema_snapshot_rejects_one_byte_fields_at_256() {
+        for (field, snap) in one_byte_field_cases(256) {
+            let err = snap.validate_encoding().unwrap_err();
+            assert!(
+                matches!(err, MemoryError::ConstraintViolation(ref msg) if msg.contains("256")),
+                "{field} of 256 must be rejected, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_table_schema_snapshot_rejects_oversized_default_value() {
+        use crate::prelude::Text;
+
+        // a large default that still fits every field round-trips
+        let mut fits = limits_snapshot();
+        fits.columns[0].default = Some(Value::Text(Text("x".repeat(60_000))));
+        fits.validate_encoding().expect("60_000-byte default fits");
+        assert_eq!(roundtrip(fits.clone()), fits);
+
+        // discriminant(1) + prefix(2) + 65_532 = 65_535 fits the default's
+        // u16 prefix, but not the enclosing column's
+        let mut column_too_large = limits_snapshot();
+        column_too_large.columns[0].default = Some(Value::Text(Text("x".repeat(65_532))));
+        let err = column_too_large.validate_encoding().unwrap_err();
+        assert!(
+            matches!(err, MemoryError::ConstraintViolation(ref msg) if msg.contains("column `t.id` encoded length")),
+            "got {err:?}"
+        );
+
+        let mut too_large = limits_snapshot();
+        too_large.columns[0].default = Some(Value::Text(Text("x".repeat(65_533))));
+        let err = too_large.validate_encoding().unwrap_err();
+        assert!(
+            matches!(err, MemoryError::ConstraintViolation(ref msg) if msg.contains("default value")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_table_schema_snapshot_rejects_snapshot_larger_than_msize() {
+        let mut snap = limits_snapshot();
+        snap.columns = (0..300)
+            .map(|i| ColumnSnapshot {
+                name: format!("{i:0>250}"),
+                ..snap.columns[0].clone()
+            })
+            .collect();
+
+        // size() saturates instead of overflowing
+        assert_eq!(snap.size(), crate::prelude::MSize::MAX);
+        let err = snap.validate_encoding().unwrap_err();
+        assert!(
+            matches!(err, MemoryError::ConstraintViolation(ref msg) if msg.contains("snapshot length")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_encoding_agrees_with_encoded_length() {
+        let snap = limits_snapshot();
+        snap.validate_encoding().expect("valid snapshot");
+        assert_eq!(snap.encode().len(), snap.size() as usize);
     }
 }

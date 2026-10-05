@@ -60,6 +60,8 @@ impl SchemaRegistry {
     ///
     /// - [`MemoryError::NameCollision`] when the fingerprint slot is occupied by a table whose
     ///   persisted snapshot carries a different name.
+    /// - [`MemoryError::ConstraintViolation`] when the table's schema snapshot exceeds a limit of
+    ///   the snapshot format (see [`TableSchemaSnapshot::validate_encoding`]); no page is claimed.
     /// - Any [`MemoryError`] propagated from page allocation, snapshot init, or the registry
     ///   write-back.
     pub fn register_table<TS>(
@@ -83,8 +85,9 @@ impl SchemaRegistry {
             return Ok(pages);
         }
 
-        // Reject metadata the ledger encodings cannot hold before any page is
-        // claimed or the registry is touched.
+        // Reject metadata the snapshot and ledger encodings cannot hold before
+        // any page is claimed or the registry is touched.
+        TS::schema_snapshot().validate_encoding()?;
         for index in TS::indexes() {
             IndexLedger::validate_columns(index.0)?;
         }
@@ -159,6 +162,10 @@ impl SchemaRegistry {
     ///
     /// - [`MemoryError::NameCollision`] when the fingerprint slot is occupied
     ///   by a table with a different name.
+    /// - [`MemoryError::ConstraintViolation`] when the snapshot exceeds a limit
+    ///   of the snapshot format (see
+    ///   [`TableSchemaSnapshot::validate_encoding`]) or declares an
+    ///   unsupported autoincrement column; no page is claimed.
     /// - Any [`MemoryError`] propagated from page allocation, snapshot init,
     ///   index init, or registry persistence.
     pub fn register_table_from_snapshot(
@@ -182,6 +189,7 @@ impl SchemaRegistry {
         // Reject unsupported autoincrement columns and metadata the ledger
         // encodings cannot hold before any page is claimed or the registry is
         // touched.
+        snapshot.validate_encoding()?;
         AutoincrementLedger::validate_snapshot(snapshot)?;
         for index in &snapshot.indexes {
             IndexLedger::validate_columns(&index.columns)?;
@@ -1267,6 +1275,63 @@ mod tests {
         assert!(matches!(result, Err(MemoryError::ConstraintViolation(_))));
         assert!(registry.table_registry_page_by_name("texts").is_none());
         assert_eq!(mm.pages_count(), pages_before);
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_rejects_metadata_above_255_without_side_effects() {
+        let mut long_name = dummy_snapshot(&"t".repeat(256));
+        long_name.columns[0].name = "id".to_string();
+
+        let mut long_index = dummy_snapshot("indexed");
+        long_index.indexes = vec![wasm_dbms_api::prelude::IndexSnapshot {
+            columns: vec!["id".to_string(); 256],
+            unique: false,
+        }];
+
+        for snapshot in [long_name, long_index] {
+            let mut mm = make_mm();
+            let mut registry = SchemaRegistry::default();
+            let pages_before = mm.pages_count();
+
+            let result = registry.register_table_from_snapshot(&snapshot, &mut mm);
+
+            assert!(
+                matches!(result, Err(MemoryError::ConstraintViolation(_))),
+                "expected ConstraintViolation, got {result:?}"
+            );
+            assert!(
+                registry
+                    .table_registry_page_by_name(&snapshot.name)
+                    .is_none()
+            );
+            assert_eq!(mm.pages_count(), pages_before);
+        }
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_round_trips_metadata_at_255() {
+        let mut snapshot = dummy_snapshot(&"t".repeat(255));
+        snapshot.primary_key = "p".repeat(255);
+        snapshot.columns[0].name = "p".repeat(255);
+        snapshot.indexes = vec![
+            wasm_dbms_api::prelude::IndexSnapshot {
+                columns: vec!["p".repeat(255)],
+                unique: true,
+            },
+            wasm_dbms_api::prelude::IndexSnapshot {
+                columns: (0..255).map(|i| format!("c{i}")).collect(),
+                unique: false,
+            },
+        ];
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+
+        let pages = registry
+            .register_table_from_snapshot(&snapshot, &mut mm)
+            .expect("255-byte metadata fits the snapshot format");
+
+        let loaded = SchemaSnapshotLedger::load(pages.schema_snapshot_page, &mut mm).expect("load");
+        assert_eq!(loaded.get(), &snapshot);
     }
 
     #[test]

@@ -442,6 +442,12 @@ nullable / auto-increment / unique / primary-key flags, optional foreign key, an
 optional default value. `IndexSnapshot` encodes the covered column names plus the
 unique flag.
 
+Every one-byte length or count in the snapshot is limited to 255 and every two-byte one
+to 65 535, and the whole encoded snapshot must fit in one `MSize`.
+`TableSchemaSnapshot::validate_encoding` checks these limits; registering a table and
+writing a snapshot reject metadata that exceeds them with
+`MemoryError::ConstraintViolation` before anything is written.
+
 **Stability rules:**
 
 - `DataTypeSnapshot` discriminants are frozen — never reordered, never reused
