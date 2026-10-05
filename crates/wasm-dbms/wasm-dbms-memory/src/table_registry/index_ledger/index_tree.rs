@@ -610,35 +610,13 @@ where
             };
 
             if let Some(index) = position {
-                let mut became_empty = false;
-                let mut prev_leaf_page = None;
-                let mut next_leaf_page = None;
+                // Emptied leaves stay linked into the sibling chain: their parent
+                // still routes keys to them, so unlinking would hide later
+                // reinserts from range scans.
                 if let NodeBody::Leaf(leaf_body) = &mut leaf.body {
                     leaf_body.entries.remove(index);
                     leaf.header.num_entries = leaf_body.entries.len() as u16;
-                    prev_leaf_page = leaf_body.prev_leaf;
-                    next_leaf_page = leaf_body.next_leaf;
-                    became_empty = leaf_body.entries.is_empty() && leaf.page != self.root_page;
                     leaf.dirty = true;
-                }
-
-                if became_empty {
-                    if let Some(prev_page) = prev_leaf_page {
-                        let mut prev_leaf = BTreeNode::<K>::read(prev_page, mm)?;
-                        if let NodeBody::Leaf(prev_body) = &mut prev_leaf.body {
-                            prev_body.next_leaf = next_leaf_page;
-                            prev_leaf.dirty = true;
-                            prev_leaf.flush(mm)?;
-                        }
-                    }
-                    if let Some(next_page) = next_leaf_page {
-                        let mut next_leaf = BTreeNode::<K>::read(next_page, mm)?;
-                        if let NodeBody::Leaf(next_body) = &mut next_leaf.body {
-                            next_body.prev_leaf = prev_leaf_page;
-                            next_leaf.dirty = true;
-                            next_leaf.flush(mm)?;
-                        }
-                    }
                 }
 
                 leaf.flush(mm)?;
@@ -725,19 +703,27 @@ where
                 NodeBody::Internal(_) => None,
             };
 
-            match prev_page {
-                Some(page) => {
-                    let prev_leaf = BTreeNode::<K>::read(page, mm)?;
-                    if prev_leaf
-                        .last_key()
-                        .is_some_and(|prev_last| prev_last >= key)
-                    {
+            // Empty leaves stay in the sibling chain, so skip past them while
+            // looking for an earlier leaf that may still hold `key`.
+            let mut candidate = prev_page;
+            loop {
+                let Some(page) = candidate else {
+                    return Ok(leaf);
+                };
+                let prev_leaf = BTreeNode::<K>::read(page, mm)?;
+                match prev_leaf.last_key() {
+                    Some(prev_last) if prev_last >= key => {
                         leaf = prev_leaf;
-                    } else {
-                        return Ok(leaf);
+                        break;
+                    }
+                    Some(_) => return Ok(leaf),
+                    None => {
+                        candidate = match &prev_leaf.body {
+                            NodeBody::Leaf(prev_body) => prev_body.prev_leaf,
+                            NodeBody::Internal(_) => None,
+                        };
                     }
                 }
-                None => return Ok(leaf),
             }
         }
     }
@@ -1518,7 +1504,7 @@ mod tests {
     #[test]
     fn test_delete_all_entries_after_cascading_splits() {
         // Insert enough to cause cascading splits, then delete everything.
-        // This exercises delete across multi-level trees with empty-leaf unlinking.
+        // This exercises delete across multi-level trees that leave empty leaves.
         let mut mm = make_mm();
         let mut tree = IndexTree::<Uint32>::init(&mut mm).expect("tree init failed");
 
@@ -1621,5 +1607,149 @@ mod tests {
         }
 
         assert_eq!(count, 6_000);
+    }
+
+    /// Collects the keys of every leaf reachable from the leftmost leaf by
+    /// following `next_leaf` links, in chain order.
+    fn leaf_chain_keys(
+        tree: &IndexTree<Uint32>,
+        mm: &mut MemoryManager<HeapMemoryProvider>,
+    ) -> Vec<(Page, Vec<Uint32>)> {
+        let mut page = tree
+            .find_leaf_page(&Uint32(0), mm)
+            .expect("leftmost leaf lookup failed");
+        let mut chain = Vec::new();
+        loop {
+            let node = BTreeNode::<Uint32>::read(page, mm).expect("leaf read failed");
+            let NodeBody::Leaf(leaf) = node.body else {
+                panic!("leaf chain reached an internal node");
+            };
+            chain.push((page, leaf.entries.iter().map(|entry| entry.key).collect()));
+            match leaf.next_leaf {
+                Some(next) => page = next,
+                None => return chain,
+            }
+        }
+    }
+
+    #[test]
+    fn test_reinsert_into_emptied_middle_leaf_is_visible_to_range_scans() {
+        let mut mm = make_mm();
+        let mut tree = IndexTree::<Uint32>::init(&mut mm).expect("tree init failed");
+
+        for value in 0..12_000u32 {
+            tree.insert(
+                Uint32(value),
+                RecordAddress {
+                    page: value,
+                    offset: 0,
+                },
+                &mut mm,
+            )
+            .expect("insert failed");
+        }
+
+        let chain = leaf_chain_keys(&tree, &mut mm);
+        assert!(
+            chain.len() >= 3,
+            "workload must produce at least three leaves"
+        );
+        let (middle_page, middle_keys) = chain[1].clone();
+
+        // Empty the middle leaf entirely.
+        for key in &middle_keys {
+            tree.delete(
+                key,
+                RecordAddress {
+                    page: key.0,
+                    offset: 0,
+                },
+                &mut mm,
+            )
+            .expect("delete failed");
+        }
+
+        // Reinsert a key that routes back into the emptied leaf.
+        let reinserted_key = middle_keys[0];
+        let reinserted = RecordAddress {
+            page: 99_999,
+            offset: 0,
+        };
+        tree.insert(reinserted_key, reinserted, &mut mm)
+            .expect("reinsert failed");
+        assert_eq!(
+            tree.find_leaf_page(&reinserted_key, &mut mm)
+                .expect("leaf lookup failed"),
+            middle_page,
+            "reinserted key must route to the emptied middle leaf"
+        );
+
+        assert_eq!(
+            tree.search(&reinserted_key, &mut mm)
+                .expect("search failed"),
+            vec![reinserted]
+        );
+
+        let mut walker = tree
+            .range_scan(&Uint32(0), None, &mut mm)
+            .expect("range scan failed");
+        let mut scanned = Vec::new();
+        while let Some(pointer) = walker.next(&mut mm).expect("walker next failed") {
+            scanned.push(pointer);
+        }
+        assert!(
+            scanned.contains(&reinserted),
+            "covering range scan must return the reinserted entry"
+        );
+        let expected_len = 12_000 - middle_keys.len() + 1;
+        assert_eq!(scanned.len(), expected_len);
+    }
+
+    #[test]
+    fn test_duplicate_search_skips_emptied_middle_leaf() {
+        let mut mm = make_mm();
+        let mut tree = IndexTree::<Uint32>::init(&mut mm).expect("tree init failed");
+
+        for value in 0..12_000u32 {
+            tree.insert(
+                Uint32(15),
+                RecordAddress {
+                    page: value,
+                    offset: 0,
+                },
+                &mut mm,
+            )
+            .expect("duplicate insert failed");
+        }
+
+        let chain = leaf_chain_keys(&tree, &mut mm);
+        assert!(
+            chain.len() >= 3,
+            "workload must produce at least three leaves"
+        );
+        let middle_page = chain[1].0;
+        let NodeBody::Leaf(middle) = BTreeNode::<Uint32>::read(middle_page, &mut mm)
+            .expect("leaf read failed")
+            .body
+        else {
+            panic!("middle page must be a leaf");
+        };
+        let removed = middle.entries.len();
+        for entry in &middle.entries {
+            tree.delete(&entry.key, entry.pointer, &mut mm)
+                .expect("delete failed");
+        }
+
+        let hits = tree.search(&Uint32(15), &mut mm).expect("search failed");
+        assert_eq!(hits.len(), 12_000 - removed);
+
+        let mut walker = tree
+            .range_scan(&Uint32(15), Some(&Uint32(16)), &mut mm)
+            .expect("range scan failed");
+        let mut scanned = 0usize;
+        while walker.next(&mut mm).expect("walker next failed").is_some() {
+            scanned += 1;
+        }
+        assert_eq!(scanned, 12_000 - removed);
     }
 }
