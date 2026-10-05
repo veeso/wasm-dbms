@@ -109,13 +109,19 @@ where
         }
 
         if let Some(filter) = &query.filter {
-            joined_rows.retain(|row| {
+            let mut filtered_rows = Vec::with_capacity(joined_rows.len());
+            for row in joined_rows {
                 let groups: Vec<(&str, Vec<(ColumnDef, Value)>)> = row
                     .iter()
                     .map(|(t, cols)| (t.as_str(), cols.clone()))
                     .collect();
-                filter.matches_joined_row(&groups).unwrap_or(false)
-            });
+                // Evaluation errors (ambiguous or out-of-scope columns, invalid
+                // operands) are query errors, not non-matching rows.
+                if filter.matches_joined_row(&groups)? {
+                    filtered_rows.push(row);
+                }
+            }
+            joined_rows = filtered_rows;
         }
 
         for (column, direction) in query.order_by.iter().rev() {
@@ -351,8 +357,8 @@ where
 mod tests {
 
     use wasm_dbms_api::prelude::{
-        Database as _, Filter, InsertRecord as _, JoinColumnDef, Query, TableSchema as _, Text,
-        Uint32, Value,
+        Database as _, DbmsError, Filter, InsertRecord as _, JoinColumnDef, Query, QueryError,
+        TableSchema as _, Text, Uint32, Value,
     };
     use wasm_dbms_macros::{DatabaseSchema, Table};
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
@@ -883,5 +889,77 @@ mod tests {
             .find(|row| joined_value(row, "employees", "id") == Some(&Value::Uint32(Uint32(10))))
             .expect("alice should be in results");
         assert_complete_row_with_null_side(alice_row, "departments");
+    }
+
+    #[test]
+    fn test_join_filter_with_ambiguous_column_returns_error() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::eq("id", Value::Uint32(Uint32(1))))
+            .build();
+        let result = db.select_join("departments", query);
+
+        assert!(
+            matches!(
+                &result,
+                Err(DbmsError::Query(QueryError::InvalidQuery(message)))
+                    if message.contains("Ambiguous column 'id'")
+            ),
+            "expected ambiguous column error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_join_filter_with_out_of_scope_table_returns_error() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::eq("projects.id", Value::Uint32(Uint32(1))))
+            .build();
+        let result = db.select_join("departments", query);
+
+        assert!(
+            matches!(
+                &result,
+                Err(DbmsError::Query(QueryError::InvalidQuery(message)))
+                    if message.contains("Table 'projects' not in query scope")
+            ),
+            "expected out-of-scope table error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_join_filter_with_invalid_like_operand_returns_error() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::like("employees.dept_id", "1%"))
+            .build();
+        let result = db.select_join("departments", query);
+
+        assert!(
+            matches!(
+                &result,
+                Err(DbmsError::Query(QueryError::InvalidQuery(message)))
+                    if message.contains("LIKE operator can only be applied to Text values")
+            ),
+            "expected LIKE type error, got {result:?}"
+        );
     }
 }
