@@ -17,12 +17,15 @@ pub fn check_column_validate<T: TableSchema>(column: &ColumnDef, value: &Value) 
 }
 
 /// Checks whether all foreign keys in `record_values` reference existing records.
+///
+/// A null value in a nullable foreign key column references no record and is skipped.
 pub fn check_foreign_keys<T: TableSchema>(
     database: &impl Database,
     record_values: &[(ColumnDef, Value)],
 ) -> DbmsResult<()> {
     record_values
         .iter()
+        .filter(|(col, value)| !(col.nullable && value.is_null()))
         .filter_map(|(col, value)| col.foreign_key.as_ref().map(|fk| (fk, value)))
         .try_for_each(|(fk, value)| check_foreign_key_existence::<T>(database, fk, value))
 }

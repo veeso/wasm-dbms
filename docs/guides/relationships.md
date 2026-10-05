@@ -70,6 +70,28 @@ When you define a foreign key:
 2. The referenced table must be registered in your database schema
 3. Foreign key values must reference existing records (enforced on insert/update)
 
+### Nullable Foreign Keys
+
+Declare an optional relation by wrapping the foreign key type in `Nullable`:
+
+```rust
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "employees"]
+pub struct Employee {
+    #[primary_key]
+    pub id: Uint32,
+    pub name: Text,
+    #[foreign_key(entity = "Employee", table = "employees", column = "id")]
+    pub manager_id: Nullable<Uint32>,
+}
+```
+
+A null foreign key references no record, so inserts and updates skip the
+existence check for it. In the generated record, the relation field has the
+same type as for a required foreign key, `Option<Box<EmployeeRecord>>`. It is
+`Some` when the relation is eager loaded and the foreign key is set, and `None`
+when the foreign key is null or the relation is not eager loaded.
+
 ---
 
 ## Referential Integrity
