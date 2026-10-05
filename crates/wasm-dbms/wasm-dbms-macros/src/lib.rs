@@ -277,7 +277,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 pub fn derive_table(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     self::table::table(input)
-        .expect("failed to derive `Table`")
+        .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
 
