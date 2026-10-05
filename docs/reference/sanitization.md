@@ -143,9 +143,12 @@ pub percentage: Uint8,
 **TimezoneSanitizer** - Convert to specific timezone
 
 ```rust
-#[sanitizer(TimezoneSanitizer("America/New_York"))]
+#[sanitizer(TimezoneSanitizer(-300))] // UTC-05:00, offset in minutes
 pub local_time: DateTime,
 ```
+
+The target offset and the offset of the value must both be less than one day, within
+`-1439..=1439` minutes; a value outside that range is rejected with `DbmsError::Sanitize`.
 
 **UtcSanitizer** - Convert to UTC
 
