@@ -472,6 +472,92 @@ mod tests {
         assert_eq!(restored_raw, original_raw);
     }
 
+    #[test]
+    fn test_journal_rollback_restores_every_small_free_segment() {
+        use wasm_dbms_api::prelude::{ColumnSnapshot, DataTypeSnapshot, TableSchemaSnapshot};
+        use wasm_dbms_memory::prelude::{SchemaRegistry, TableRegistry};
+
+        /// Snapshot alignment of 1 keeps each 2-byte record body in a
+        /// 4-byte slot, so freed segments stay smaller than their metadata.
+        const ALIGNMENT: PageOffset = 1;
+
+        let mut mm = make_mm();
+        let snapshot = TableSchemaSnapshot {
+            version: TableSchemaSnapshot::latest_version(),
+            name: "small".to_string(),
+            primary_key: "id".to_string(),
+            alignment: u32::from(ALIGNMENT),
+            columns: vec![ColumnSnapshot {
+                name: "id".to_string(),
+                data_type: DataTypeSnapshot::Uint16,
+                nullable: false,
+                auto_increment: false,
+                unique: true,
+                primary_key: true,
+                foreign_key: None,
+                default: None,
+            }],
+            indexes: vec![],
+        };
+        let pages = SchemaRegistry::default()
+            .register_table_from_snapshot(&snapshot, &mut mm)
+            .expect("Failed to register table");
+        let mut table = TableRegistry::load(pages, &mut mm).expect("Failed to load table");
+
+        // Eight contiguous 4-byte records; freeing every other one leaves four
+        // non-adjacent 4-byte free segments (16 free bytes, 34 metadata bytes).
+        let addresses = (0..8u8)
+            .map(|i| {
+                table
+                    .insert_raw(&[i, i], ALIGNMENT, &mut mm)
+                    .expect("Failed to insert record")
+            })
+            .collect::<Vec<_>>();
+        for address in addresses.iter().step_by(2) {
+            table
+                .delete_raw(*address, 2, ALIGNMENT, &mut mm)
+                .expect("Failed to delete record");
+        }
+
+        let snapshot_memory = |mm: &mut MemoryManager<HeapMemoryProvider>| {
+            let page_size = mm.page_size() as usize;
+            (0..mm.pages_count() as Page)
+                .map(|page| {
+                    let mut buf = vec![0u8; page_size];
+                    mm.read_at_raw(page, 0, &mut buf)
+                        .expect("Failed to read page");
+                    buf
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = snapshot_memory(&mut mm);
+
+        let mut journal = Journal::new();
+        {
+            let mut writer = JournaledWriter::new(&mut mm, &mut journal);
+            // Reuse part of a free segment, then free a record next to one.
+            table
+                .insert_raw(&[0xAA], ALIGNMENT, &mut writer)
+                .expect("Failed to reuse free segment");
+            table
+                .delete_raw(addresses[1], 2, ALIGNMENT, &mut writer)
+                .expect("Failed to delete record");
+        }
+        journal
+            .rollback(&mut mm)
+            .expect("Failed to rollback journal");
+
+        let after = snapshot_memory(&mut mm);
+        assert_eq!(after.len(), before.len());
+        for (page, (after, before)) in after.iter().zip(&before).enumerate() {
+            let first_diff = after.iter().zip(before).position(|(a, b)| a != b);
+            assert!(
+                first_diff.is_none(),
+                "page {page} differs after rollback at byte {first_diff:?}"
+            );
+        }
+    }
+
     // -- test helpers --------------------------------------------------------
 
     #[derive(Debug, Clone, PartialEq)]

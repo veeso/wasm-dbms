@@ -219,11 +219,11 @@ impl Encode for FreeSegmentsList {
     }
 
     fn size(&self) -> MSize {
-        let mut size = TABLE_LEN_SIZE;
-        for record in &self.0 {
-            size = size.saturating_add(record.size); // This saturating won't happen, but just to prevent panic...
-        }
-        size
+        // Length prefix plus one fixed-size metadata entry per segment; the
+        // free bytes a segment describes are not part of the encoding.
+        let record_size = FreeSegment::SIZE.get_fixed_size().expect("Should be fixed");
+        // A page holds at most `max_segments` entries, so this cannot saturate.
+        TABLE_LEN_SIZE.saturating_add((self.0.len() as MSize).saturating_mul(record_size))
     }
 }
 
@@ -561,6 +561,37 @@ mod tests {
         let table = mock_table(&mut mm);
         let page = table.page();
         assert_eq!(table.page, page);
+    }
+
+    #[test]
+    fn test_size_matches_encoded_length_for_small_segments() {
+        let list = FreeSegmentsList(
+            (0..4)
+                .map(|i| FreeSegment {
+                    page: 1,
+                    offset: i * 8,
+                    size: 4,
+                })
+                .collect(),
+        );
+
+        assert_eq!(list.size(), 2 + 4 * 8);
+        assert_eq!(list.size() as usize, list.encode().len());
+    }
+
+    #[test]
+    fn test_size_matches_encoded_length_for_empty_and_large_segments() {
+        let empty = FreeSegmentsList::default();
+        assert_eq!(empty.size(), 2);
+        assert_eq!(empty.size() as usize, empty.encode().len());
+
+        let large = FreeSegmentsList(vec![FreeSegment {
+            page: 1,
+            offset: 0,
+            size: 4096,
+        }]);
+        assert_eq!(large.size(), 2 + 8);
+        assert_eq!(large.size() as usize, large.encode().len());
     }
 
     fn mock_table(mm: &mut MemoryManager<HeapMemoryProvider>) -> FreeSegmentsTable {
