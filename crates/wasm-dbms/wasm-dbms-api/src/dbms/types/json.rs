@@ -27,13 +27,22 @@ const LEN_SIZE: MSize = 2;
 /// 2. **Within same type**:
 ///    - Null: all equal
 ///    - Bool: `false < true`
-///    - Number: numeric comparison (integers compared as i64, floats as f64)
+///    - Number: exact numeric comparison of the mathematical values, without
+///      lossy conversion between integers and floats; when an integer and a
+///      float have the same value (e.g. `1` and `1.0`) the integer sorts first
 ///    - String: lexicographic comparison
 ///    - Array: element-wise lexicographic comparison
 ///    - Object: keys sorted alphabetically, then key-value pairs compared lexicographically
 ///
 /// This ordering is deterministic and suitable for indexing and sorting operations,
 /// though comparing values of different types may not be semantically meaningful.
+///
+/// # Equality and hashing
+///
+/// Equality and hashing are derived from the same ordering, so two values are
+/// equal exactly when they compare [`Ordering::Equal`] and equal values always
+/// hash identically. In particular `1` and `1.0` are distinct values (matching
+/// [`serde_json::Value`] equality), while `0.0` and `-0.0` are equal.
 #[derive(Clone, Debug, Eq)]
 pub struct Json {
     /// JSON value
@@ -67,7 +76,8 @@ impl Json {
 
 impl PartialEq for Json {
     fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
+        // Defined through `cmp` so `Eq`, `Ord` and `Hash` can never disagree.
+        cmp_value(&self.value, &other.value) == Ordering::Equal
     }
 }
 
@@ -85,10 +95,18 @@ fn hash_value<H: std::hash::Hasher>(v: &Value, state: &mut H) {
     match v {
         Value::Null => {}
         Value::Bool(b) => b.hash(state),
-        Value::Number(n) => {
-            // Hash the string representation for consistent hashing across int/float
-            n.to_string().hash(state);
-        }
+        Value::Number(n) => match JsonNumber::from(n) {
+            JsonNumber::Int(i) => {
+                0u8.hash(state);
+                i.hash(state);
+            }
+            JsonNumber::Float(f) => {
+                1u8.hash(state);
+                // `0.0` and `-0.0` compare equal, so they must hash equal too.
+                let f = if f == 0.0 { 0.0 } else { f };
+                f.to_bits().hash(state);
+            }
+        },
         Value::String(s) => s.hash(state),
         Value::Array(arr) => {
             arr.len().hash(state);
@@ -155,27 +173,77 @@ fn cmp_value(a: &Value, b: &Value) -> Ordering {
     }
 }
 
+/// Lossless view of a [`serde_json::Number`] used for comparison and hashing.
+#[derive(Debug, Clone, Copy)]
+enum JsonNumber {
+    /// Integer number; `i128` holds every `i64` and `u64` exactly.
+    Int(i128),
+    /// Floating point number.
+    Float(f64),
+}
+
+impl From<&serde_json::Number> for JsonNumber {
+    fn from(n: &serde_json::Number) -> Self {
+        if let Some(i) = n.as_i64() {
+            Self::Int(i128::from(i))
+        } else if let Some(u) = n.as_u64() {
+            Self::Int(i128::from(u))
+        } else {
+            // Without `arbitrary_precision`, every non-integer serde_json
+            // number is a finite f64, so this fallback is unreachable. NaN
+            // sorts above every number and is handled consistently by
+            // `cmp_float`, `cmp_int_float` and `hash_value`.
+            Self::Float(n.as_f64().unwrap_or(f64::NAN))
+        }
+    }
+}
+
 /// Compares two JSON numbers.
 ///
-/// Integers are compared as i64, floats as f64.
-/// When comparing int to float, both are converted to f64.
+/// Numbers are ordered by their exact mathematical value. Integers and
+/// floats are compared without lossy conversion, so the order stays
+/// transitive beyond 2^53. When an integer and a float have the same value,
+/// the integer sorts first, keeping `1` and `1.0` distinct as in
+/// [`serde_json::Value`] equality. `0.0` and `-0.0` compare equal.
 fn cmp_number(a: &serde_json::Number, b: &serde_json::Number) -> Ordering {
-    // Try integer comparison first (most common case)
-    if let (Some(a_i64), Some(b_i64)) = (a.as_i64(), b.as_i64()) {
-        return a_i64.cmp(&b_i64);
+    match (JsonNumber::from(a), JsonNumber::from(b)) {
+        (JsonNumber::Int(a), JsonNumber::Int(b)) => a.cmp(&b),
+        (JsonNumber::Float(a), JsonNumber::Float(b)) => cmp_float(a, b),
+        (JsonNumber::Int(a), JsonNumber::Float(b)) => cmp_int_float(a, b).then(Ordering::Less),
+        (JsonNumber::Float(a), JsonNumber::Int(b)) => {
+            cmp_int_float(b, a).reverse().then(Ordering::Greater)
+        }
+    }
+}
+
+/// Compares two floats numerically, treating `0.0` and `-0.0` as equal.
+///
+/// NaN (unreachable with standard serde_json numbers) falls back to
+/// [`f64::total_cmp`] so the order stays total.
+fn cmp_float(a: f64, b: f64) -> Ordering {
+    a.partial_cmp(&b).unwrap_or_else(|| a.total_cmp(&b))
+}
+
+/// Compares the mathematical values of an integer and a float exactly.
+fn cmp_int_float(int: i128, float: f64) -> Ordering {
+    /// 2^127 as `f64`; every `i128` is strictly below it.
+    const I128_UPPER: f64 = 170_141_183_460_469_231_731_687_303_715_884_105_728.0;
+
+    if float.is_nan() {
+        // NaN sorts above every number, matching `f64::total_cmp`.
+        return Ordering::Less;
+    }
+    if float >= I128_UPPER {
+        return Ordering::Less;
+    }
+    if float < -I128_UPPER {
+        return Ordering::Greater;
     }
 
-    // Try unsigned integer comparison
-    if let (Some(a_u64), Some(b_u64)) = (a.as_u64(), b.as_u64()) {
-        return a_u64.cmp(&b_u64);
-    }
-
-    // Fall back to float comparison
-    let a_f64 = a.as_f64().unwrap_or(f64::NAN);
-    let b_f64 = b.as_f64().unwrap_or(f64::NAN);
-
-    // Use total_cmp for deterministic NaN handling
-    a_f64.total_cmp(&b_f64)
+    // In range: the truncated float is an integer that fits `i128` exactly.
+    let truncated = float.trunc();
+    int.cmp(&(truncated as i128))
+        .then_with(|| cmp_float(0.0, float - truncated))
 }
 
 /// Compares two JSON arrays element-wise.
@@ -769,6 +837,158 @@ mod tests {
         assert_eq!(map.get(&j(json!({"id": 1}))), Some(&100));
         assert_eq!(map.get(&j(json!({"id": 2}))), Some(&200));
         assert_eq!(map.get(&j(json!({"id": 3}))), None);
+    }
+
+    // ===================
+    // Eq / Ord / Hash consistency tests
+    // ===================
+
+    fn hash_of(value: &Json) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::Hasher;
+
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Asserts that `Eq`, `Ord` and `Hash` agree for one pair of values.
+    fn assert_consistent(a: &Json, b: &Json) {
+        let equal = a == b;
+        assert_eq!(
+            equal,
+            a.cmp(b) == Ordering::Equal,
+            "Eq and Ord disagree for {a} and {b}"
+        );
+        assert_eq!(
+            a.cmp(b),
+            b.cmp(a).reverse(),
+            "Ord is not antisymmetric for {a} and {b}"
+        );
+        if equal {
+            assert_eq!(
+                hash_of(a),
+                hash_of(b),
+                "equal values {a} and {b} hash differently"
+            );
+        }
+    }
+
+    #[test]
+    fn test_eq_ord_and_hash_are_consistent_for_objects() {
+        let a = j(json!({"a": 1}));
+        let b = j(json!({"b": 1}));
+        assert_ne!(a, b);
+        assert_ne!(a.cmp(&b), Ordering::Equal);
+        assert_consistent(&a, &b);
+    }
+
+    #[test]
+    fn test_signed_zero_is_equal_and_hashes_equal() {
+        let positive_zero = j(json!(0.0));
+        let negative_zero = j(json!(-0.0));
+        assert_eq!(positive_zero, negative_zero);
+        assert_eq!(positive_zero.cmp(&negative_zero), Ordering::Equal);
+        assert_eq!(hash_of(&positive_zero), hash_of(&negative_zero));
+
+        let mut set = std::collections::HashSet::new();
+        set.insert(positive_zero);
+        assert!(set.contains(&negative_zero));
+    }
+
+    #[test]
+    fn test_integer_and_float_with_same_value_are_distinct_and_ordered() {
+        let int_one = j(json!(1));
+        let float_one = j(json!(1.0));
+        assert_ne!(int_one, float_one);
+        assert_eq!(int_one.cmp(&float_one), Ordering::Less);
+        assert_consistent(&int_one, &float_one);
+
+        // the tie-break never overrides the numeric order
+        assert!(j(json!(1.0)) < j(json!(2)));
+        assert!(j(json!(-1)) < j(json!(-0.5)));
+        assert!(j(json!(0)) < j(json!(0.0)));
+        assert!(j(json!(0.0)) < j(json!(1)));
+    }
+
+    #[test]
+    fn test_number_order_is_exact_and_transitive_near_2_pow_53() {
+        const TWO_POW_53: i64 = 1 << 53;
+        let values = [
+            j(json!(TWO_POW_53 - 1)),
+            j(json!((TWO_POW_53 - 1) as f64)),
+            j(json!(TWO_POW_53)),
+            j(json!(TWO_POW_53 as f64)),
+            j(json!(TWO_POW_53 + 1)),
+            j(json!(TWO_POW_53 + 2)),
+            j(json!((TWO_POW_53 + 2) as f64)),
+        ];
+
+        // the literal order above is the expected strict total order
+        for (i, a) in values.iter().enumerate() {
+            for (k, b) in values.iter().enumerate() {
+                assert_eq!(a.cmp(b), i.cmp(&k), "wrong order for {a} vs {b}");
+                assert_consistent(a, b);
+            }
+        }
+
+        // 2^53 + 1 is not representable as f64 and must not collapse onto 2^53
+        assert!(j(json!(TWO_POW_53 as f64)) < j(json!(TWO_POW_53 + 1)));
+    }
+
+    #[test]
+    fn test_number_order_is_exact_at_integer_extremes() {
+        let ordered = [
+            j(json!(-1.0e300)),
+            j(json!(i64::MIN as f64 - 4096.0)),
+            j(json!(i64::MIN)),
+            j(json!(i64::MIN as f64)),
+            j(json!(i64::MIN + 1)),
+            j(json!(-0.5)),
+            j(json!(0)),
+            j(json!(-0.0)),
+            j(json!(0.5)),
+            j(json!(i64::MAX)),
+            j(json!(u64::MAX - 1)),
+            j(json!(u64::MAX)),
+            j(json!(u64::MAX as f64)),
+            j(json!(1.0e300)),
+        ];
+
+        for window in ordered.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "{} must be < {}",
+                window[0],
+                window[1]
+            );
+        }
+        for a in &ordered {
+            for b in &ordered {
+                assert_consistent(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn test_eq_ord_and_hash_are_consistent_for_nested_numbers() {
+        let values = [
+            j(json!([1, 2.5])),
+            j(json!([1.0, 2.5])),
+            j(json!({"n": 0.0})),
+            j(json!({"n": -0.0})),
+            j(json!({"n": 0})),
+            j(json!([[0.0], {"k": -0.0}])),
+            j(json!([[-0.0], {"k": 0.0}])),
+        ];
+        for a in &values {
+            for b in &values {
+                assert_consistent(a, b);
+            }
+        }
+        assert_eq!(values[2], values[3]);
+        assert_ne!(values[2], values[4]);
+        assert_eq!(values[5], values[6]);
     }
 
     // ===================
