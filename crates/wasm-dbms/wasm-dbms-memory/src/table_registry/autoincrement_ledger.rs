@@ -23,10 +23,18 @@ impl AutoincrementLedger {
     /// Initialize the [`AutoincrementLedger`] for the given table schema, and write it to the given page.
     ///
     /// Each autoincrement column in the table schema will be initialized in the registry with the appropriate zero value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] if the autoincrement
+    /// columns do not fit the registry encoding (see [`Self::validate`]), or
+    /// any error raised while writing the registry page.
     pub fn init<TS>(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self>
     where
         TS: TableSchema,
     {
+        Self::validate::<TS>()?;
+
         let mut registry = AutoincrementRegistry::default();
         // init each autoincrement column in the registry with the appropriate zero value
         for auto_increment_column in TS::columns().iter().filter(|c| c.auto_increment) {
@@ -49,7 +57,8 @@ impl AutoincrementLedger {
     /// # Errors
     ///
     /// Returns [`MemoryError::ConstraintViolation`] if an autoincrement
-    /// column is not an integer, or any error raised while writing the
+    /// column is not an integer or does not fit the registry encoding (see
+    /// [`Self::validate_snapshot`]), or any error raised while writing the
     /// registry page.
     pub fn init_from_snapshot(
         page: Page,
@@ -69,28 +78,58 @@ impl AutoincrementLedger {
         Ok(Self { page, registry })
     }
 
+    /// Checks that the autoincrement columns of `TS` fit the registry
+    /// encoding, so [`Self::init`] cannot persist truncated metadata.
+    ///
+    /// Callers should run this before allocating any page for the table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] if there are more than
+    /// 255 autoincrement columns or a column name is longer than 255 bytes.
+    pub fn validate<TS>() -> MemoryResult<()>
+    where
+        TS: TableSchema,
+    {
+        AutoincrementRegistry::validate_columns(
+            TS::columns()
+                .iter()
+                .filter(|c| c.auto_increment)
+                .map(|c| c.name),
+        )
+    }
+
     /// Checks that every autoincrement column of `snapshot` has an integer
-    /// type, so [`Self::init_from_snapshot`] cannot fail on it.
+    /// type and fits the registry encoding, so [`Self::init_from_snapshot`]
+    /// cannot fail on it.
     ///
     /// Callers should run this before allocating any page for the table.
     ///
     /// # Errors
     ///
     /// Returns [`MemoryError::ConstraintViolation`] if an autoincrement
-    /// column is not an integer.
+    /// column is not an integer, there are more than 255 autoincrement
+    /// columns, or a column name is longer than 255 bytes.
     pub fn validate_snapshot(snapshot: &TableSchemaSnapshot) -> MemoryResult<()> {
-        match snapshot
+        if let Some(column) = snapshot
             .columns
             .iter()
             .filter(|c| c.auto_increment)
             .find(|c| Self::snapshot_zero(&c.data_type).is_none())
         {
-            Some(column) => Err(MemoryError::ConstraintViolation(format!(
+            return Err(MemoryError::ConstraintViolation(format!(
                 "unsupported autoincrement type for column `{}`: {:?}",
                 column.name, column.data_type
-            ))),
-            None => Ok(()),
+            )));
         }
+
+        AutoincrementRegistry::validate_columns(
+            snapshot
+                .columns
+                .iter()
+                .filter(|c| c.auto_increment)
+                .map(|c| c.name.as_str()),
+        )
     }
 
     /// Load the [`AutoincrementLedger`] from the given page.
@@ -919,5 +958,85 @@ mod tests {
     #[should_panic(expected = "unsupported autoincrement type")]
     fn test_zero_panics_on_unsupported_type() {
         let _ = AutoincrementLedger::zero(DataTypeKind::Text);
+    }
+
+    fn snapshot_with_autoincrement_columns(
+        names: Vec<String>,
+    ) -> wasm_dbms_api::prelude::TableSchemaSnapshot {
+        use wasm_dbms_api::prelude::{ColumnSnapshot, DataTypeSnapshot, TableSchemaSnapshot};
+
+        TableSchemaSnapshot {
+            version: TableSchemaSnapshot::latest_version(),
+            name: "counters".to_string(),
+            primary_key: names[0].clone(),
+            alignment: 8,
+            columns: names
+                .into_iter()
+                .map(|name| ColumnSnapshot {
+                    name,
+                    data_type: DataTypeSnapshot::Uint32,
+                    nullable: false,
+                    auto_increment: true,
+                    unique: false,
+                    primary_key: false,
+                    foreign_key: None,
+                    default: None,
+                })
+                .collect(),
+            indexes: vec![],
+        }
+    }
+
+    #[test]
+    fn test_init_from_snapshot_accepts_255_autoincrement_columns() {
+        let mut mm = make_mm();
+        let page = mm.claim_page().expect("claim");
+        let names = (0..255).map(|i| format!("c{i}")).collect::<Vec<_>>();
+        let snapshot = snapshot_with_autoincrement_columns(names);
+
+        AutoincrementLedger::init_from_snapshot(page, &snapshot, &mut mm).expect("init");
+
+        let mut reloaded = AutoincrementLedger::load(page, &mut mm).expect("load");
+        assert_eq!(
+            reloaded.next("c254", &mut mm).expect("next"),
+            Value::Uint32(1u32.into())
+        );
+    }
+
+    #[test]
+    fn test_init_from_snapshot_rejects_256_autoincrement_columns() {
+        let mut mm = make_mm();
+        let page = mm.claim_page().expect("claim");
+        let names = (0..256).map(|i| format!("c{i}")).collect::<Vec<_>>();
+        let snapshot = snapshot_with_autoincrement_columns(names);
+
+        let result = AutoincrementLedger::init_from_snapshot(page, &snapshot, &mut mm);
+        assert!(matches!(result, Err(MemoryError::ConstraintViolation(_))));
+    }
+
+    #[test]
+    fn test_init_from_snapshot_accepts_255_byte_autoincrement_column_name() {
+        let mut mm = make_mm();
+        let page = mm.claim_page().expect("claim");
+        let name = "x".repeat(255);
+        let snapshot = snapshot_with_autoincrement_columns(vec![name.clone()]);
+
+        AutoincrementLedger::init_from_snapshot(page, &snapshot, &mut mm).expect("init");
+
+        let mut reloaded = AutoincrementLedger::load(page, &mut mm).expect("load");
+        assert_eq!(
+            reloaded.next(&name, &mut mm).expect("next"),
+            Value::Uint32(1u32.into())
+        );
+    }
+
+    #[test]
+    fn test_init_from_snapshot_rejects_256_byte_autoincrement_column_name() {
+        let mut mm = make_mm();
+        let page = mm.claim_page().expect("claim");
+        let snapshot = snapshot_with_autoincrement_columns(vec!["x".repeat(256)]);
+
+        let result = AutoincrementLedger::init_from_snapshot(page, &snapshot, &mut mm);
+        assert!(matches!(result, Err(MemoryError::ConstraintViolation(_))));
     }
 }

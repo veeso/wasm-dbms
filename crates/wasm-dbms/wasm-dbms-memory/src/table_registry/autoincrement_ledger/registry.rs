@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use wasm_dbms_api::memory::{DEFAULT_ALIGNMENT, DataSize, Encode, MSize, MemoryError, PageOffset};
 use wasm_dbms_api::prelude::{MemoryResult, Value};
 
+/// Largest entry count and column-name length the one-byte prefixes of the
+/// encoded registry can hold.
+const MAX_ONE_BYTE_LEN: usize = u8::MAX as usize;
+
 /// Mapping between the column name and the current autoincrement value for that column.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct AutoincrementRegistry(HashMap<String, Value>);
@@ -25,6 +29,37 @@ impl AutoincrementRegistry {
         let next_value = Self::next_value(current_value.clone())?;
         *current_value = next_value.clone();
         Ok(next_value)
+    }
+
+    /// Checks that `columns` fit the one-byte entry count and column-name
+    /// length prefixes of the encoded registry.
+    ///
+    /// Callers should run this before allocating any page for the table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] if there are more than
+    /// 255 columns or a column name is longer than 255 bytes.
+    pub(crate) fn validate_columns<'a, I>(columns: I) -> MemoryResult<()>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let mut count = 0usize;
+        for column in columns {
+            if column.len() > MAX_ONE_BYTE_LEN {
+                return Err(MemoryError::ConstraintViolation(format!(
+                    "autoincrement column name `{column}` is {} bytes long, maximum is {MAX_ONE_BYTE_LEN}",
+                    column.len()
+                )));
+            }
+            count += 1;
+        }
+        if count > MAX_ONE_BYTE_LEN {
+            return Err(MemoryError::ConstraintViolation(format!(
+                "table has {count} autoincrement columns, maximum is {MAX_ONE_BYTE_LEN}"
+            )));
+        }
+        Ok(())
     }
 
     /// Initializes the autoincrement value for the given column in the registry.

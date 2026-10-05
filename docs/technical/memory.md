@@ -537,9 +537,9 @@ pub struct AutoincrementLedger {
 
 ```txt
 Offset   Size    Field
-0        1       Number of entries (u8)
+0        1       Number of entries (u8, at most 255)
 1+       var     For each entry:
-                 - 1 byte: column name length (u8)
+                 - 1 byte: column name length (u8, at most 255)
                  - N bytes: UTF-8 column name
                  - var bytes: encoded Value (type-tagged)
 ```
@@ -707,10 +707,14 @@ Offset   Size    Field
 8+       var     For each index:
                  - 8 bytes: column count (u64)
                  - For each column name:
-                   - 1 byte: name length (u8)
+                   - 1 byte: name length (u8, at most 255)
                    - N bytes: UTF-8 column name
                  - 4 bytes: root page (u32)
 ```
+
+Index and autoincrement column names longer than 255 bytes, and tables with more than
+255 autoincrement columns, are rejected with `MemoryError::ConstraintViolation` when the
+table is registered, before any page is claimed.
 
 When a table is registered via `SchemaRegistry::register_table()`, the index ledger is
 initialized by allocating one root page per index definition. The ledger supports
