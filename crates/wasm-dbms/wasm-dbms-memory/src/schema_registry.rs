@@ -83,6 +83,13 @@ impl SchemaRegistry {
             return Ok(pages);
         }
 
+        // Reject metadata the ledger encodings cannot hold before any page is
+        // claimed or the registry is touched.
+        for index in TS::indexes() {
+            IndexLedger::validate_columns(index.0)?;
+        }
+        AutoincrementLedger::validate::<TS>()?;
+
         // allocate table registry page
         let schema_snapshot_page = mm.claim_page()?;
         let pages_list_page = mm.claim_page()?;
@@ -172,9 +179,13 @@ impl SchemaRegistry {
             return Ok(pages);
         }
 
-        // Reject unsupported autoincrement columns before any page is claimed
-        // or the registry is touched.
+        // Reject unsupported autoincrement columns and metadata the ledger
+        // encodings cannot hold before any page is claimed or the registry is
+        // touched.
         AutoincrementLedger::validate_snapshot(snapshot)?;
+        for index in &snapshot.indexes {
+            IndexLedger::validate_columns(&index.columns)?;
+        }
 
         let schema_snapshot_page = mm.claim_page()?;
         let pages_list_page = mm.claim_page()?;
@@ -1383,5 +1394,49 @@ mod tests {
             .get()
             .clone();
         assert_eq!(snapshot.name, "users");
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_rejects_256_autoincrement_columns_without_side_effects() {
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let mut snapshot = dummy_snapshot("counters");
+        let template = snapshot.columns[0].clone();
+        snapshot.columns = (0..256)
+            .map(|i| ColumnSnapshot {
+                name: format!("c{i}"),
+                auto_increment: true,
+                primary_key: i == 0,
+                ..template.clone()
+            })
+            .collect();
+        snapshot.primary_key = "c0".to_string();
+        let pages_before = mm.pages_count();
+
+        let result = registry.register_table_from_snapshot(&snapshot, &mut mm);
+
+        assert!(matches!(result, Err(MemoryError::ConstraintViolation(_))));
+        assert!(registry.table_registry_page_by_name("counters").is_none());
+        assert_eq!(mm.pages_count(), pages_before);
+    }
+
+    #[test]
+    fn test_register_table_from_snapshot_rejects_long_index_column_name_without_side_effects() {
+        use wasm_dbms_api::prelude::IndexSnapshot;
+
+        let mut mm = make_mm();
+        let mut registry = SchemaRegistry::default();
+        let mut snapshot = dummy_snapshot("indexed");
+        snapshot.indexes = vec![IndexSnapshot {
+            columns: vec!["x".repeat(256)],
+            unique: false,
+        }];
+        let pages_before = mm.pages_count();
+
+        let result = registry.register_table_from_snapshot(&snapshot, &mut mm);
+
+        assert!(matches!(result, Err(MemoryError::ConstraintViolation(_))));
+        assert!(registry.table_registry_page_by_name("indexed").is_none());
+        assert_eq!(mm.pages_count(), pages_before);
     }
 }

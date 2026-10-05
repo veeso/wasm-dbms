@@ -19,6 +19,10 @@ pub use self::index_tree::IndexTreeWalker;
 use super::RecordAddress;
 use crate::MemoryAccess;
 
+/// Longest column name the one-byte length prefix of the ledger encoding can
+/// hold.
+const MAX_COLUMN_NAME_LEN: usize = u8::MAX as usize;
+
 /// The [`IndexLedger`] struct is responsible for managing and providing access to the indexes in the database.
 pub struct IndexLedger {
     /// Page where the index ledger is stored.
@@ -34,6 +38,12 @@ struct IndexLedgerTables(HashMap<Vec<String>, Page>);
 
 impl IndexLedger {
     /// Initializes the index ledger by creating an empty ledger page in memory and setting up the initial structure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] if an index column name
+    /// does not fit the ledger encoding (see [`Self::validate_columns`]),
+    /// or any error raised while claiming or writing pages.
     pub fn init(
         ledger_page: Page,
         indexes: &[IndexDef],
@@ -53,6 +63,13 @@ impl IndexLedger {
     /// Used by the migration engine, which materialises a table from a
     /// [`TableSchemaSnapshot`](wasm_dbms_api::prelude::TableSchemaSnapshot) and
     /// therefore has no `'static` slice handy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] if an index column name
+    /// does not fit the ledger encoding (see [`Self::validate_columns`]);
+    /// no page is claimed in that case. Otherwise propagates any error
+    /// raised while claiming or writing pages.
     pub fn init_from_keys<I>(
         ledger_page: Page,
         index_keys: I,
@@ -61,6 +78,12 @@ impl IndexLedger {
     where
         I: IntoIterator<Item = Vec<String>>,
     {
+        // Validate every key before claiming any tree root page.
+        let index_keys = index_keys.into_iter().collect::<Vec<_>>();
+        for key in &index_keys {
+            Self::validate_columns(key)?;
+        }
+
         let mut tables = HashMap::new();
         for key in index_keys {
             let root_page = IndexTree::<wasm_dbms_api::prelude::Uint32>::init(mm)?.root_page();
@@ -73,6 +96,32 @@ impl IndexLedger {
         };
 
         mm.write_at(ledger_page, 0, &ledger.tables)
+    }
+
+    /// Checks that every column name of an index fits the one-byte length
+    /// prefix of the ledger encoding.
+    ///
+    /// Callers should run this before allocating any page for the table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ConstraintViolation`] if a column name is
+    /// longer than 255 bytes.
+    pub fn validate_columns<S>(columns: &[S]) -> MemoryResult<()>
+    where
+        S: AsRef<str>,
+    {
+        match columns
+            .iter()
+            .map(AsRef::as_ref)
+            .find(|column| column.len() > MAX_COLUMN_NAME_LEN)
+        {
+            Some(column) => Err(MemoryError::ConstraintViolation(format!(
+                "index column name `{column}` is {} bytes long, maximum is {MAX_COLUMN_NAME_LEN}",
+                column.len()
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// Load the page ledger from memory at the given [`Page`].
@@ -589,5 +638,30 @@ mod tests {
         assert!(
             matches!(error, MemoryError::IndexNotFound(columns) if columns == vec!["missing".to_string()])
         );
+    }
+
+    #[test]
+    fn test_init_accepts_255_byte_column_name() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
+        let column = "x".repeat(255);
+
+        IndexLedger::init_from_keys(ledger_page, [vec![column.clone()]], &mut mm)
+            .expect("init failed");
+
+        let loaded = IndexLedger::load(ledger_page, &mut mm).expect("load failed");
+        assert!(loaded.tables.0.contains_key(&vec![column]));
+    }
+
+    #[test]
+    fn test_init_rejects_256_byte_column_name_without_claiming_pages() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let ledger_page = mm.claim_page().expect("failed to allocate page");
+        let pages_before = mm.pages_count();
+
+        let result = IndexLedger::init_from_keys(ledger_page, [vec!["x".repeat(256)]], &mut mm);
+
+        assert!(matches!(result, Err(MemoryError::ConstraintViolation(_))));
+        assert_eq!(mm.pages_count(), pages_before);
     }
 }
