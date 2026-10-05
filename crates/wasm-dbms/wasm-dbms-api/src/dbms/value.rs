@@ -353,6 +353,10 @@ fn decode_custom_value(data: &[u8]) -> MemoryResult<Value> {
     }))
 }
 
+/// Smallest encoded `Vec<Value>` entry: a `u32` size prefix followed by a
+/// discriminant-only value such as [`Value::Null`].
+const MIN_ENCODED_VEC_ENTRY_SIZE: usize = 4 + 1;
+
 /// Encodes a `Vec<Value>` as `[count: u32 LE] + [for each value: [size: u32 LE] + value.encode()]`.
 ///
 /// This is used as the key type for B-tree indexes, supporting both single-column
@@ -380,7 +384,15 @@ impl Encode for Vec<Value> {
         }
         let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
         let mut offset = 4;
-        let mut values = Vec::with_capacity(count);
+        // every entry needs at least its size prefix and a discriminant byte,
+        // so the remaining input bounds the count before anything is reserved
+        if count > (data.len() - offset) / MIN_ENCODED_VEC_ENTRY_SIZE {
+            return Err(MemoryError::DecodeError(DecodeError::TooShort));
+        }
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(count)
+            .map_err(|_| MemoryError::DecodeError(DecodeError::TooShort))?;
         for _ in 0..count {
             if offset + 4 > data.len() {
                 return Err(MemoryError::DecodeError(DecodeError::TooShort));
@@ -823,6 +835,48 @@ mod tests {
         ];
         let encoded = Encode::encode(&original);
         assert_eq!(Encode::size(&original) as usize, encoded.len());
+    }
+
+    #[test]
+    fn test_vec_value_decode_bounds_declared_count_by_input() {
+        // A header declaring one million values, followed by no value bytes.
+        let bytes = 1_000_000u32.to_le_bytes();
+
+        let (result, largest) = crate::test_alloc::largest_allocation_during(|| {
+            Vec::<Value>::decode(Cow::Borrowed(&bytes))
+        });
+
+        assert!(
+            matches!(result, Err(MemoryError::DecodeError(DecodeError::TooShort))),
+            "unexpected decode result: {result:?}"
+        );
+        assert!(
+            largest < 1_024,
+            "decoder allocated {largest} bytes for a {}-byte input",
+            bytes.len()
+        );
+    }
+
+    #[test]
+    fn test_vec_value_decode_bounds_count_with_partial_input() {
+        // Declares u32::MAX values but carries only a single `Null` entry.
+        let mut bytes = u32::MAX.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&Encode::encode(&Value::Null));
+
+        let (result, largest) = crate::test_alloc::largest_allocation_during(|| {
+            Vec::<Value>::decode(Cow::Borrowed(&bytes))
+        });
+
+        assert!(
+            matches!(result, Err(MemoryError::DecodeError(DecodeError::TooShort))),
+            "unexpected decode result: {result:?}"
+        );
+        assert!(
+            largest < 1_024,
+            "decoder allocated {largest} bytes for a {}-byte input",
+            bytes.len()
+        );
     }
 
     // -- Encoded size limits --

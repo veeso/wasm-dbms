@@ -33,5 +33,7 @@ pub mod error;
 pub mod memory;
 pub mod prelude;
 #[cfg(test)]
+mod test_alloc;
+#[cfg(test)]
 mod tests;
 pub mod utils;
