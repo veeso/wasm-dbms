@@ -153,11 +153,11 @@ impl MemoryProvider for WasiMemoryProvider {
     }
 
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64> {
-        let previous_pages = self.pages;
+        let previous_size = self.size();
         // reject unrepresentable sizes before touching the file
         let new_size = new_pages
             .checked_mul(Self::PAGE_SIZE)
-            .and_then(|additional| self.size().checked_add(additional))
+            .and_then(|additional| previous_size.checked_add(additional))
             .ok_or(MemoryError::FailedToAllocatePage)?;
 
         // extend with zeros via set_len
@@ -166,7 +166,7 @@ impl MemoryProvider for WasiMemoryProvider {
             .map_err(|e| MemoryError::ProviderError(e.to_string()))?;
 
         self.pages += new_pages;
-        Ok(previous_pages)
+        Ok(previous_size)
     }
 
     fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
@@ -193,6 +193,8 @@ mod tests {
 
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use wasm_dbms_memory::HeapMemoryProvider;
+
     use super::*;
 
     /// Atomic counter to generate unique temp file paths across tests.
@@ -212,6 +214,25 @@ mod tests {
     /// Removes the temp file if it exists (best-effort cleanup).
     fn cleanup(path: &Path) {
         let _ = std::fs::remove_file(path);
+    }
+
+    /// Asserts the [`MemoryProvider::grow`] contract on an empty provider:
+    /// every call returns the size in bytes reserved before the growth.
+    fn assert_grow_returns_previous_size<P>(mut provider: P)
+    where
+        P: MemoryProvider,
+    {
+        assert_eq!(provider.size(), 0);
+
+        for new_pages in [2, 1, 0, 3] {
+            let size_before = provider.size();
+            let previous = provider.grow(new_pages).unwrap();
+            assert_eq!(previous, size_before);
+            assert_eq!(provider.size(), previous + new_pages * P::PAGE_SIZE);
+        }
+
+        assert_eq!(provider.pages(), 6);
+        assert_eq!(provider.size(), 6 * P::PAGE_SIZE);
     }
 
     #[test]
@@ -270,7 +291,7 @@ mod tests {
         assert_eq!(provider.size(), PAGE_SIZE * 2);
 
         let previous = provider.grow(1).unwrap();
-        assert_eq!(previous, 2);
+        assert_eq!(previous, PAGE_SIZE * 2);
         assert_eq!(provider.pages(), 3);
         assert_eq!(provider.size(), PAGE_SIZE * 3);
         cleanup(&path);
@@ -560,5 +581,17 @@ mod tests {
 
         assert_eq!(std::fs::read(&path).unwrap(), original);
         cleanup(&path);
+    }
+
+    #[test]
+    fn test_grow_contract_wasi_memory_provider() {
+        let path = temp_db_path();
+        assert_grow_returns_previous_size(WasiMemoryProvider::new(&path).unwrap());
+        cleanup(&path);
+    }
+
+    #[test]
+    fn test_grow_contract_heap_memory_provider() {
+        assert_grow_returns_previous_size(HeapMemoryProvider::default());
     }
 }

@@ -128,6 +128,8 @@ impl MemoryProvider for FileMemoryProvider {
 #[cfg(test)]
 mod tests {
 
+    use wasm_dbms_memory::prelude::HeapMemoryProvider;
+
     use super::*;
 
     /// Creates a temporary file path for testing.
@@ -138,6 +140,25 @@ mod tests {
     /// Removes a test file if it exists.
     fn cleanup(path: &Path) {
         let _ = std::fs::remove_file(path);
+    }
+
+    /// Asserts the [`MemoryProvider::grow`] contract on an empty provider:
+    /// every call returns the size in bytes reserved before the growth.
+    fn assert_grow_returns_previous_size<P>(mut provider: P)
+    where
+        P: MemoryProvider,
+    {
+        assert_eq!(provider.size(), 0);
+
+        for new_pages in [2, 1, 0, 3] {
+            let size_before = provider.size();
+            let previous = provider.grow(new_pages).unwrap();
+            assert_eq!(previous, size_before);
+            assert_eq!(provider.size(), previous + new_pages * P::PAGE_SIZE);
+        }
+
+        assert_eq!(provider.pages(), 6);
+        assert_eq!(provider.size(), 6 * P::PAGE_SIZE);
     }
 
     #[test]
@@ -296,5 +317,20 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), original);
 
         cleanup(&path);
+    }
+
+    #[test]
+    fn test_grow_contract_file_memory_provider() {
+        let path = temp_path("grow_contract");
+        cleanup(&path);
+
+        assert_grow_returns_previous_size(FileMemoryProvider::new(&path).unwrap());
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn test_grow_contract_heap_memory_provider() {
+        assert_grow_returns_previous_size(HeapMemoryProvider::default());
     }
 }

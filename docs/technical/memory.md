@@ -123,7 +123,7 @@ pub trait MemoryProvider {
     fn pages(&self) -> u64;
 
     /// Grow memory by new_pages
-    /// Returns previous size on success
+    /// Returns previous size in bytes on success
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64>;
 
     /// Read bytes from memory at offset

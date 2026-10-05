@@ -21,7 +21,7 @@ pub trait MemoryProvider {
 
     /// Attempts to grow the memory by `new_pages` (added pages).
     ///
-    /// Returns an error if it wasn't possible. Otherwise, returns the previous size that was reserved.
+    /// Returns an error if it wasn't possible. Otherwise, returns the previous size in bytes that was reserved.
     ///
     /// Actual reserved size after the growth will be `previous_size + (new_pages * PAGE_SIZE)`.
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64>;
