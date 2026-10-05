@@ -32,13 +32,15 @@ impl SchemaSnapshotLedger {
     ///
     /// # Errors
     ///
-    /// Returns a [`MemoryError`](wasm_dbms_api::memory::MemoryError) if the underlying memory
-    /// write fails.
+    /// Returns [`MemoryError::ConstraintViolation`](wasm_dbms_api::memory::MemoryError::ConstraintViolation)
+    /// without writing if the snapshot exceeds a limit of the snapshot format, or a
+    /// [`MemoryError`](wasm_dbms_api::memory::MemoryError) if the underlying memory write fails.
     pub fn init<Schema>(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<()>
     where
         Schema: TableSchema,
     {
         let schema_snapshot = Schema::schema_snapshot();
+        schema_snapshot.validate_encoding()?;
         mm.write_at(page, 0, &schema_snapshot)
     }
 
@@ -63,14 +65,17 @@ impl SchemaSnapshotLedger {
     ///
     /// # Errors
     ///
-    /// Returns a [`MemoryError`](wasm_dbms_api::memory::MemoryError) if the underlying memory
-    /// write fails. On error the in-memory cache is left untouched.
+    /// Returns [`MemoryError::ConstraintViolation`](wasm_dbms_api::memory::MemoryError::ConstraintViolation)
+    /// without writing if the snapshot exceeds a limit of the snapshot format, or a
+    /// [`MemoryError`](wasm_dbms_api::memory::MemoryError) if the underlying memory write fails.
+    /// On error the in-memory cache is left untouched.
     pub fn write(
         &mut self,
         page: Page,
         snapshot: TableSchemaSnapshot,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<()> {
+        snapshot.validate_encoding()?;
         mm.write_at(page, 0, &snapshot)?;
         self.snapshot = snapshot;
         Ok(())
@@ -393,5 +398,48 @@ mod tests {
         assert_eq!(user_ledger.get(), &User::schema_snapshot());
         assert_eq!(other_ledger.get(), &other);
         assert_ne!(user_ledger.get(), other_ledger.get());
+    }
+
+    #[test]
+    fn test_write_rejects_metadata_above_255_and_keeps_previous_snapshot() {
+        let mut mm = make_mm();
+        let page = mm.claim_page().expect("failed to allocate page");
+
+        SchemaSnapshotLedger::init::<User>(page, &mut mm).expect("init failed");
+        let mut ledger = SchemaSnapshotLedger::load(page, &mut mm).expect("load failed");
+
+        let mut long_table_name = other_snapshot();
+        long_table_name.name = "t".repeat(256);
+        let mut long_column_name = other_snapshot();
+        long_column_name.columns[0].name = "c".repeat(256);
+        let mut long_index = other_snapshot();
+        long_index.indexes[0].columns = vec!["id".to_string(); 256];
+        let mut long_custom_tag = other_snapshot();
+        long_custom_tag.columns[0].data_type =
+            DataTypeSnapshot::Custom(Box::new(wasm_dbms_api::prelude::CustomDataTypeSnapshot {
+                tag: "x".repeat(256),
+                wire_size: wasm_dbms_api::prelude::WireSize::LengthPrefixed,
+            }));
+
+        for snapshot in [
+            long_table_name,
+            long_column_name,
+            long_index,
+            long_custom_tag,
+        ] {
+            let result = ledger.write(page, snapshot, &mut mm);
+            assert!(
+                matches!(
+                    result,
+                    Err(wasm_dbms_api::prelude::MemoryError::ConstraintViolation(_))
+                ),
+                "expected ConstraintViolation, got {result:?}"
+            );
+        }
+
+        // neither the cache nor the persisted page changed
+        assert_eq!(ledger.get(), &User::schema_snapshot());
+        let reloaded = SchemaSnapshotLedger::load(page, &mut mm).expect("reload failed");
+        assert_eq!(reloaded.get(), &User::schema_snapshot());
     }
 }

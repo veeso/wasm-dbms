@@ -429,6 +429,34 @@ fn test_transaction_commit_rejects_oversized_text() {
     assert!(rows.is_empty());
 }
 
+/// Table whose 256-byte name does not fit the one-byte snapshot field.
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"]
+pub struct LongNameTable {
+    #[primary_key]
+    pub id: Uint32,
+}
+
+#[test]
+fn test_register_table_rejects_table_name_above_255_bytes() {
+    use wasm_dbms_api::prelude::{DbmsError, MemoryError};
+
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    let pages_before = ctx.mm.borrow().pages_count();
+
+    let result = ctx.register_table::<LongNameTable>();
+
+    assert!(
+        matches!(
+            result,
+            Err(DbmsError::Memory(MemoryError::ConstraintViolation(_)))
+        ),
+        "expected ConstraintViolation, got {result:?}"
+    );
+    assert!(!ctx.has_table(LongNameTable::table_name()));
+    assert_eq!(ctx.mm.borrow().pages_count(), pages_before);
+}
+
 #[test]
 fn test_update_no_matching_records() {
     let ctx = setup();
