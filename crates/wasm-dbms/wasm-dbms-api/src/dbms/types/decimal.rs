@@ -1,6 +1,7 @@
 use rust_decimal::Decimal as RustDecimal;
 use serde::{Deserialize, Serialize};
 
+use crate::dbms::types::DataType;
 use crate::memory::{DataSize, DecodeError, Encode, MSize, PageOffset};
 
 const RUST_DECIMAL_ENCODE_SIZE: MSize = 16;
@@ -94,6 +95,8 @@ impl Encode for Decimal {
         Self::SIZE.get_fixed_size().expect("should be fixed size")
     }
 }
+
+impl DataType for Decimal {}
 
 #[cfg(test)]
 mod tests {

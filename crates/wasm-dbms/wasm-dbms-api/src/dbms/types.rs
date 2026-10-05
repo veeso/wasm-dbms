@@ -104,6 +104,49 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_should_implement_data_type_for_every_builtin_and_nullable_builtin() {
+        fn assert_data_type<T>()
+        where
+            T: DataType,
+        {
+        }
+
+        assert_data_type::<Blob>();
+        assert_data_type::<Boolean>();
+        assert_data_type::<Date>();
+        assert_data_type::<DateTime>();
+        assert_data_type::<Decimal>();
+        assert_data_type::<Int8>();
+        assert_data_type::<Int16>();
+        assert_data_type::<Int32>();
+        assert_data_type::<Int64>();
+        assert_data_type::<Json>();
+        assert_data_type::<Text>();
+        assert_data_type::<Uint8>();
+        assert_data_type::<Uint16>();
+        assert_data_type::<Uint32>();
+        assert_data_type::<Uint64>();
+        assert_data_type::<Uuid>();
+
+        assert_data_type::<Nullable<Blob>>();
+        assert_data_type::<Nullable<Boolean>>();
+        assert_data_type::<Nullable<Date>>();
+        assert_data_type::<Nullable<DateTime>>();
+        assert_data_type::<Nullable<Decimal>>();
+        assert_data_type::<Nullable<Int8>>();
+        assert_data_type::<Nullable<Int16>>();
+        assert_data_type::<Nullable<Int32>>();
+        assert_data_type::<Nullable<Int64>>();
+        assert_data_type::<Nullable<Json>>();
+        assert_data_type::<Nullable<Text>>();
+        assert_data_type::<Nullable<Uint8>>();
+        assert_data_type::<Nullable<Uint16>>();
+        assert_data_type::<Nullable<Uint32>>();
+        assert_data_type::<Nullable<Uint64>>();
+        assert_data_type::<Nullable<Uuid>>();
+    }
+
+    #[test]
     fn test_should_create_all_data_type_kind_variants() {
         let kinds = [
             DataTypeKind::Blob,
