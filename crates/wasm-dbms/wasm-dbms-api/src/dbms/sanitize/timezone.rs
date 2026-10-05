@@ -6,6 +6,8 @@ use crate::prelude::{DateTime, DbmsError, DbmsResult, Sanitize, Value};
 /// which actually is just a wrapper for this sanitizer with "UTC" as timezone.
 ///
 /// The value provided is `i16` representing the timezone offset in minutes from UTC.
+/// Both this offset and the offset of the sanitized value must be less than one day,
+/// i.e. within `-1439..=1439` minutes; otherwise sanitizing returns an error.
 ///
 /// # Example
 ///
@@ -19,14 +21,19 @@ use crate::prelude::{DateTime, DbmsError, DbmsResult, Sanitize, Value};
 /// ```
 pub struct TimezoneSanitizer(pub i16);
 
+/// Largest supported timezone offset magnitude, in minutes (one day minus one minute).
+const MAX_OFFSET_MINUTES: i16 = 24 * 60 - 1;
+
 impl Sanitize for TimezoneSanitizer {
     fn sanitize(&self, value: Value) -> DbmsResult<Value> {
         match value {
             Value::DateTime(dt) => {
                 validate_calendar_fields(&dt)?;
+                validate_offset(self.0, "target")?;
+                validate_offset(dt.timezone_offset_minutes, "source")?;
 
-                let delta_minutes = self.0 - dt.timezone_offset_minutes;
-                let delta_us = delta_minutes as i64 * 60 * 1_000_000;
+                let delta_minutes = i64::from(self.0) - i64::from(dt.timezone_offset_minutes);
+                let delta_us = delta_minutes * 60 * 1_000_000;
 
                 let ts = datetime_to_us(&dt) + delta_us;
                 let mut new_dt = us_to_datetime(ts)?;
@@ -57,6 +64,18 @@ pub struct UtcSanitizer;
 impl Sanitize for UtcSanitizer {
     fn sanitize(&self, value: Value) -> DbmsResult<Value> {
         TimezoneSanitizer(0).sanitize(value)
+    }
+}
+
+/// Checks that a timezone offset is less than one day in magnitude.
+fn validate_offset(offset_minutes: i16, role: &str) -> DbmsResult<()> {
+    if (-MAX_OFFSET_MINUTES..=MAX_OFFSET_MINUTES).contains(&offset_minutes) {
+        Ok(())
+    } else {
+        Err(DbmsError::Sanitize(format!(
+            "{role} timezone offset {offset_minutes} minutes is outside the supported range \
+             -{MAX_OFFSET_MINUTES}..={MAX_OFFSET_MINUTES}"
+        )))
     }
 }
 
@@ -410,6 +429,55 @@ mod tests {
             .unwrap();
 
         assert_eq!(out, Value::DateTime(input));
+    }
+
+    #[test]
+    fn test_should_reject_extreme_offsets_without_overflow() {
+        let cases = [
+            (TimezoneSanitizer(i16::MAX), i16::MIN),
+            (TimezoneSanitizer(i16::MIN), i16::MAX),
+            (TimezoneSanitizer(0), i16::MIN),
+            (TimezoneSanitizer(i16::MAX), 0),
+        ];
+
+        for (sanitizer, offset) in cases {
+            let input = dt(2024, 6, 15, 12, 0, 0, 0, offset);
+            let outcome = std::panic::catch_unwind(|| sanitizer.sanitize(Value::DateTime(input)));
+            let result = outcome.unwrap_or_else(|_| {
+                panic!("sanitizer {} panicked on offset {offset}", sanitizer.0)
+            });
+            let err = result.expect_err("extreme offsets should be rejected");
+            assert!(matches!(err, DbmsError::Sanitize(_)), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn test_should_reject_offsets_of_one_day_or_more() {
+        let input = dt(2024, 6, 15, 12, 0, 0, 0, 0);
+        for target in [1_440, -1_440] {
+            let err = TimezoneSanitizer(target)
+                .sanitize(Value::DateTime(input))
+                .unwrap_err();
+            assert!(matches!(err, DbmsError::Sanitize(_)), "{err:?}");
+        }
+
+        for offset in [1_440, -1_440] {
+            let input = dt(2024, 6, 15, 12, 0, 0, 0, offset);
+            let err = UtcSanitizer.sanitize(Value::DateTime(input)).unwrap_err();
+            assert!(matches!(err, DbmsError::Sanitize(_)), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn test_should_shift_between_widest_supported_offsets() {
+        let input = dt(2024, 1, 1, 0, 0, 0, 0, -1_439);
+        let expected = dt(2024, 1, 2, 23, 58, 0, 0, 1_439);
+
+        let out = TimezoneSanitizer(1_439)
+            .sanitize(Value::DateTime(input))
+            .unwrap();
+
+        assert_eq!(out, Value::DateTime(expected));
     }
 
     #[allow(clippy::too_many_arguments)]
