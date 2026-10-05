@@ -23,6 +23,8 @@ impl Sanitize for TimezoneSanitizer {
     fn sanitize(&self, value: Value) -> DbmsResult<Value> {
         match value {
             Value::DateTime(dt) => {
+                validate_calendar_fields(&dt)?;
+
                 let delta_minutes = self.0 - dt.timezone_offset_minutes;
                 let delta_us = delta_minutes as i64 * 60 * 1_000_000;
 
@@ -55,6 +57,25 @@ pub struct UtcSanitizer;
 impl Sanitize for UtcSanitizer {
     fn sanitize(&self, value: Value) -> DbmsResult<Value> {
         TimezoneSanitizer(0).sanitize(value)
+    }
+}
+
+/// Checks that every calendar and clock field of `dt` names an existing instant.
+fn validate_calendar_fields(dt: &DateTime) -> DbmsResult<()> {
+    let date_is_valid = (1..=12).contains(&dt.month) && dt.day >= 1 && {
+        // A valid date is the only one that survives the round trip through a day count.
+        let days = days_from_civil(dt.year.into(), dt.month.into(), dt.day.into());
+        civil_from_days(days) == (dt.year.into(), dt.month, dt.day)
+    };
+    let time_is_valid =
+        dt.hour < 24 && dt.minute < 60 && dt.second < 60 && dt.microsecond < 1_000_000;
+
+    if date_is_valid && time_is_valid {
+        Ok(())
+    } else {
+        Err(DbmsError::Sanitize(format!(
+            "invalid date time fields: {dt:?}"
+        )))
     }
 }
 
@@ -348,6 +369,47 @@ mod tests {
                 .unwrap(),
             Value::DateTime(dt(u16::MAX, 12, 31, 23, 30, 0, 0, 60))
         );
+    }
+
+    #[test]
+    fn test_should_reject_invalid_calendar_fields() {
+        let invalid = [
+            dt(2025, 0, 1, 0, 0, 0, 0, 0),
+            dt(2025, 13, 1, 0, 0, 0, 0, 0),
+            dt(2025, 14, 1, 0, 0, 0, 0, 0),
+            dt(2025, u8::MAX, 1, 0, 0, 0, 0, 0),
+            dt(2025, 1, 0, 0, 0, 0, 0, 0),
+            dt(2025, 1, 32, 0, 0, 0, 0, 0),
+            dt(2025, 4, 31, 0, 0, 0, 0, 0),
+            dt(2025, 2, 29, 0, 0, 0, 0, 0),
+            dt(1900, 2, 29, 0, 0, 0, 0, 0),
+            dt(2025, 2, 30, 0, 0, 0, 0, 0),
+            dt(2025, 1, 1, 24, 0, 0, 0, 0),
+            dt(2025, 1, 1, 0, 60, 0, 0, 0),
+            dt(2025, 1, 1, 0, 0, 60, 0, 0),
+            dt(2025, 1, 1, 0, 0, 0, 1_000_000, 0),
+        ];
+
+        for input in invalid {
+            for sanitizer in [TimezoneSanitizer(0), TimezoneSanitizer(60)] {
+                let outcome =
+                    std::panic::catch_unwind(|| sanitizer.sanitize(Value::DateTime(input)));
+                let result = outcome.unwrap_or_else(|_| panic!("sanitizer panicked on {input:?}"));
+                let err = result.expect_err(&format!("{input:?} should be rejected"));
+                assert!(matches!(err, DbmsError::Sanitize(_)), "{err:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_should_accept_last_valid_calendar_fields() {
+        let input = dt(2000, 2, 29, 23, 59, 59, 999_999, 0);
+
+        let out = TimezoneSanitizer(0)
+            .sanitize(Value::DateTime(input))
+            .unwrap();
+
+        assert_eq!(out, Value::DateTime(input));
     }
 
     #[allow(clippy::too_many_arguments)]
