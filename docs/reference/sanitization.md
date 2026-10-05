@@ -138,6 +138,12 @@ pub percentage: Uint8,
 // 0 → 0
 ```
 
+`ClampSanitizer` applies to `Int8`, `Int16`, `Int32`, and `Int64` values, while
+`ClampUnsignedSanitizer` applies to `Uint8`, `Uint16`, `Uint32`, and `Uint64`
+values. Bounds outside the range of the column's integer type are saturated to
+that range: clamping an `Int8` with `min = -1000, max = 1000` keeps every value,
+and clamping it with `min = 1000, max = 2000` yields `127`.
+
 ### DateTime Sanitizers
 
 **TimezoneSanitizer** - Convert to specific timezone
