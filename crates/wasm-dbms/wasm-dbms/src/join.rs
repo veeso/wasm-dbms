@@ -54,6 +54,22 @@ where
         from_table: &str,
         query: Query,
     ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
+        let mut table_columns: JoinedTableColumns = vec![(
+            from_table.to_string(),
+            self.schema.table_columns(from_table)?,
+        )];
+        for join in &query.joins {
+            table_columns.push((join.table.clone(), self.schema.table_columns(&join.table)?));
+        }
+
+        if let Some(filter) = &query.filter {
+            let groups: Vec<(&str, &[ColumnDef])> = table_columns
+                .iter()
+                .map(|(table, columns)| (table.as_str(), *columns))
+                .collect();
+            filter.validate_joined(&groups)?;
+        }
+
         let from_rows = self
             .schema
             .select(dbms, from_table, Query::builder().all().build())?;
@@ -64,12 +80,9 @@ where
             .collect();
         // Schema columns of the tables already in `joined_rows`, used to
         // NULL-pad outer joins even when one side has no rows.
-        let mut left_tables: JoinedTableColumns = vec![(
-            from_table.to_string(),
-            self.schema.table_columns(from_table)?,
-        )];
+        let mut left_tables: JoinedTableColumns = vec![table_columns[0].clone()];
 
-        for join in &query.joins {
+        for (join_index, join) in query.joins.iter().enumerate() {
             let (left_table, left_col) = self.resolve_column_ref(&join.left_column, from_table);
             let (_right_table_ref, right_col) =
                 self.resolve_column_ref(&join.right_column, &join.table);
@@ -91,7 +104,7 @@ where
                 keep_unmatched_right,
             )?;
 
-            let right_columns = self.schema.table_columns(&join.table)?;
+            let right_columns = table_columns[join_index + 1].1;
 
             joined_rows = self.nested_loop_join(
                 joined_rows,
@@ -951,6 +964,72 @@ mod tests {
             .inner_join("employees", "departments.id", "employees.dept_id")
             .and_where(Filter::like("employees.dept_id", "1%"))
             .build();
+        let result = db.select_join("departments", query);
+
+        assert!(
+            matches!(
+                &result,
+                Err(DbmsError::Query(QueryError::InvalidQuery(message)))
+                    if message.contains("LIKE operator can only be applied to Text values")
+            ),
+            "expected LIKE type error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_join_filter_with_ambiguous_column_returns_error_for_empty_join() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::eq("id", Value::Uint32(Uint32(1))))
+            .build();
+
+        let result = db.select_join("departments", query);
+
+        assert!(
+            matches!(
+                &result,
+                Err(DbmsError::Query(QueryError::InvalidQuery(message)))
+                    if message.contains("Ambiguous column 'id'")
+            ),
+            "expected ambiguous column error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_join_filter_with_out_of_scope_table_returns_error_for_empty_join() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::eq("projects.id", Value::Uint32(Uint32(1))))
+            .build();
+
+        let result = db.select_join("departments", query);
+
+        assert!(
+            matches!(
+                &result,
+                Err(DbmsError::Query(QueryError::InvalidQuery(message)))
+                    if message.contains("Table 'projects' not in query scope")
+            ),
+            "expected out-of-scope table error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_join_filter_with_invalid_like_operand_returns_error_for_empty_join() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::like("employees.dept_id", "1%"))
+            .build();
+
         let result = db.select_join("departments", query);
 
         assert!(

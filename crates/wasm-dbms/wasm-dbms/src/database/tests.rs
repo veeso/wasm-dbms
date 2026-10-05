@@ -941,6 +941,68 @@ fn test_transaction_delete_commit_ignores_rows_inserted_after_staging() {
     assert_eq!(rows[0].id, Some(Uint32(2)));
 }
 
+#[test]
+fn test_transaction_update_conflicts_when_captured_primary_key_is_reused() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "original");
+
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[1], Value::Text(Text("updated".to_string())))],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    assert_eq!(tx_db.update::<User>(patch).unwrap(), 1);
+
+    db.delete::<User>(
+        DeleteBehavior::Restrict,
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    )
+    .unwrap();
+    insert_user(&db, 1, "replacement");
+
+    assert!(tx_db.commit().is_err());
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].name, Some(Text("replacement".to_string())));
+}
+
+#[test]
+fn test_transaction_delete_conflicts_when_captured_primary_key_is_reused() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "original");
+
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    assert_eq!(
+        tx_db
+            .delete::<User>(
+                DeleteBehavior::Restrict,
+                Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+            )
+            .unwrap(),
+        1
+    );
+
+    db.delete::<User>(
+        DeleteBehavior::Restrict,
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    )
+    .unwrap();
+    insert_user(&db, 1, "replacement");
+
+    assert!(tx_db.commit().is_err());
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].name, Some(Text("replacement".to_string())));
+}
+
 // -- select_raw --
 
 #[test]

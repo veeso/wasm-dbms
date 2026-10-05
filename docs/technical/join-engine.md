@@ -24,9 +24,10 @@ The implementation lives in `crates/wasm-dbms/wasm-dbms/src/join.rs`.
 The engine is implemented as a generic struct:
 
 ```rust
-pub struct JoinEngine<'a, Schema: ?Sized>
+pub struct JoinEngine<'a, Schema: ?Sized, M>
 where
-    Schema: DatabaseSchema,
+    Schema: DatabaseSchema<M>,
+    M: MemoryProvider,
 {
     schema: &'a Schema,
 }
@@ -35,7 +36,7 @@ where
 Key design decisions:
 
 - **`Schema: ?Sized`** — The `?Sized` bound allows the engine to work with `Box<dyn DatabaseSchema>`, which is how the API layer passes the schema at runtime.
-- **Borrows `DatabaseSchema`** — The engine borrows the schema to read rows from tables via `schema.select(dbms, table, query)`.
+- **Borrows `DatabaseSchema`** — The engine borrows the schema to read rows via `schema.select(dbms, table, query)` and compile-time column definitions via `schema.table_columns(table)`.
 - **Stateless** — The engine holds no mutable state; it takes a `Query` and returns results in a single call.
 
 The `DatabaseSchema` trait provides the `select` method that the engine uses to read all rows from each table involved in the join.
@@ -48,43 +49,49 @@ The `join()` method processes a query through these steps:
 
 ```
 ┌──────────────────────────┐
-│ 1. Read FROM table rows  │
+│ 1. Load table schemas    │
+│    Validate filter       │
 └────────────┬─────────────┘
              │
 ┌────────────▼─────────────┐
-│ 2. For each JOIN clause:  │◄──── left-to-right
+│ 2. Read FROM table rows  │
+└────────────┬─────────────┘
+             │
+┌────────────▼─────────────┐
+│ 3. For each JOIN clause:  │◄──── left-to-right
 │    Read right table rows  │
 │    Nested-loop join       │
 └────────────┬─────────────┘
              │
 ┌────────────▼─────────────┐
-│ 3. Apply filter           │
+│ 4. Apply filter           │
 └────────────┬─────────────┘
              │
 ┌────────────▼─────────────┐
-│ 4. Apply ordering         │
+│ 5. Apply ordering         │
 └────────────┬─────────────┘
              │
 ┌────────────▼─────────────┐
-│ 5. Apply offset           │
+│ 6. Apply offset           │
 └────────────┬─────────────┘
              │
 ┌────────────▼─────────────┐
-│ 6. Apply limit            │
+│ 7. Apply limit            │
 └────────────┬─────────────┘
              │
 ┌────────────▼─────────────┐
-│ 7. Flatten to output      │
+│ 8. Flatten to output      │
 └──────────────────────────┘
 ```
 
-1. **Read FROM table**: All rows from the primary table are loaded using an unfiltered `Query::builder().all().build()`.
-2. **Process JOINs**: Each `Join` clause is processed left-to-right. For each clause, the right table is read in full, column references are resolved, and the nested-loop join is executed against the accumulated result.
-3. **Filter**: The query's filter is applied to the combined rows using `filter.matches_joined_row()`, which supports qualified `table.column` references.
-4. **Order**: Order-by clauses are applied in reverse (stable sort), so the primary sort key ends up correctly ordered.
-5. **Offset**: Rows are skipped according to the offset value.
-6. **Limit**: The result is truncated to the limit.
-7. **Flatten**: Each joined row is converted from the internal `JoinedRow` representation to the output `Vec<(JoinColumnDef, Value)>` format, applying column selection.
+1. **Load schemas and validate**: Compile-time column definitions are loaded for every table. The filter is validated against those definitions so ambiguous references, out-of-scope tables, and invalid typed operands fail even when the join produces no rows.
+2. **Read FROM table**: All rows from the primary table are loaded using an unfiltered `Query::builder().all().build()`.
+3. **Process JOINs**: Each `Join` clause is processed left-to-right. For each clause, matching rows from the right table are loaded and the nested-loop join is executed against the accumulated result.
+4. **Filter**: The validated filter is applied to the combined rows using `filter.matches_joined_row()`, which supports qualified `table.column` references.
+5. **Order**: Order-by clauses are applied in reverse (stable sort), so the primary sort key ends up correctly ordered.
+6. **Offset**: Rows are skipped according to the offset value.
+7. **Limit**: The result is truncated to the limit.
+8. **Flatten**: Each joined row is converted from the internal `JoinedRow` representation to the output `Vec<(JoinColumnDef, Value)>` format, applying column selection.
 
 ---
 
@@ -112,18 +119,18 @@ This unified approach avoids code duplication across join types while keeping th
 
 ## NULL Padding
 
-When a row has no match on the opposite side (in LEFT, RIGHT, or FULL joins), the missing columns are filled with `Value::Null`. The engine determines which columns to pad by inspecting a sample row from the opposite table:
+When a row has no match on the opposite side (in LEFT, RIGHT, or FULL joins), the missing columns are filled with `Value::Null`. The engine uses compile-time column definitions supplied by `DatabaseSchema::table_columns`:
 
 ```rust
-fn null_pad_columns(&self, sample_row: &[(ColumnDef, Value)]) -> Vec<(ColumnDef, Value)> {
-    sample_row
+fn null_pad_columns(&self, columns: &[ColumnDef]) -> Vec<(ColumnDef, Value)> {
+    columns
         .iter()
-        .map(|(col, _)| (*col, Value::Null))
+        .map(|column| (*column, Value::Null))
         .collect()
 }
 ```
 
-This preserves the correct column definitions (name, type, nullability) while setting every value to NULL. If the opposite table is empty (no sample row available), the padded group has zero columns.
+This preserves the complete row shape and column definitions even when the opposite table contains no rows. The derive-generated `DatabaseSchema` implementation supplies this metadata. Handwritten implementations remain source-compatible through the trait's default method, but must override `table_columns` to execute joins.
 
 ---
 
@@ -146,7 +153,7 @@ fn resolve_column_ref(&self, field: &str, default_table: &str) -> (String, &str)
 }
 ```
 
-For filters and ordering on joined results, the same qualified/unqualified pattern applies. Unqualified names are searched across all table groups in the row, returning the first match.
+For filters and ordering on joined results, the same qualified/unqualified pattern applies. Filter validation rejects an unqualified name that exists in multiple joined tables and asks the caller to qualify it with a table name.
 
 ---
 
