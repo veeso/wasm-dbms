@@ -3657,3 +3657,48 @@ fn select_join_with_group_by_is_rejected() {
         .expect_err("GROUP BY must be rejected on select_join");
     assert!(err.to_string().contains("GROUP BY"));
 }
+
+use wasm_dbms_api::prelude::Decimal;
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "invoices"]
+pub struct Invoice {
+    #[primary_key]
+    pub id: Uint32,
+    pub discount: Nullable<Decimal>,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(Invoice = "invoices")]
+pub struct InvoiceTestSchema;
+
+#[test]
+fn nullable_decimal_column_round_trips_value_and_null() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    InvoiceTestSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, InvoiceTestSchema);
+
+    let discount = Decimal(rust_decimal::Decimal::new(1250, 2));
+    for (id, discount) in [(1, Nullable::Value(discount)), (2, Nullable::Null)] {
+        let insert = InvoiceInsertRequest::from_values(&[
+            (Invoice::columns()[0], Value::Uint32(Uint32(id))),
+            (Invoice::columns()[1], discount.into()),
+        ])
+        .unwrap();
+        db.insert::<Invoice>(insert).unwrap();
+    }
+
+    let rows = db
+        .select_raw("invoices", Query::builder().order_by_asc("id").build())
+        .unwrap();
+    let discounts: Vec<&Value> = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .find(|(column, _)| column.name == "discount")
+                .map(|(_, value)| value)
+                .expect("discount column should be present")
+        })
+        .collect();
+    assert_eq!(discounts, vec![&Value::Decimal(discount), &Value::Null]);
+}
