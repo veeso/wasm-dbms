@@ -809,8 +809,10 @@ is promoted to the parent internal node. If the parent also overflows, the split
 propagates upward. When the root splits, a new root is created and the tree height
 increases by one.
 
-When a leaf becomes empty after deletion (and is not the root), it is unlinked from
-the leaf chain and its parent is updated.
+When a leaf becomes empty after deletion, it stays in the leaf chain and its parent
+keeps routing keys to it, so a later insert that lands in it is reachable by both
+exact-match lookups and range scans. Empty leaves are not reclaimed; lookups and range
+scans step over them.
 
 ### Index Tree Walker
 
