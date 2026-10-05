@@ -379,6 +379,10 @@ where
                 }
 
                 found_fk = true;
+                // a null foreign key references no record, so there is nothing to fetch
+                if value.is_null() {
+                    continue;
+                }
                 match fk_columns.iter_mut().find(|(lc, _)| *lc == fk.local_column) {
                     Some((_, values)) => {
                         values.insert(value.clone());

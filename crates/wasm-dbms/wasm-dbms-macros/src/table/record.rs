@@ -22,34 +22,22 @@ fn struct_def(metadata: &TableMetadata) -> TokenStream2 {
     for field in &metadata.fields {
         let name = &field.name;
 
-        // if it is a fk, use the record type
+        // if it is a fk, use the related record type; `None` both when the relation is not
+        // eager loaded and when a nullable foreign key is null
         let fk = metadata
             .foreign_keys
             .iter()
             .find(|fk| fk.field == field.name);
 
-        let ty = if let Some(fk) = fk {
+        if let Some(fk) = fk {
             let entity_record = &fk.record_type;
-            // if nullable, wrap in Nullable
-            if field.nullable {
-                quote::quote! {
-                    ::wasm_dbms_api::prelude::Nullable<Box<#entity_record>>
-                }
-            } else {
-                quote::quote! { #entity_record }
-            }
-        } else {
-            let value_ty = &field.ty;
-            quote::quote! { #value_ty }
-        };
-
-        if field.is_fk {
             fields.push(quote::quote! {
-                pub #name: Option<Box<#ty>>,
+                pub #name: Option<Box<#entity_record>>,
             });
         } else {
+            let value_ty = &field.ty;
             fields.push(quote::quote! {
-                pub #name: Option<#ty>,
+                pub #name: Option<#value_ty>,
             });
         }
     }
@@ -300,17 +288,16 @@ fn impl_to_values(metadata: &TableMetadata) -> TokenStream2 {
                 .as_ref()
                 .expect("built-in field must have value_type");
 
-            // handle nullable
-            if field.nullable {
+            if field.is_fk {
+                // do not push fk fields
+                continue;
+            } else if field.nullable {
                 field_match.push(quote::quote! {
                     match #self_field_name {
                         Some(::wasm_dbms_api::prelude::Nullable::Value(value)) => #value_type(value.clone()),
                         Some(::wasm_dbms_api::prelude::Nullable::Null) | None => ::wasm_dbms_api::prelude::Value::Null,
                     }
                 });
-            } else if field.is_fk {
-                // do not push fk fields
-                continue;
             } else {
                 field_match.push(quote::quote! {
                     match #self_field_name {

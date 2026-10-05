@@ -3745,3 +3745,82 @@ fn tuple_and_named_sanitizer_attributes_apply_on_insert() {
         Some(Decimal(rust_decimal::Decimal::new(1_235, 2)))
     );
 }
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "employees"]
+pub struct Employee {
+    #[primary_key]
+    pub id: Uint32,
+    pub name: Text,
+    #[foreign_key(entity = "Employee", table = "employees", column = "id")]
+    pub manager_id: Nullable<Uint32>,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(Employee = "employees")]
+pub struct EmployeeTestSchema;
+
+fn insert_employee(
+    db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+    id: u32,
+    name: &str,
+    manager_id: Option<u32>,
+) -> wasm_dbms_api::prelude::DbmsResult<()> {
+    let manager_id: Nullable<Uint32> = manager_id.map(Uint32).into();
+    let insert = EmployeeInsertRequest::from_values(&[
+        (Employee::columns()[0], Value::Uint32(Uint32(id))),
+        (Employee::columns()[1], Value::Text(Text(name.to_string()))),
+        (Employee::columns()[2], manager_id.into()),
+    ])
+    .unwrap();
+    db.insert::<Employee>(insert)
+}
+
+#[test]
+fn nullable_foreign_key_accepts_null_and_eager_loads_present_relation() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    EmployeeTestSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, EmployeeTestSchema);
+
+    insert_employee(&db, 1, "boss", None).unwrap();
+    insert_employee(&db, 2, "worker", Some(1)).unwrap();
+    let err = insert_employee(&db, 3, "orphan", Some(99)).unwrap_err();
+    assert!(matches!(
+        err,
+        wasm_dbms_api::prelude::DbmsError::Query(
+            wasm_dbms_api::prelude::QueryError::BrokenForeignKeyReference { .. }
+        )
+    ));
+
+    let rows = db
+        .select_raw("employees", Query::builder().order_by_asc("id").build())
+        .unwrap();
+    let managers: Vec<&Value> = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .find(|(column, _)| column.name == "manager_id")
+                .map(|(_, value)| value)
+                .expect("manager_id column should be present")
+        })
+        .collect();
+    assert_eq!(managers, vec![&Value::Null, &Value::Uint32(Uint32(1))]);
+
+    let employees = db
+        .select::<Employee>(
+            Query::builder()
+                .all()
+                .with("employees")
+                .order_by_asc("id")
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(employees.len(), 2);
+    assert_eq!(employees[0].manager_id, None);
+    let manager = employees[1]
+        .manager_id
+        .as_ref()
+        .expect("manager should be eager loaded");
+    assert_eq!(manager.id, Some(Uint32(1)));
+    assert_eq!(manager.name, Some(Text("boss".to_string())));
+}
