@@ -16,6 +16,9 @@ use crate::schema::DatabaseSchema;
 /// A row in the joined result, organized by source table.
 type JoinedRow = Vec<(String, Vec<(ColumnDef, Value)>)>;
 
+/// Schema columns of every table in a joined row, in row order.
+type JoinedTableColumns = Vec<(String, &'static [ColumnDef])>;
+
 /// Engine that executes join queries using nested-loop join.
 pub struct JoinEngine<'a, Schema: ?Sized, M>
 where
@@ -59,6 +62,12 @@ where
             .into_iter()
             .map(|row| vec![(from_table.to_string(), row)])
             .collect();
+        // Schema columns of the tables already in `joined_rows`, used to
+        // NULL-pad outer joins even when one side has no rows.
+        let mut left_tables: JoinedTableColumns = vec![(
+            from_table.to_string(),
+            self.schema.table_columns(from_table)?,
+        )];
 
         for join in &query.joins {
             let (left_table, left_col) = self.resolve_column_ref(&join.left_column, from_table);
@@ -82,16 +91,21 @@ where
                 keep_unmatched_right,
             )?;
 
+            let right_columns = self.schema.table_columns(&join.table)?;
+
             joined_rows = self.nested_loop_join(
                 joined_rows,
                 &right_rows,
+                &left_tables,
                 &join.table,
+                right_columns,
                 &left_table,
                 left_col,
                 right_col,
                 keep_unmatched_left,
                 keep_unmatched_right,
             );
+            left_tables.push((join.table.clone(), right_columns));
         }
 
         if let Some(filter) = &query.filter {
@@ -172,12 +186,19 @@ where
     }
 
     /// Unified nested-loop join.
+    ///
+    /// Unmatched rows kept by an outer join are padded with `NULL` values for
+    /// every schema column of the missing side, taken from `left_tables` and
+    /// `right_columns` rather than from sample rows, so the row shape stays
+    /// complete when that side is empty.
     #[allow(clippy::too_many_arguments)]
     fn nested_loop_join(
         &self,
         left_rows: Vec<JoinedRow>,
         right_rows: &[Vec<(ColumnDef, Value)>],
+        left_tables: &[(String, &'static [ColumnDef])],
         right_table: &str,
+        right_columns: &[ColumnDef],
         left_table: &str,
         left_col: &str,
         right_col: &str,
@@ -208,11 +229,10 @@ where
 
             if keep_unmatched_left && !matched {
                 let mut new_row = left_row.clone();
-                let null_cols = right_rows
-                    .first()
-                    .map(|sample| self.null_pad_columns(sample))
-                    .unwrap_or_default();
-                new_row.push((right_table.to_string(), null_cols));
+                new_row.push((
+                    right_table.to_string(),
+                    self.null_pad_columns(right_columns),
+                ));
                 results.push(new_row);
             }
         }
@@ -220,12 +240,12 @@ where
         if keep_unmatched_right {
             for (i, right_row) in right_rows.iter().enumerate() {
                 if !right_matched[i] {
-                    let mut new_row: JoinedRow = Vec::new();
-                    if let Some(sample_left) = left_rows.first() {
-                        for (table_name, cols) in sample_left {
-                            new_row.push((table_name.clone(), self.null_pad_columns(cols)));
-                        }
-                    }
+                    let mut new_row: JoinedRow = left_tables
+                        .iter()
+                        .map(|(table_name, columns)| {
+                            (table_name.clone(), self.null_pad_columns(columns))
+                        })
+                        .collect();
                     new_row.push((right_table.to_string(), right_row.clone()));
                     results.push(new_row);
                 }
@@ -256,12 +276,9 @@ where
             .and_then(|(_, cols)| cols.iter().find(|(c, _)| c.name == column).map(|(_, v)| v))
     }
 
-    /// Creates a NULL-padded row.
-    fn null_pad_columns(&self, sample_row: &[(ColumnDef, Value)]) -> Vec<(ColumnDef, Value)> {
-        sample_row
-            .iter()
-            .map(|(col, _)| (*col, Value::Null))
-            .collect()
+    /// Creates a NULL-padded row from a table's schema columns.
+    fn null_pad_columns(&self, columns: &[ColumnDef]) -> Vec<(ColumnDef, Value)> {
+        columns.iter().map(|col| (*col, Value::Null)).collect()
     }
 
     /// Sorts joined rows by a column.
@@ -334,7 +351,8 @@ where
 mod tests {
 
     use wasm_dbms_api::prelude::{
-        Database as _, Filter, InsertRecord as _, Query, TableSchema as _, Text, Uint32, Value,
+        Database as _, Filter, InsertRecord as _, JoinColumnDef, Query, TableSchema as _, Text,
+        Uint32, Value,
     };
     use wasm_dbms_macros::{DatabaseSchema, Table};
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
@@ -726,5 +744,144 @@ mod tests {
                     && *value == Value::Text(Text("alice".to_string()))
             })
         }));
+    }
+
+    /// Returns the value of `table.column` in a joined row, if the column is present.
+    fn joined_value<'a>(
+        row: &'a [(JoinColumnDef, Value)],
+        table: &str,
+        column: &str,
+    ) -> Option<&'a Value> {
+        row.iter()
+            .find(|(col, _)| col.table.as_deref() == Some(table) && col.name == column)
+            .map(|(_, value)| value)
+    }
+
+    /// Asserts that `row` has every department and employee column, in schema
+    /// order, and that the columns of `null_table` are all `NULL`.
+    fn assert_complete_row_with_null_side(row: &[(JoinColumnDef, Value)], null_table: &str) {
+        let shape: Vec<(Option<&str>, &str)> = row
+            .iter()
+            .map(|(col, _)| (col.table.as_deref(), col.name.as_str()))
+            .collect();
+        let expected_shape: Vec<(Option<&str>, &str)> = Department::columns()
+            .iter()
+            .map(|col| (Some("departments"), col.name))
+            .chain(
+                Employee::columns()
+                    .iter()
+                    .map(|col| (Some("employees"), col.name)),
+            )
+            .collect();
+        assert_eq!(shape, expected_shape);
+
+        for (col, value) in row {
+            if col.table.as_deref() == Some(null_table) {
+                assert_eq!(
+                    *value,
+                    Value::Null,
+                    "{null_table}.{} must be NULL",
+                    col.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_left_join_with_empty_right_table_keeps_null_right_columns() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+
+        let query = Query::builder()
+            .all()
+            .left_join("employees", "departments.id", "employees.dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_complete_row_with_null_side(&results[0], "employees");
+        assert_eq!(
+            joined_value(&results[0], "departments", "name"),
+            Some(&Value::Text(Text("eng".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_right_join_with_empty_left_table_keeps_null_left_columns() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .right_join("employees", "departments.id", "employees.dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_complete_row_with_null_side(&results[0], "departments");
+        assert_eq!(
+            joined_value(&results[0], "employees", "name"),
+            Some(&Value::Text(Text("alice".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_full_join_with_empty_right_table_keeps_null_right_columns() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+
+        let query = Query::builder()
+            .all()
+            .full_join("employees", "departments.id", "employees.dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_complete_row_with_null_side(&results[0], "employees");
+    }
+
+    #[test]
+    fn test_full_join_with_empty_left_table_keeps_null_left_columns() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .full_join("employees", "departments.id", "employees.dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_complete_row_with_null_side(&results[0], "departments");
+    }
+
+    #[test]
+    fn test_full_join_with_unmatched_rows_on_both_sides_has_stable_shape() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 999);
+
+        let query = Query::builder()
+            .all()
+            .full_join("employees", "departments.id", "employees.dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 2);
+        let eng_row = results
+            .iter()
+            .find(|row| joined_value(row, "departments", "id") == Some(&Value::Uint32(Uint32(1))))
+            .expect("eng should be in results");
+        assert_complete_row_with_null_side(eng_row, "employees");
+        let alice_row = results
+            .iter()
+            .find(|row| joined_value(row, "employees", "id") == Some(&Value::Uint32(Uint32(10))))
+            .expect("alice should be in results");
+        assert_complete_row_with_null_side(alice_row, "departments");
     }
 }
