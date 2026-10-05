@@ -549,6 +549,141 @@ fn test_transaction_pk_update_then_delete() {
     assert_eq!(rows.len(), 0);
 }
 
+// -- transaction insert/delete/reinsert of the same PK (#117) --
+
+#[test]
+fn test_transaction_insert_delete_reinsert_same_pk_is_visible_once() {
+    let ctx = setup();
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+    insert_user(&db, 1, "first");
+    let deleted = db
+        .delete::<User>(
+            DeleteBehavior::Restrict,
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        )
+        .unwrap();
+    assert_eq!(deleted, 1);
+    insert_user(&db, 1, "second");
+
+    // full-scan path
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].name, Some(Text("second".to_string())));
+
+    // index path (PK is always indexed)
+    let rows = db
+        .select::<User>(
+            Query::builder()
+                .all()
+                .and_where(Filter::eq("id", Value::Uint32(Uint32(1))))
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, Some(Text("second".to_string())));
+
+    db.commit().unwrap();
+
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].name, Some(Text("second".to_string())));
+}
+
+#[test]
+fn test_transaction_delete_committed_row_then_reinsert_same_pk_is_visible_once() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "first");
+
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+    db.delete::<User>(
+        DeleteBehavior::Restrict,
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    )
+    .unwrap();
+    insert_user(&db, 1, "second");
+
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].name, Some(Text("second".to_string())));
+
+    db.commit().unwrap();
+
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    let rows = db.select::<User>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, Some(Text("second".to_string())));
+}
+
+#[test]
+fn test_transaction_pk_update_then_reinsert_old_pk_yields_both_rows() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+    // move alice from id 1 to id 2, then reuse id 1 for a new row
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[0], Value::Uint32(Uint32(2)))],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    db.update::<User>(patch).unwrap();
+    insert_user(&db, 1, "bob");
+
+    let rows = db
+        .select::<User>(Query::builder().all().order_by_asc("id").build())
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].name, Some(Text("bob".to_string())));
+    assert_eq!(rows[1].id, Some(Uint32(2)));
+    assert_eq!(rows[1].name, Some(Text("alice".to_string())));
+
+    db.commit().unwrap();
+
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    let rows = db
+        .select::<User>(Query::builder().all().order_by_asc("id").build())
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].name, Some(Text("bob".to_string())));
+    assert_eq!(rows[1].name, Some(Text("alice".to_string())));
+}
+
+#[test]
+fn test_transaction_insert_pk_update_then_reinsert_old_pk_yields_both_rows() {
+    let ctx = setup();
+    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
+
+    // insert alice as id 1 inside the transaction, move her to id 2, reuse id 1
+    insert_user(&db, 1, "alice");
+    let patch = UserUpdateRequest::from_values(
+        &[(User::columns()[0], Value::Uint32(Uint32(2)))],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    db.update::<User>(patch).unwrap();
+    insert_user(&db, 1, "bob");
+
+    let rows = db
+        .select::<User>(Query::builder().all().order_by_asc("id").build())
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].name, Some(Text("bob".to_string())));
+    assert_eq!(rows[1].id, Some(Uint32(2)));
+    assert_eq!(rows[1].name, Some(Text("alice".to_string())));
+}
+
 // -- select_raw --
 
 #[test]

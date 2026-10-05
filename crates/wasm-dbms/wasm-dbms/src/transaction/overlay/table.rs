@@ -140,14 +140,22 @@ impl TableOverlay {
     }
 
     /// Returns an iterator over the inserted records which are still valid after the operation stack.
+    ///
+    /// Each [`Operation::Insert`] starts a new row lineage, so only the operations recorded
+    /// after that insert are replayed on top of the inserted record. A lineage which is later
+    /// deleted or superseded by a reinsert of the same primary key yields nothing, ensuring
+    /// exactly one row per live primary key. See <https://github.com/veeso/wasm-dbms/issues/117>.
     pub fn iter_inserted(&self) -> impl Iterator<Item = Vec<(ColumnDef, Value)>> {
-        self.operations.iter().filter_map(|op| {
-            if let Operation::Insert(_, record) = op {
-                self.patch_row(record.clone())
-            } else {
-                None
-            }
-        })
+        self.operations
+            .iter()
+            .enumerate()
+            .filter_map(|(position, op)| {
+                if let Operation::Insert(_, record) = op {
+                    Self::replay(record.clone(), &self.operations[position + 1..])
+                } else {
+                    None
+                }
+            })
     }
 
     /// Patches a row with the overlay changes.
@@ -158,10 +166,20 @@ impl TableOverlay {
     /// (e.g. `id: 1 → 2`) correctly chains subsequent operations keyed by
     /// the new PK value. See <https://github.com/veeso/wasm-dbms/issues/65>.
     ///
-    /// NOTE: `clippy::manual_try_fold`
-    /// this lint is TOTALLY WRONG HERE. We may have a row which first becomes None (deleted), then an insert again returns Some.
-    #[allow(clippy::manual_try_fold)]
+    /// A reinsert of the same primary key after a delete is not applied here: it starts a new
+    /// lineage which is emitted by [`Self::iter_inserted`].
     pub fn patch_row(&self, row: Vec<(ColumnDef, Value)>) -> Option<Vec<(ColumnDef, Value)>> {
+        Self::replay(row, &self.operations)
+    }
+
+    /// Replays `operations` on top of `row`, following the row's primary key across updates.
+    ///
+    /// Returns [`None`] as soon as the row is deleted, or when an insert for its current
+    /// primary key supersedes it, since the inserted record belongs to a different lineage.
+    fn replay(
+        row: Vec<(ColumnDef, Value)>,
+        operations: &[Operation],
+    ) -> Option<Vec<(ColumnDef, Value)>> {
         // get primary key value
         let mut current_pk = row
             .iter()
@@ -170,47 +188,38 @@ impl TableOverlay {
             .cloned()?;
 
         // apply all operations for this primary key to the row, tracking PK changes
-        let mut current_row = Some(row);
-        for op in &self.operations {
+        let mut current_row = row;
+        for op in operations {
             if op.primary_key_value() != &current_pk {
                 continue;
             }
-            current_row = self.apply_operation(current_row, op);
-            // If an update changed the PK column, track the new value
-            if let (Some(patched), Operation::Update(_, updates)) = (&current_row, op)
-                && let Some((_, new_pk)) = updates.iter().find(|(name, _)| {
-                    patched
-                        .iter()
-                        .any(|(col_def, _)| col_def.primary_key && col_def.name == *name)
-                })
-            {
-                current_pk = new_pk.clone();
+            match op {
+                Operation::Insert(_, _) | Operation::Delete(_) => return None,
+                Operation::Update(_, updates) => {
+                    Self::apply_update(&mut current_row, updates);
+                    // If an update changed the PK column, track the new value
+                    if let Some((_, new_pk)) = updates.iter().find(|(name, _)| {
+                        current_row
+                            .iter()
+                            .any(|(col_def, _)| col_def.primary_key && col_def.name == *name)
+                    }) {
+                        current_pk = new_pk.clone();
+                    }
+                }
             }
         }
 
-        current_row
+        Some(current_row)
     }
 
-    /// Applies a single [`Operation`] to a row.
-    fn apply_operation(
-        &self,
-        row: Option<Vec<(ColumnDef, Value)>>,
-        op: &Operation,
-    ) -> Option<Vec<(ColumnDef, Value)>> {
-        match (row, op) {
-            (_, Operation::Insert(_, record)) => Some(record.clone()), // it's definetely weird if we have `Some` row here, but just return the inserted record
-            (_, Operation::Delete(_)) => None, // row is deleted; it would be weird to have `None` row here; just return None
-            (None, Operation::Update(_, _)) => None, // trying to update a non-existing row; just return None
-            (Some(mut existing_row), Operation::Update(_, updates)) => {
-                for (col_name, new_value) in updates {
-                    if let Some((_, value)) = existing_row
-                        .iter_mut()
-                        .find(|(col_def, _)| col_def.name == *col_name)
-                    {
-                        *value = new_value.clone();
-                    }
-                }
-                Some(existing_row)
+    /// Applies the column `updates` of an [`Operation::Update`] to a row.
+    fn apply_update(row: &mut [(ColumnDef, Value)], updates: &[(&'static str, Value)]) {
+        for (col_name, new_value) in updates {
+            if let Some((_, value)) = row
+                .iter_mut()
+                .find(|(col_def, _)| col_def.name == *col_name)
+            {
+                *value = new_value.clone();
             }
         }
     }
@@ -1049,6 +1058,57 @@ mod tests {
             patched.is_none(),
             "row should be deleted after PK update + delete"
         );
+    }
+
+    #[test]
+    fn test_iter_inserted_after_insert_delete_reinsert_yields_final_row_once() {
+        // Reproduce #117: insert, delete and reinsert the same PK.
+        let mut overlay = TableOverlay::new(index_defs());
+        let pk = Value::Uint32(1.into());
+        let first = make_row(1, "Alice", 24);
+        let second = make_row(1, "Bob", 30);
+
+        overlay.insert(pk.clone(), first.clone());
+        overlay.delete(pk.clone(), &first);
+        overlay.insert(pk, second.clone());
+
+        let inserted: Vec<_> = overlay.iter_inserted().collect();
+        assert_eq!(inserted, vec![second]);
+    }
+
+    #[test]
+    fn test_iter_inserted_after_pk_update_and_reinsert_of_old_pk() {
+        // Insert PK 1, move it to PK 2, then insert a new row with PK 1.
+        let mut overlay = TableOverlay::new(index_defs());
+        let first = make_row(1, "Alice", 24);
+        overlay.insert(Value::Uint32(1.into()), first.clone());
+        overlay.update(
+            Value::Uint32(1.into()),
+            vec![("id", Value::Uint32(2.into()))],
+            &first,
+        );
+        let second = make_row(1, "Bob", 30);
+        overlay.insert(Value::Uint32(1.into()), second.clone());
+
+        let inserted: Vec<_> = overlay.iter_inserted().collect();
+        assert_eq!(inserted, vec![make_row(2, "Alice", 24), second]);
+    }
+
+    #[test]
+    fn test_patch_row_after_delete_and_reinsert_yields_none() {
+        // A base row deleted and reinserted with the same PK must be emitted once,
+        // by `iter_inserted`, not also by `patch_row` on the base row.
+        let mut overlay = TableOverlay::new(index_defs());
+        let pk = Value::Uint32(1.into());
+        let base = make_row(1, "Alice", 24);
+        let reinserted = make_row(1, "Bob", 30);
+
+        overlay.delete(pk.clone(), &base);
+        overlay.insert(pk, reinserted.clone());
+
+        assert!(overlay.patch_row(base).is_none());
+        let inserted: Vec<_> = overlay.iter_inserted().collect();
+        assert_eq!(inserted, vec![reinserted]);
     }
 
     #[test]
