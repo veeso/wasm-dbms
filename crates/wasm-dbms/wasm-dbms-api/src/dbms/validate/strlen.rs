@@ -2,6 +2,8 @@ use crate::prelude::{DbmsError, Validate, Value};
 
 /// A validator that checks if the length of a string does not exceed a maximum length.
 ///
+/// The length is the number of Unicode characters (scalar values), not bytes.
+///
 /// # Example
 ///
 /// ```rust
@@ -20,21 +22,22 @@ impl Validate for MaxStrlenValidator {
             return Err(DbmsError::Validation("Value is not a `Text`".to_string()));
         };
 
-        let s = &text.0;
+        let len = text.0.chars().count();
 
-        if s.len() <= self.0 {
+        if len <= self.0 {
             Ok(())
         } else {
             Err(DbmsError::Validation(format!(
                 "String length {} exceeds maximum allowed length of {}",
-                s.len(),
-                self.0
+                len, self.0
             )))
         }
     }
 }
 
 /// A validator that checks if the length of a string is at least a minimum length.
+///
+/// The length is the number of Unicode characters (scalar values), not bytes.
 ///
 /// # Example
 /// ```rust
@@ -53,21 +56,22 @@ impl Validate for MinStrlenValidator {
             return Err(DbmsError::Validation("Value is not a `Text`".to_string()));
         };
 
-        let s = &text.0;
+        let len = text.0.chars().count();
 
-        if s.len() >= self.0 {
+        if len >= self.0 {
             Ok(())
         } else {
             Err(DbmsError::Validation(format!(
                 "String length {} is less than minimum required length of {}",
-                s.len(),
-                self.0
+                len, self.0
             )))
         }
     }
 }
 
 /// A validator that checks if the length of a string is within a specified range.
+///
+/// The length is the number of Unicode characters (scalar values), not bytes.
 ///
 /// # Example
 ///
@@ -89,8 +93,7 @@ impl Validate for RangeStrlenValidator {
             return Err(DbmsError::Validation("Value is not a `Text`".to_string()));
         };
 
-        let s = &text.0;
-        let len = s.len();
+        let len = text.0.chars().count();
 
         if len >= self.0 && len <= self.1 {
             Ok(())
@@ -159,5 +162,28 @@ mod tests {
         let validator = RangeStrlenValidator(3, 10);
         let non_text_value = Value::Uint32(crate::prelude::Uint32(42));
         assert!(validator.validate(&non_text_value).is_err());
+    }
+
+    #[test]
+    fn test_strlen_validators_count_unicode_characters() {
+        let emoji = Value::Text(Text("🙂".to_string()));
+        let accented = Value::Text(Text("héllo".to_string()));
+
+        assert!(MaxStrlenValidator(1).validate(&emoji).is_ok());
+        assert!(MaxStrlenValidator(5).validate(&accented).is_ok());
+        assert!(MinStrlenValidator(2).validate(&emoji).is_err());
+        assert!(MinStrlenValidator(6).validate(&accented).is_err());
+        assert!(RangeStrlenValidator(1, 1).validate(&emoji).is_ok());
+        assert!(RangeStrlenValidator(2, 4).validate(&emoji).is_err());
+        assert!(RangeStrlenValidator(5, 5).validate(&accented).is_ok());
+    }
+
+    #[test]
+    fn test_strlen_validator_error_reports_character_count() {
+        let two_emoji = Value::Text(Text("🙂🙂".to_string()));
+
+        let err = MaxStrlenValidator(1).validate(&two_emoji).unwrap_err();
+
+        assert!(err.to_string().contains("String length 2 exceeds"), "{err}");
     }
 }
