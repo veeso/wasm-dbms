@@ -33,6 +33,7 @@ use crate::dbms::value::Value;
 /// | `true`/`false` | `Value::Boolean` |
 /// | Integer number | `Value::Int64` |
 /// | Float number | `Value::Decimal` |
+/// | Number outside the `Decimal` range | `Value::Json` |
 /// | String | `Value::Text` |
 /// | Array | `Value::Json` |
 /// | Object | `Value::Json` |
@@ -63,6 +64,7 @@ pub fn extract_at_path(json: &Json, segments: &[PathSegment]) -> Option<Value> {
 /// | `true`/`false` | `Value::Boolean` |
 /// | Integer number (fits i64) | `Value::Int64` |
 /// | Float number | `Value::Decimal` |
+/// | Number outside the `Decimal` range | `Value::Json` |
 /// | String | `Value::Text` |
 /// | Array | `Value::Json` |
 /// | Object | `Value::Json` |
@@ -91,8 +93,8 @@ pub fn json_value_to_dbms_value(value: &JsonValue) -> Value {
                     return Value::Decimal(d.into());
                 }
             }
-            // Fallback: shouldn't happen for valid JSON numbers
-            Value::Null
+            // The number does not fit a Decimal: keep it as JSON so it stays a present value
+            Value::Json(Json::from(value.clone()))
         }
         JsonValue::String(s) => Value::Text(s.clone().into()),
         // Arrays and objects are wrapped as JSON
@@ -296,6 +298,14 @@ mod tests {
     fn test_convert_large_integer() {
         let value = json_value_to_dbms_value(&json!(i64::MAX));
         assert_eq!(value, Value::Int64(i64::MAX.into()));
+    }
+
+    #[test]
+    fn test_convert_number_outside_decimal_range_keeps_number() {
+        for number in [json!(1e100), json!(-1e100)] {
+            let value = json_value_to_dbms_value(&number);
+            assert_eq!(value, Value::Json(Json::from(number)));
+        }
     }
 
     #[test]

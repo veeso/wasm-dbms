@@ -529,6 +529,14 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_number_outside_decimal_range_is_present_and_not_null() {
+        let json = j(json!({"n": 1e100}));
+        assert!(JsonFilter::has_key("n").matches(&json).unwrap());
+        assert!(!JsonFilter::extract_is_null("n").matches(&json).unwrap());
+        assert!(JsonFilter::extract_not_null("n").matches(&json).unwrap());
+    }
+
+    #[test]
     fn test_filter_extract_in_list() {
         let json = j(json!({"status": "active"}));
         let filter = JsonFilter::extract_in(
