@@ -25,9 +25,15 @@ pub struct DateTime {
 
 impl fmt::Display for DateTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let offset_sign = if self.timezone_offset_minutes < 0 {
+            '-'
+        } else {
+            '+'
+        };
+        let offset_minutes = self.timezone_offset_minutes.unsigned_abs();
         write!(
             f,
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}{:+03}:{:02}",
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}{}{:02}:{:02}",
             self.year,
             self.month,
             self.day,
@@ -35,8 +41,9 @@ impl fmt::Display for DateTime {
             self.minute,
             self.second,
             self.microsecond,
-            self.timezone_offset_minutes / 60,
-            self.timezone_offset_minutes % 60
+            offset_sign,
+            offset_minutes / 60,
+            offset_minutes % 60
         )
     }
 }
@@ -132,6 +139,39 @@ mod tests {
             timezone_offset_minutes: -120,
         };
         assert_eq!(date.to_string(), "2024-06-15T12:30:45.123456-02:00");
+    }
+
+    #[test]
+    fn test_date_display_formats_offset_with_single_sign() {
+        let cases = [
+            (0, "+00:00"),
+            (30, "+00:30"),
+            (-30, "-00:30"),
+            (-59, "-00:59"),
+            (-60, "-01:00"),
+            (-210, "-03:30"),
+            (330, "+05:30"),
+            (-1_439, "-23:59"),
+            (i16::MIN, "-546:08"),
+            (i16::MAX, "+546:07"),
+        ];
+
+        for (offset, expected_offset) in cases {
+            let date = DateTime {
+                year: 2024,
+                month: 6,
+                day: 15,
+                hour: 12,
+                minute: 30,
+                second: 45,
+                microsecond: 123456,
+                timezone_offset_minutes: offset,
+            };
+            assert_eq!(
+                date.to_string(),
+                format!("2024-06-15T12:30:45.123456{expected_offset}")
+            );
+        }
     }
 
     #[cfg(feature = "candid")]
