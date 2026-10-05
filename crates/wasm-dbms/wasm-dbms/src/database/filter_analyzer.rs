@@ -153,8 +153,8 @@ fn analyze_and(
         ) if left_column == right_column => Some(AnalyzedFilter {
             plan: IndexPlan::Range {
                 column: left_column,
-                start: left_start.or(right_start),
-                end: left_end.or(right_end),
+                start: stricter_bound(left_start, right_start, std::cmp::max),
+                end: stricter_bound(left_end, right_end, std::cmp::min),
             },
             remaining_filter: combine_filters(left_remaining, right_remaining),
         }),
@@ -174,6 +174,22 @@ fn analyze_and(
             remaining_filter: combine_filters(Some(left.to_owned()), analysis.remaining_filter),
         }),
         (None, None) => None,
+    }
+}
+
+/// Intersects two optional range bounds on the same column.
+///
+/// When both bounds are present, `pick` selects the stricter one: `max` for
+/// lower bounds and `min` for upper bounds. Exclusive comparisons (`>` and
+/// `<`) are kept in the residual filter by [`analyze_inner`], so choosing the
+/// inclusive value here never admits a row that an exclusive bound rejects.
+fn stricter_bound<F>(left: Option<Value>, right: Option<Value>, pick: F) -> Option<Value>
+where
+    F: FnOnce(Value, Value) -> Value,
+{
+    match (left, right) {
+        (Some(left), Some(right)) => Some(pick(left, right)),
+        (left, right) => left.or(right),
     }
 }
 
@@ -307,6 +323,96 @@ mod tests {
             analyzed.remaining_filter,
             Some(Filter::lt("name", Value::Text("z".to_string().into())))
         );
+    }
+
+    fn text(value: &str) -> Value {
+        Value::Text(value.to_string().into())
+    }
+
+    /// Asserts that both operand orders of `left AND right` plan the given
+    /// range bounds on `name`.
+    fn assert_range_in_both_orders(
+        left: Filter,
+        right: Filter,
+        start: Option<Value>,
+        end: Option<Value>,
+    ) {
+        let expected = IndexPlan::Range {
+            column: "name",
+            start,
+            end,
+        };
+        for filter in [
+            left.clone().and(right.clone()),
+            right.clone().and(left.clone()),
+        ] {
+            let analyzed = analyze_filter(&filter, single_index()).expect("analysis should exist");
+            assert_eq!(analyzed.plan, expected, "unexpected plan for {filter:?}");
+        }
+    }
+
+    #[test]
+    fn test_and_inclusive_lower_bounds_use_maximum() {
+        assert_range_in_both_orders(
+            Filter::ge("name", text("b")),
+            Filter::ge("name", text("m")),
+            Some(text("m")),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_and_exclusive_lower_bounds_use_maximum() {
+        let left = Filter::gt("name", text("b"));
+        let right = Filter::gt("name", text("m"));
+        assert_range_in_both_orders(left.clone(), right.clone(), Some(text("m")), None);
+
+        // Exclusive bounds stay in the residual filter so equal keys are trimmed.
+        let analyzed = analyze_filter(&left.clone().and(right.clone()), single_index())
+            .expect("analysis should exist");
+        assert_eq!(analyzed.remaining_filter, Some(left.and(right)));
+    }
+
+    #[test]
+    fn test_and_inclusive_upper_bounds_use_minimum() {
+        assert_range_in_both_orders(
+            Filter::le("name", text("z")),
+            Filter::le("name", text("m")),
+            None,
+            Some(text("m")),
+        );
+    }
+
+    #[test]
+    fn test_and_exclusive_upper_bounds_use_minimum() {
+        let left = Filter::lt("name", text("z"));
+        let right = Filter::lt("name", text("m"));
+        assert_range_in_both_orders(left.clone(), right.clone(), None, Some(text("m")));
+
+        let analyzed = analyze_filter(&left.clone().and(right.clone()), single_index())
+            .expect("analysis should exist");
+        assert_eq!(analyzed.remaining_filter, Some(left.and(right)));
+    }
+
+    #[test]
+    fn test_and_mixed_bounds_on_equal_value_keep_exclusive_residual() {
+        for (inclusive, exclusive) in [
+            (Filter::ge("name", text("m")), Filter::gt("name", text("m"))),
+            (Filter::le("name", text("m")), Filter::lt("name", text("m"))),
+        ] {
+            for filter in [
+                inclusive.clone().and(exclusive.clone()),
+                exclusive.clone().and(inclusive.clone()),
+            ] {
+                let analyzed =
+                    analyze_filter(&filter, single_index()).expect("analysis should exist");
+                assert_eq!(
+                    analyzed.remaining_filter,
+                    Some(exclusive.clone()),
+                    "exclusive bound must survive as residual for {filter:?}"
+                );
+            }
+        }
     }
 
     #[test]

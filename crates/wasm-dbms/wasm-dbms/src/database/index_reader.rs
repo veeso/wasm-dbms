@@ -76,6 +76,14 @@ impl IndexReader<'_> {
     where
         MA: MemoryAccess,
     {
+        // An empty range must match nothing; without this guard the exact
+        // `end` lookup below would still return records equal to `end`.
+        if let (Some(start), Some(end)) = (start, end)
+            && start > end
+        {
+            return Ok(IndexSearchResult::default());
+        }
+
         let empty_start = Vec::new();
         let start_key = start.unwrap_or(empty_start.as_slice()).to_vec();
         let end_key = end.map(ToOwned::to_owned);
