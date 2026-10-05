@@ -187,6 +187,23 @@ let filter = Filter::is_null("phone");
 let filter = Filter::not_null("avatar_url");
 ```
 
+A `NULL` value in a nullable `Text` or `Json` column never matches a `like`
+filter or a JSON filter, so the row is left out of the result instead of
+failing the query. The pattern or JSON path is still checked, and an invalid
+one returns an error. `not()` inverts the result, so a negated `like` or JSON
+filter matches `NULL` values, in the same way `ne` matches them. Combine the
+filter with `not_null` to leave `NULL` values out:
+
+```rust
+// Users whose nickname does not start with "x", without users lacking a nickname
+let filter = Filter::like("nickname", "x%")
+.not()
+.and(Filter::not_null("nickname"));
+```
+
+The same rules apply to plain queries and to join filters, where the columns
+of an unmatched side of a `LEFT`, `RIGHT`, or `FULL` join are `NULL`.
+
 ### Combining Filters
 
 Filters can be combined using logical operators:
