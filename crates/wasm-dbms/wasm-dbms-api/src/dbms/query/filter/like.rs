@@ -61,6 +61,12 @@ impl FromStr for Pattern {
             }
         }
 
+        if escape {
+            return Err(QueryError::InvalidQuery(
+                "LIKE pattern ends with a dangling escape character".to_string(),
+            ));
+        }
+
         // push remaining literal if any
         if !current_literal.is_empty() {
             tokens.push(PatternToken::Literal(current_literal));
@@ -78,6 +84,13 @@ impl From<Pattern> for Like {
 
 impl Like {
     /// Parses a SQL LIKE pattern into a [`Like`] struct.
+    ///
+    /// A backslash escapes the next character, so `\%`, `\_` and `\\` match a literal
+    /// `%`, `_` and `\`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QueryError::InvalidQuery`] if the pattern ends with an unescaped backslash.
     pub fn parse(pattern: impl AsRef<str>) -> QueryResult<Self> {
         let pattern = Pattern::from_str(pattern.as_ref())?;
         Ok(Self { pattern })
@@ -300,5 +313,22 @@ mod tests {
         let pattern = Like::parse("\u{1f600}_\u{1f600}").expect("failed to parse pattern");
         assert!(pattern.matches("\u{1f600}\u{1f60d}\u{1f600}"));
         assert!(!pattern.matches("\u{1f600}\u{1f600}"));
+    }
+
+    #[test]
+    fn test_should_reject_dangling_escape() {
+        for pattern in ["abc\\", "\\", "%\\", "abc\\\\\\"] {
+            assert!(
+                matches!(Like::parse(pattern), Err(QueryError::InvalidQuery(_))),
+                "pattern {pattern:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_should_match_trailing_escaped_backslash() {
+        let pattern = Like::parse("abc\\\\").expect("failed to parse pattern");
+        assert!(pattern.matches("abc\\"));
+        assert!(!pattern.matches("abc"));
     }
 }

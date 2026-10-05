@@ -159,7 +159,14 @@ Use `like` for pattern matching with wildcards:
 | ------- | -------------------------- |
 | `%`     | Any sequence of characters |
 | `_`     | Any single character       |
-| `%%`    | Literal `%` character      |
+| `\%`    | Literal `%` character      |
+| `\_`    | Literal `_` character      |
+| `\\`    | Literal `\` character      |
+
+A backslash escapes the character that follows it. A pattern that ends with an
+unescaped backslash, such as `abc\`, is rejected with
+`QueryError::InvalidQuery`. Write `abc\\` to match text ending with a literal
+backslash.
 
 ```rust
 // Find users whose email ends with @company.com
@@ -172,7 +179,7 @@ let filter = Filter::like("name", "Pro%");
 let filter = Filter::like("code", "__-___");
 
 // Find text containing literal %
-let filter = Filter::like("description", "%%25%% off");
+let filter = Filter::like("description", r"%25\% off%");
 ```
 
 ### Null Checks
