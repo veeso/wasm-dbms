@@ -11,7 +11,7 @@ use self::metadata::TableEntry;
 /// Entry point for the `#[derive(DatabaseSchema)]` macro.
 ///
 /// Generates `impl<M> DatabaseSchema<M> for #struct` with match-arm
-/// dispatch for all seven required trait methods, plus an inherent
+/// dispatch for every required trait method, plus an inherent
 /// `register_tables` helper.
 pub fn database_schema(input: DeriveInput) -> syn::Result<TokenStream2> {
     let metadata = self::metadata::collect_schema_metadata(&input.attrs)?;
@@ -27,9 +27,10 @@ pub fn database_schema(input: DeriveInput) -> syn::Result<TokenStream2> {
 }
 
 /// Generates `impl<M> DatabaseSchema<M> for #struct_ident` with all
-/// seven required trait methods.
+/// required trait methods.
 fn impl_database_schema(struct_ident: &syn::Ident, tables: &[TableEntry]) -> TokenStream2 {
     let select_fn = impl_select(tables);
+    let table_columns_fn = impl_table_columns(tables);
     let aggregate_fn = impl_aggregate(tables);
     let referenced_tables_fn = impl_referenced_tables(tables);
     let insert_fn = impl_insert(tables);
@@ -51,6 +52,7 @@ fn impl_database_schema(struct_ident: &syn::Ident, tables: &[TableEntry]) -> Tok
             M: ::wasm_dbms_memory::prelude::MemoryProvider,
         {
             #select_fn
+            #table_columns_fn
             #aggregate_fn
             #referenced_tables_fn
             #insert_fn
@@ -115,6 +117,34 @@ fn impl_select(tables: &[TableEntry]) -> TokenStream2 {
         ) -> ::wasm_dbms_api::prelude::DbmsResult<Vec<Vec<(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)>>> {
             use ::wasm_dbms_api::prelude::TableSchema as _;
 
+            match table_name {
+                #(#match_arms)*
+                _ => Err(::wasm_dbms_api::prelude::DbmsError::Query(
+                    ::wasm_dbms_api::prelude::QueryError::TableNotFound(table_name.to_string()),
+                )),
+            }
+        }
+    }
+}
+
+fn impl_table_columns(tables: &[TableEntry]) -> TokenStream2 {
+    let match_arms: Vec<_> = tables
+        .iter()
+        .map(|t| {
+            let entity = &t.table;
+            quote::quote! {
+                name if name == <#entity as ::wasm_dbms_api::prelude::TableSchema>::table_name() => {
+                    Ok(<#entity as ::wasm_dbms_api::prelude::TableSchema>::columns())
+                }
+            }
+        })
+        .collect();
+
+    quote::quote! {
+        fn table_columns(
+            &self,
+            table_name: &str,
+        ) -> ::wasm_dbms_api::prelude::DbmsResult<&'static [::wasm_dbms_api::prelude::ColumnDef]> {
             match table_name {
                 #(#match_arms)*
                 _ => Err(::wasm_dbms_api::prelude::DbmsError::Query(

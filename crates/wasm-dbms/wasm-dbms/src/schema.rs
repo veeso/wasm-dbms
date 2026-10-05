@@ -29,6 +29,18 @@ where
         query: Query,
     ) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>>;
 
+    /// Returns the compile-time column definitions of the given table, in
+    /// declaration order.
+    ///
+    /// Used by the join engine to emit `NULL` columns for the missing side of
+    /// an outer join, even when that table has no rows to sample.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QueryError::TableNotFound`](wasm_dbms_api::prelude::QueryError::TableNotFound)
+    /// if the table is not part of this schema.
+    fn table_columns(&self, table_name: &str) -> DbmsResult<&'static [ColumnDef]>;
+
     /// Performs a join query, returning results with column definitions
     /// that include source table names.
     fn select_join(
