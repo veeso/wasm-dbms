@@ -2132,4 +2132,25 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_should_reject_like_pattern_with_dangling_escape() {
+        let text = vec![(
+            nullable_column("name", DataTypeKind::Text),
+            Value::Text(Text("abc".to_string())),
+        )];
+        let null = vec![(nullable_column("name", DataTypeKind::Text), Value::Null)];
+
+        for values in [text, null] {
+            assert!(matches!(
+                Filter::like("name", "abc\\").matches(&values),
+                Err(QueryError::InvalidQuery(message)) if message.contains("Invalid LIKE pattern")
+            ));
+            let joined: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![("users", values)];
+            assert!(matches!(
+                Filter::like("users.name", "abc\\").matches_joined_row(&joined),
+                Err(QueryError::InvalidQuery(message)) if message.contains("Invalid LIKE pattern")
+            ));
+        }
+    }
 }

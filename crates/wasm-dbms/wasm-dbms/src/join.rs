@@ -1077,4 +1077,28 @@ mod tests {
         );
         assert_complete_row_with_null_side(&results[0], "employees");
     }
+
+    #[test]
+    fn test_join_filter_with_dangling_like_escape_returns_error() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "abc", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::like("employees.name", "abc\\"))
+            .build();
+        let result = db.select_join("departments", query);
+
+        assert!(
+            matches!(
+                &result,
+                Err(DbmsError::Query(QueryError::InvalidQuery(message)))
+                    if message.contains("Invalid LIKE pattern")
+            ),
+            "expected invalid LIKE pattern error, got {result:?}"
+        );
+    }
 }
