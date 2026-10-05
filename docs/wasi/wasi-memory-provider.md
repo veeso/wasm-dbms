@@ -120,6 +120,7 @@ The possible errors are:
 | Error                                | Cause                                           |
 | ------------------------------------ | ----------------------------------------------- |
 | `MemoryError::OutOfBounds`           | Read or write beyond allocated memory           |
+| `MemoryError::FailedToAllocatePage`  | Requested growth overflows a `u64` byte size    |
 | `MemoryError::ProviderError(String)` | File I/O failure, or file size not page-aligned |
 
 ---
