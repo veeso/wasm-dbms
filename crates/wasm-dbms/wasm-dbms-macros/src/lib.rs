@@ -45,7 +45,8 @@ mod utils;
 ///
 /// - `fn size(&self) -> MSize`
 ///   Computes the runtime-encoding size of the value by summing the
-///   sizes of all fields.
+///   sizes of all fields, saturating at `MSize::MAX` when the sum does not
+///   fit.
 ///
 /// # What the macro generates
 ///
@@ -66,7 +67,7 @@ mod utils;
 ///     const DATA_SIZE: DataSize = DataSize::Dynamic; // or DataSize::Fixed(n) if applicable
 ///
 ///     fn size(&self) -> MSize {
-///         self.id.size() + self.name.size()
+///         MSize::MIN.saturating_add(self.id.size()).saturating_add(self.name.size())
 ///     }
 ///
 ///     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {

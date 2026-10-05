@@ -65,6 +65,11 @@ impl TableRegistry {
     /// Returns the address where the record was inserted, which can be used to read it back or to update/delete it.
     ///
     /// NOTE: this function does NOT make any logical checks on the record being inserted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::DataTooLarge`] before writing anything when the
+    /// record cannot be stored on a single page.
     pub fn insert<E>(
         &mut self,
         record: E,
@@ -73,6 +78,8 @@ impl TableRegistry {
     where
         E: Encode,
     {
+        ensure_record_fits(&record, mm.page_size())?;
+
         // get position to write the record
         let raw_record = RawRecord::new(record);
         let write_at = self.get_write_position(&raw_record, mm)?;
@@ -142,6 +149,11 @@ impl TableRegistry {
     ///
     /// 1. If the new record has exactly the same size of the old record, overwrite it in place.
     /// 2. If the new record does not fit, delete the old record and insert the new record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::DataTooLarge`] before touching the old record
+    /// when the new record cannot be stored on a single page.
     pub fn update(
         &mut self,
         new_record: impl Encode,
@@ -149,6 +161,8 @@ impl TableRegistry {
         old_address: RecordAddress,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<RecordAddress> {
+        ensure_record_fits(&new_record, mm.page_size())?;
+
         if new_record.size() == old_record.size() {
             self.update_in_place(new_record, old_address, mm)
         } else {
@@ -432,6 +446,28 @@ impl TableRegistry {
             }
         }
     }
+}
+
+/// Rejects a typed record whose raw-record footprint does not fit an
+/// [`MSize`], using the same limit as the raw insert path.
+///
+/// A record whose [`Encode::size`] saturated at [`MSize::MAX`] always fails
+/// this check, so oversized values never reach [`Encode::encode`].
+///
+/// # Errors
+///
+/// Returns [`MemoryError::DataTooLarge`] when the record cannot be stored on
+/// a single page.
+fn ensure_record_fits<E>(record: &E, page_size: u64) -> MemoryResult<()>
+where
+    E: Encode,
+{
+    raw_record_footprint(
+        record.size() as usize,
+        <RawRecord<E> as Encode>::ALIGNMENT,
+        page_size,
+    )
+    .map(|_| ())
 }
 
 /// Computes the on-page footprint of a raw record with a `body_len`-byte
@@ -1777,5 +1813,70 @@ mod tests {
 
         let result = registry.delete_raw(RecordAddress::new(0, 0), MSize::MAX, 32, &mut mm);
         assert!(matches!(result, Err(MemoryError::DataTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_insert_rejects_record_that_does_not_fit_a_page() {
+        use wasm_dbms_api::prelude::Text;
+
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        // 65_533 fits the Text prefix; the others saturate `size()`.
+        for len in [65_533, 65_534, 65_536, 70_000] {
+            let result = registry.insert(Text("x".repeat(len)), &mut mm);
+            assert!(
+                matches!(result, Err(MemoryError::DataTooLarge { .. })),
+                "{len}-byte text: expected DataTooLarge, got {result:?}"
+            );
+        }
+        assert!(registry.page_ledger.pages().is_empty());
+    }
+
+    #[test]
+    fn test_insert_rejects_footprint_of_a_full_page() {
+        use wasm_dbms_api::prelude::Text;
+
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        // header(2) + prefix(2) + 65_501 = 65_505, aligned to 32 = 65_536:
+        // not an MSize, so the free-segment size would wrap on delete.
+        let result = registry.insert(Text("x".repeat(65_501)), &mut mm);
+        assert!(matches!(
+            result,
+            Err(MemoryError::DataTooLarge {
+                requested: 65_536,
+                ..
+            })
+        ));
+
+        // header(2) + prefix(2) + 65_500 = 65_504: largest storable record.
+        let text = Text("x".repeat(65_500));
+        let address = registry
+            .insert(text.clone(), &mut mm)
+            .expect("65_504-byte footprint fits");
+        let read: Text = registry.read_at(address, &mut mm).expect("read back");
+        assert_eq!(read, text);
+    }
+
+    #[test]
+    fn test_update_rejects_record_that_does_not_fit_a_page() {
+        use wasm_dbms_api::prelude::Text;
+
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+
+        let old = Text("small".to_string());
+        let address = registry.insert(old.clone(), &mut mm).expect("insert");
+
+        let result = registry.update(Text("x".repeat(70_000)), old.clone(), address, &mut mm);
+        assert!(
+            matches!(result, Err(MemoryError::DataTooLarge { .. })),
+            "expected DataTooLarge, got {result:?}"
+        );
+
+        let read: Text = registry.read_at(address, &mut mm).expect("read back");
+        assert_eq!(read, old);
     }
 }

@@ -164,7 +164,7 @@ where
     fn size(&self) -> crate::memory::MSize {
         match self {
             Nullable::Null => 1,
-            Nullable::Value(v) => 1 + v.size(),
+            Nullable::Value(v) => v.size().saturating_add(1),
         }
     }
 }
@@ -266,5 +266,20 @@ mod tests {
     fn test_should_default_nullable_to_null() {
         let default_nullable: Nullable<Int32> = Default::default();
         assert_eq!(default_nullable, Nullable::Null);
+    }
+
+    #[test]
+    fn test_should_saturate_nullable_size_when_payload_does_not_fit() {
+        use crate::dbms::types::Text;
+        use crate::memory::MSize;
+
+        // flag(1) + prefix(2) + 65_532 = MSize::MAX
+        let fits: Nullable<Text> = Nullable::Value(Text("x".repeat(65_532)));
+        assert_eq!(fits.size(), MSize::MAX);
+        let decoded = Nullable::<Text>::decode(fits.encode()).unwrap();
+        assert_eq!(decoded, fits);
+
+        let too_large: Nullable<Text> = Nullable::Value(Text("x".repeat(65_533)));
+        assert_eq!(too_large.size(), MSize::MAX);
     }
 }
