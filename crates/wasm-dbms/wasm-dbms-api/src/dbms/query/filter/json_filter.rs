@@ -161,6 +161,19 @@ impl JsonFilter {
         }
     }
 
+    /// Validates the filter's JSON path without matching any value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QueryError::InvalidQuery`](crate::dbms::query::QueryError::InvalidQuery)
+    /// if the path syntax is invalid.
+    pub(crate) fn validate(&self) -> QueryResult<()> {
+        match self {
+            JsonFilter::Contains(_) => Ok(()),
+            JsonFilter::Extract(path, _) | JsonFilter::HasKey(path) => parse_path(path).map(|_| ()),
+        }
+    }
+
     /// Creates a `Contains` filter with the given JSON pattern.
     pub fn contains(pattern: Json) -> Self {
         JsonFilter::Contains(pattern)

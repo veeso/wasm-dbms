@@ -145,26 +145,11 @@ impl Filter {
             }
             Filter::Json(field, json_filter) => {
                 let col_value = Self::resolve_joined_column(field, table_groups)?;
-                let json = col_value.and_then(|v| v.as_json()).ok_or_else(|| {
-                    QueryError::InvalidQuery(format!("Column '{field}' is not a Json type"))
-                })?;
-                return json_filter.matches(json);
+                return Self::matches_json(field, json_filter, col_value);
             }
             Filter::Like(field, pattern) => {
                 let col_value = Self::resolve_joined_column(field, table_groups)?;
-                if let Some(Value::Text(Text(text))) = col_value {
-                    return Ok(like::Like::parse(pattern)
-                        .map_err(|e| {
-                            QueryError::InvalidQuery(format!("Invalid LIKE pattern {pattern}: {e}"))
-                        })?
-                        .matches(text));
-                }
-                if col_value.is_some() {
-                    return Err(QueryError::InvalidQuery(
-                        "LIKE operator can only be applied to Text values".to_string(),
-                    ));
-                }
-                false
+                return col_value.map_or(Ok(false), |value| Self::matches_like(pattern, value));
             }
             Filter::NotNull(field) => {
                 let col_value = Self::resolve_joined_column(field, table_groups)?;
@@ -309,6 +294,51 @@ impl Filter {
         }
     }
 
+    /// Returns the value of the column named `field`, if present.
+    fn find_column<'a>(field: &str, values: &'a [(ColumnDef, Value)]) -> Option<&'a Value> {
+        values
+            .iter()
+            .find(|(col, _)| col.name == field)
+            .map(|(_, val)| val)
+    }
+
+    /// Matches a column value against a JSON filter.
+    ///
+    /// A [`Value::Null`] column never matches, but the filter path is still validated.
+    fn matches_json(
+        field: &str,
+        json_filter: &JsonFilter,
+        value: Option<&Value>,
+    ) -> QueryResult<bool> {
+        match value {
+            Some(Value::Json(json)) => json_filter.matches(json),
+            Some(Value::Null) => json_filter.validate().map(|()| false),
+            _ => Err(QueryError::InvalidQuery(format!(
+                "Column '{field}' is not a Json type"
+            ))),
+        }
+    }
+
+    /// Matches a column value against a LIKE pattern.
+    ///
+    /// A [`Value::Null`] column never matches, but the pattern is still validated.
+    fn matches_like(pattern: &str, value: &Value) -> QueryResult<bool> {
+        let text = match value {
+            Value::Text(Text(text)) => Some(text),
+            Value::Null => None,
+            _ => {
+                return Err(QueryError::InvalidQuery(
+                    "LIKE operator can only be applied to Text values".to_string(),
+                ));
+            }
+        };
+        let like = like::Like::parse(pattern).map_err(|e| {
+            QueryError::InvalidQuery(format!("Invalid LIKE pattern {pattern}: {e}"))
+        })?;
+
+        Ok(text.is_some_and(|text| like.matches(text)))
+    }
+
     /// Checks if the given values match the filter.
     pub fn matches(&self, values: &[(ColumnDef, Value)]) -> QueryResult<bool> {
         let res = match self {
@@ -334,33 +364,12 @@ impl Filter {
                 .iter()
                 .any(|(col, val)| col.name == *field && list.iter().any(|v| v == val)),
             Filter::Json(field, json_filter) => {
-                let json = values
-                    .iter()
-                    .find(|(col, _)| col.name == *field)
-                    .and_then(|(_, val)| val.as_json())
-                    .ok_or_else(|| {
-                        QueryError::InvalidQuery(format!("Column '{field}' is not a Json type"))
-                    })?;
-                return json_filter.matches(json);
+                let col_value = Self::find_column(field, values);
+                return Self::matches_json(field, json_filter, col_value);
             }
             Filter::Like(field, pattern) => {
-                for (col, val) in values {
-                    if col.name == *field {
-                        if let Value::Text(Text(text)) = val {
-                            return Ok(like::Like::parse(pattern)
-                                .map_err(|e| {
-                                    QueryError::InvalidQuery(format!(
-                                        "Invalid LIKE pattern {pattern}: {e}"
-                                    ))
-                                })?
-                                .matches(text));
-                        }
-                        return Err(QueryError::InvalidQuery(
-                            "LIKE operator can only be applied to Text values".to_string(),
-                        ));
-                    }
-                }
-                false
+                return Self::find_column(field, values)
+                    .map_or(Ok(false), |value| Self::matches_like(pattern, value));
             }
             Filter::NotNull(field) => values
                 .iter()
@@ -2015,5 +2024,112 @@ mod tests {
         )];
         // LIKE on a missing column returns false
         assert!(!filter.matches_joined_row(&values).unwrap());
+    }
+
+    /// Returns a nullable column definition with the given name and type.
+    fn nullable_column(name: &'static str, data_type: DataTypeKind) -> ColumnDef {
+        ColumnDef {
+            name,
+            data_type,
+            auto_increment: false,
+            nullable: true,
+            primary_key: false,
+            unique: false,
+            foreign_key: None,
+            default: None,
+            renamed_from: &[],
+        }
+    }
+
+    /// Returns JSON filters covering every [`JsonFilter`] operation.
+    fn every_json_filter() -> Vec<JsonFilter> {
+        use std::str::FromStr;
+
+        use crate::dbms::types::Json;
+
+        vec![
+            JsonFilter::contains(Json::from_str(r#"{"a": 1}"#).unwrap()),
+            JsonFilter::has_key("a"),
+            JsonFilter::extract_eq("a", Value::Int32(1.into())),
+            JsonFilter::extract_is_null("a"),
+            JsonFilter::extract_not_null("a"),
+        ]
+    }
+
+    #[test]
+    fn test_should_not_match_like_on_null_text() {
+        let values = vec![(nullable_column("name", DataTypeKind::Text), Value::Null)];
+
+        assert!(!Filter::like("name", "%x%").matches(&values).unwrap());
+        assert!(!Filter::like("name", "%").matches(&values).unwrap());
+        assert!(Filter::like("name", "%x%").not().matches(&values).unwrap());
+    }
+
+    #[test]
+    fn test_should_not_match_json_filters_on_null_json() {
+        let values = vec![(nullable_column("data", DataTypeKind::Json), Value::Null)];
+
+        for json_filter in every_json_filter() {
+            let filter = Filter::json("data", json_filter.clone());
+            assert!(
+                !filter.matches(&values).unwrap(),
+                "{json_filter:?} must not match NULL"
+            );
+            assert!(
+                filter.not().matches(&values).unwrap(),
+                "NOT {json_filter:?} must match NULL"
+            );
+        }
+    }
+
+    #[test]
+    fn test_should_reject_invalid_json_path_on_null_json() {
+        let values = vec![(nullable_column("data", DataTypeKind::Json), Value::Null)];
+
+        let filter = Filter::json("data", JsonFilter::has_key("a..b"));
+        assert!(matches!(
+            filter.matches(&values),
+            Err(QueryError::InvalidQuery(_))
+        ));
+    }
+
+    #[test]
+    fn test_should_not_match_like_on_null_text_in_joined_row() {
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "users",
+            vec![(nullable_column("name", DataTypeKind::Text), Value::Null)],
+        )];
+
+        assert!(
+            !Filter::like("users.name", "%x%")
+                .matches_joined_row(&values)
+                .unwrap()
+        );
+        assert!(
+            Filter::like("users.name", "%x%")
+                .not()
+                .matches_joined_row(&values)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_should_not_match_json_filters_on_null_json_in_joined_row() {
+        let values: Vec<(&str, Vec<(ColumnDef, Value)>)> = vec![(
+            "posts",
+            vec![(nullable_column("data", DataTypeKind::Json), Value::Null)],
+        )];
+
+        for json_filter in every_json_filter() {
+            let filter = Filter::json("posts.data", json_filter.clone());
+            assert!(
+                !filter.matches_joined_row(&values).unwrap(),
+                "{json_filter:?} must not match NULL"
+            );
+            assert!(
+                filter.not().matches_joined_row(&values).unwrap(),
+                "NOT {json_filter:?} must match NULL"
+            );
+        }
     }
 }

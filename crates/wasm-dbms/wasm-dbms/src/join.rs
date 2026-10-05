@@ -1041,4 +1041,40 @@ mod tests {
             "expected LIKE type error, got {result:?}"
         );
     }
+
+    #[test]
+    fn test_left_join_like_filter_skips_null_padded_rows() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .left_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::like("employees.name", "a%"))
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            joined_value(&results[0], "employees", "name"),
+            Some(&Value::Text(Text("alice".to_string())))
+        );
+
+        let query = Query::builder()
+            .all()
+            .left_join("employees", "departments.id", "employees.dept_id")
+            .and_where(Filter::like("employees.name", "a%").not())
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            joined_value(&results[0], "departments", "name"),
+            Some(&Value::Text(Text("hr".to_string())))
+        );
+        assert_complete_row_with_null_side(&results[0], "employees");
+    }
 }

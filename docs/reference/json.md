@@ -214,6 +214,10 @@ let filter = Filter::json("metadata",
 | `extract_is_null(path)`    | Path doesn't exist or is null |
 | `extract_not_null(path)`   | Path exists and is not null   |
 
+`extract_is_null` checks for a JSON `null` inside a stored document. A
+nullable `Json` column holding `NULL` matches no JSON filter, including
+`extract_is_null`. Use `Filter::is_null` to find those rows.
+
 ### HasKey (Path Existence)
 
 Check if a path exists in the JSON:
