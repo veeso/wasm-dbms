@@ -3702,3 +3702,46 @@ fn nullable_decimal_column_round_trips_value_and_null() {
         .collect();
     assert_eq!(discounts, vec![&Value::Decimal(discount), &Value::Null]);
 }
+
+use wasm_dbms_api::prelude::{ClampSanitizer, Int32, RoundToScaleSanitizer};
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "payments"]
+pub struct Payment {
+    #[primary_key]
+    pub id: Uint32,
+    #[sanitizer(ClampSanitizer, min = 0, max = 100)]
+    pub score: Int32,
+    #[sanitizer(RoundToScaleSanitizer(2))]
+    pub amount: Decimal,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(Payment = "payments")]
+pub struct PaymentTestSchema;
+
+#[test]
+fn tuple_and_named_sanitizer_attributes_apply_on_insert() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    PaymentTestSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, PaymentTestSchema);
+
+    let insert = PaymentInsertRequest::from_values(&[
+        (Payment::columns()[0], Value::Uint32(Uint32(1))),
+        (Payment::columns()[1], Value::Int32(Int32(250))),
+        (
+            Payment::columns()[2],
+            Value::Decimal(Decimal(rust_decimal::Decimal::new(12_346, 3))),
+        ),
+    ])
+    .unwrap();
+    db.insert::<Payment>(insert).unwrap();
+
+    let rows = db.select::<Payment>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].score, Some(Int32(100)));
+    assert_eq!(
+        rows[0].amount,
+        Some(Decimal(rust_decimal::Decimal::new(1_235, 2)))
+    );
+}
