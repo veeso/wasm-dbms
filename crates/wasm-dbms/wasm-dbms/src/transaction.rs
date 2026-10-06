@@ -197,7 +197,8 @@ mod tests {
         let patch = ItemUpdateRequest::from_values(
             &[(Item::columns()[1], Value::Text(Text("bar".to_string())))],
             Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-        );
+        )
+        .unwrap();
         let current_row = vec![
             (Item::columns()[0], Value::Uint32(Uint32(1))),
             (Item::columns()[1], Value::Text(Text("foo".to_string()))),
@@ -217,7 +218,8 @@ mod tests {
         let patch = ItemUpdateRequest::from_values(
             &[(Item::columns()[1], Value::Text(Text("bar".to_string())))],
             Some(Filter::eq("name", Value::Text(Text("foo".to_string())))),
-        );
+        )
+        .unwrap();
         let rows = vec![
             (
                 Value::Uint32(Uint32(1)),

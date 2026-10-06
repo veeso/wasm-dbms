@@ -114,7 +114,10 @@ impl UpdateRecord for UserUpdateRequest {
     type Record = UserRecord;
     type Schema = User;
 
-    fn from_values(values: &[(ColumnDef, Value)], where_clause: Option<Filter>) -> Self {
+    fn from_values(
+        values: &[(ColumnDef, Value)],
+        where_clause: Option<Filter>,
+    ) -> DbmsResult<Self> {
         let mut id = None;
         let mut name = None;
 
@@ -134,11 +137,11 @@ impl UpdateRecord for UserUpdateRequest {
             }
         }
 
-        UserUpdateRequest {
+        Ok(UserUpdateRequest {
             id,
             name,
             where_clause,
-        }
+        })
     }
 
     fn update_values(&self) -> Vec<(ColumnDef, crate::dbms::value::Value)> {

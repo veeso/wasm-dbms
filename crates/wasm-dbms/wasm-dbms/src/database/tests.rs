@@ -311,7 +311,8 @@ fn test_update_record() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("alicia".to_string())))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     let count = db.update::<User>(patch).unwrap();
     assert_eq!(count, 1);
 
@@ -389,7 +390,8 @@ fn test_update_rejects_oversized_text_and_keeps_original_row() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("x".repeat(70_000))))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     let result = db.update::<User>(patch);
     assert!(
         matches!(
@@ -466,7 +468,8 @@ fn test_update_no_matching_records() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("bob".to_string())))],
         Some(Filter::eq("id", Value::Uint32(Uint32(999)))),
-    );
+    )
+    .unwrap();
     let count = db.update::<User>(patch).unwrap();
     assert_eq!(count, 0);
 }
@@ -574,7 +577,8 @@ fn test_transaction_update_and_commit() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("alicia".to_string())))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<User>(patch).unwrap();
     db.commit().unwrap();
 
@@ -625,14 +629,16 @@ fn test_transaction_pk_update_then_column_update_and_commit() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[0], Value::Uint32(Uint32(10)))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<User>(patch).unwrap();
 
     // Step 2: update name on the same row (now keyed by id=10)
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("alicia".to_string())))],
         Some(Filter::eq("id", Value::Uint32(Uint32(10)))),
-    );
+    )
+    .unwrap();
     db.update::<User>(patch).unwrap();
 
     // Verify within transaction: select should return the row with both updates
@@ -665,7 +671,8 @@ fn test_transaction_pk_update_then_delete() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[0], Value::Uint32(Uint32(10)))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<User>(patch).unwrap();
 
     // Step 2: delete the row by new PK
@@ -773,7 +780,8 @@ fn test_transaction_pk_update_then_reinsert_old_pk_yields_both_rows() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[0], Value::Uint32(Uint32(2)))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<User>(patch).unwrap();
     insert_user(&db, 1, "bob");
 
@@ -808,7 +816,8 @@ fn test_transaction_insert_pk_update_then_reinsert_old_pk_yields_both_rows() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[0], Value::Uint32(Uint32(2)))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<User>(patch).unwrap();
     insert_user(&db, 1, "bob");
 
@@ -835,7 +844,8 @@ fn test_transaction_update_commit_ignores_rows_inserted_after_staging() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("new".to_string())))],
         Some(Filter::eq("name", Value::Text(Text("old".to_string())))),
-    );
+    )
+    .unwrap();
     let staged = tx_db.update::<User>(patch).unwrap();
     assert_eq!(staged, 1);
 
@@ -876,7 +886,8 @@ fn test_transaction_update_commit_includes_rows_inserted_in_same_transaction() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("new".to_string())))],
         Some(Filter::eq("name", Value::Text(Text("old".to_string())))),
-    );
+    )
+    .unwrap();
     let staged = tx_db.update::<User>(patch).unwrap();
     assert_eq!(staged, 2);
 
@@ -904,7 +915,8 @@ fn test_transaction_update_matching_no_rows_does_not_update_later_insertions() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("new".to_string())))],
         Some(Filter::eq("name", Value::Text(Text("old".to_string())))),
-    );
+    )
+    .unwrap();
     assert_eq!(tx_db.update::<User>(patch).unwrap(), 0);
 
     insert_user(&db, 1, "old");
@@ -952,7 +964,8 @@ fn test_transaction_update_conflicts_when_captured_primary_key_is_reused() {
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("updated".to_string())))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     assert_eq!(tx_db.update::<User>(patch).unwrap(), 1);
 
     db.delete::<User>(
@@ -1593,7 +1606,8 @@ fn test_update_on_indexed_column_filter() {
     let patch = NameIndexedUserUpdateRequest::from_values(
         &[(NameIndexedUser::columns()[2], Value::Uint32(Uint32(99)))],
         Some(Filter::eq("name", Value::Text(Text("alice".to_string())))),
-    );
+    )
+    .unwrap();
     let count = db.update::<NameIndexedUser>(patch).unwrap();
     assert_eq!(count, 2);
 
@@ -2182,7 +2196,8 @@ fn test_update_non_indexed_column_preserves_index() {
             Value::Text(Text("alice@example.com".to_string())),
         )],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<IndexedUser>(patch).unwrap();
 
     let table_registry = db.load_table_registry::<IndexedUser>().unwrap();
@@ -2217,7 +2232,8 @@ fn test_update_indexed_column_updates_index() {
             Value::Text(Text("new@example.com".to_string())),
         )],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<IndexedUser>(patch).unwrap();
 
     let table_registry = db.load_table_registry::<IndexedUser>().unwrap();
@@ -2343,7 +2359,8 @@ fn test_update_contract_code_to_unique_value_succeeds() {
             Value::Text(Text("CONTRACT-999".to_string())),
         )],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<Contract>(patch).unwrap();
 
     let rows = db
@@ -2368,7 +2385,8 @@ fn test_update_contract_keeping_same_code_succeeds() {
     let patch = ContractUpdateRequest::from_values(
         &[(Contract::columns()[2], Value::Uint32(Uint32(2)))],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     db.update::<Contract>(patch).unwrap();
 }
 
@@ -2386,7 +2404,8 @@ fn test_update_contract_code_to_existing_value_fails() {
             Value::Text(Text("CONTRACT-001".to_string())),
         )],
         Some(Filter::eq("id", Value::Uint32(Uint32(2)))),
-    );
+    )
+    .unwrap();
     let result = db.update::<Contract>(patch);
     assert!(matches!(
         result,
@@ -3833,7 +3852,8 @@ fn update_manager(
     let patch = EmployeeUpdateRequest::from_values(
         &[(Employee::columns()[2], manager_id)],
         Some(Filter::eq("id", Value::Uint32(Uint32(id)))),
-    );
+    )
+    .unwrap();
     db.update::<Employee>(patch)
 }
 
@@ -4141,7 +4161,8 @@ fn table_fields_named_like_generated_locals_round_trip() {
             (columns[6], Value::from(priority(5))),
         ],
         Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-    );
+    )
+    .unwrap();
     assert_eq!(db.update::<ShadowingRow>(patch).unwrap(), 1);
 
     let rows = db
@@ -4207,4 +4228,106 @@ fn encode_derive_supports_empty_structs() {
     assert_eq!(<WithEmptyField as Encode>::SIZE, DataSize::Fixed(4));
     assert_eq!(<WithEmptyField as Encode>::ALIGNMENT, 4);
     assert_eq!(WithEmptyField::decode(nested.encode()).unwrap(), nested);
+}
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "key_users"]
+pub struct KeyUser {
+    #[primary_key]
+    pub id: Uint32,
+    #[unique]
+    pub code: Uint32,
+    pub nickname: Nullable<Text>,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(KeyUser = "key_users")]
+pub struct KeySchema;
+
+fn key_user_code(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>) -> Option<Uint32> {
+    db.select::<KeyUser>(Query::builder().build()).unwrap()[0].code
+}
+
+#[test]
+fn dynamic_update_rejects_a_wrong_typed_field() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    KeySchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, KeySchema);
+    db.insert::<KeyUser>(KeyUserInsertRequest {
+        id: 1.into(),
+        code: 10.into(),
+        nickname: Nullable::Null,
+    })
+    .unwrap();
+
+    let result = KeySchema.update(
+        &db,
+        "key_users",
+        &[(KeyUser::columns()[1], Value::Text("wrong type".into()))],
+        None,
+    );
+    assert!(matches!(
+        result,
+        Err(wasm_dbms_api::prelude::DbmsError::Query(
+            wasm_dbms_api::prelude::QueryError::InvalidQuery(_)
+        ))
+    ));
+    assert_eq!(key_user_code(&db), Some(Uint32(10)));
+
+    // null is only accepted by nullable columns
+    let result = KeySchema.update(
+        &db,
+        "key_users",
+        &[(KeyUser::columns()[1], Value::Null)],
+        None,
+    );
+    assert!(result.is_err());
+    assert_eq!(key_user_code(&db), Some(Uint32(10)));
+    let result = KeySchema.update(
+        &db,
+        "key_users",
+        &[
+            (KeyUser::columns()[1], Value::Uint32(Uint32(11))),
+            (KeyUser::columns()[2], Value::Null),
+        ],
+        None,
+    );
+    assert_eq!(result.unwrap(), 1);
+    assert_eq!(key_user_code(&db), Some(Uint32(11)));
+}
+
+#[test]
+fn dynamic_update_rejects_a_custom_value_of_another_type() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    GenericRowTestSchema::<Priority>::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, GenericRowTestSchema::<Priority>::new());
+    let payload = Priority {
+        level: wasm_dbms_api::prelude::Uint8(1),
+    };
+    db.insert::<GenericRow<Priority>>(GenericRowInsertRequest {
+        id: Uint32(1),
+        payload: payload.clone(),
+    })
+    .unwrap();
+
+    let columns = GenericRow::<Priority>::columns();
+    let wrong_tag = Value::Custom(wasm_dbms_api::prelude::CustomValue {
+        type_tag: "not_a_priority".to_string(),
+        encoded: vec![7],
+        display: "7".to_string(),
+    });
+    for wrong in [wrong_tag, Value::Uint32(Uint32(7))] {
+        let result = GenericRowTestSchema::<Priority>::new().update(
+            &db,
+            "generic_rows",
+            &[(columns[1], wrong)],
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    let rows = db
+        .select::<GenericRow<Priority>>(Query::builder().build())
+        .unwrap();
+    assert_eq!(rows[0].payload, Some(payload));
 }

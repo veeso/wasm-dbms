@@ -325,7 +325,7 @@ fn impl_update(tables: &[TableEntry]) -> TokenStream2 {
             let entity = &t.table;
             quote::quote! {
                 name if name == <#entity as ::wasm_dbms_api::prelude::TableSchema>::table_name() => {
-                    let update_request = <<#entity as ::wasm_dbms_api::prelude::TableSchema>::Update as ::wasm_dbms_api::prelude::UpdateRecord>::from_values(patch_values, filter);
+                    let update_request = <<#entity as ::wasm_dbms_api::prelude::TableSchema>::Update as ::wasm_dbms_api::prelude::UpdateRecord>::from_values(patch_values, filter)?;
                     dbms.update::<#entity>(update_request)
                 }
             }

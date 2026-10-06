@@ -201,7 +201,8 @@ mod tests {
                 Value::Text(Text("CONTRACT-999".to_string())),
             )],
             Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-        );
+        )
+        .unwrap();
         assert!(db.update::<Contract>(patch).is_ok());
     }
 
@@ -219,7 +220,8 @@ mod tests {
                 Value::Text(Text("CONTRACT-001".to_string())),
             )],
             Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
-        );
+        )
+        .unwrap();
         assert!(db.update::<Contract>(patch).is_ok());
     }
 
@@ -238,7 +240,8 @@ mod tests {
                 Value::Text(Text("CONTRACT-001".to_string())),
             )],
             Some(Filter::eq("id", Value::Uint32(Uint32(2)))),
-        );
+        )
+        .unwrap();
         let result = db.update::<Contract>(patch);
         assert!(result.is_err());
         assert!(matches!(

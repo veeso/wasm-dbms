@@ -66,7 +66,16 @@ pub trait UpdateRecord: Sized + Clone {
     type Schema: TableSchema<Record = Self::Record>;
 
     /// Creates an update record from a list of column [`Value`]s and an optional [`Filter`] for the where clause.
-    fn from_values(values: &[(ColumnDef, Value)], where_clause: Option<Filter>) -> Self;
+    ///
+    /// Values for columns that are not part of the table are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a value does not match the type of its column: a value of another
+    /// type, [`Value::Null`] for a non-nullable column, or a custom value with another type tag
+    /// or an undecodable payload.
+    fn from_values(values: &[(ColumnDef, Value)], where_clause: Option<Filter>)
+    -> DbmsResult<Self>;
 
     /// Get the list of column [`Value`]s to be updated.
     fn update_values(&self) -> Vec<(ColumnDef, Value)>;

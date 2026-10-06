@@ -349,7 +349,7 @@ let result = database.update::<User>(
     UserUpdateRequest::from_values(
         &[(email_col, Value::Text("alice@example.com".into()))],
         Some(Filter::eq("id", Value::Uint32(2.into()))),
-    ),
+    )?,
 );
 ```
 
@@ -493,6 +493,10 @@ match result {
 - Invalid JSON paths (trailing dots, unclosed brackets)
 - Applying JSON filter to non-JSON column
 - Type mismatches in comparisons
+- Update patch value whose type does not match its column, built with
+  `UpdateRecord::from_values` or sent through the dynamic schema update
+  (`"column '<col>' does not accept a value of type <type>"`); `Null` is accepted
+  only by nullable columns
 - Aggregate-specific:
   - `SUM` or `AVG` on non-numeric column
     (`"aggregate requires numeric column: '<col>'"`)

@@ -116,45 +116,33 @@ fn impl_update_record(
 /// ```
 ///
 /// ```rust,ignore
-/// fn from_values(values: &[(ColumnDef, Value)], where_clause: Option<Filter>) -> Self {
+/// fn from_values(values: &[(ColumnDef, Value)], where_clause: Option<Filter>) -> DbmsResult<Self> {
 ///    let mut id: Option<Uint32> = None;
 ///    let mut title: Option<Text> = None;
 ///    let mut content: Option<Text> = None;
 ///    let mut user_id: Option<Uint32> = None;
 ///
 ///    for (column, value) in values {
-///        match __wasm_dbms_column.name {
+///        match column.name {
 ///            "id" => {
-///                if let Value::Uint32(v) = value {
-///                    id = Some(*v);
-///                }
+///                id = Some(match value {
+///                    Value::Uint32(v) => v.clone(),
+///                    _ => return Err(/* QueryError::InvalidQuery: wrong value type */),
+///                });
 ///            }
-///            "title" => {
-///                if let Value::Text(v) = value {
-///                    title = Some(v.clone());
-///                }
-///            }
-///            "content" => {
-///                if let Value::Text(v) = value {
-///                    content = Some(v.clone());
-///                }
-///            }
-///            "user_id" => {
-///                if let Value::Uint32(v) = value {
-///                    user_id = Some(*v);
-///                }
-///            }
+///            // ... same for `title`, `content` and `user_id`; nullable columns also
+///            // accept `Value::Null`, custom columns accept a `Value::Custom` with their tag
 ///            _ => { /* Ignore unknown columns */ }
 ///        }
 ///    }
 ///
-///    Self {
+///    Ok(Self {
 ///        id,
 ///        title,
 ///        content,
 ///        user_id,
 ///        where_clause,
-///    }
+///    })
 ///}
 /// ```
 fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
@@ -171,65 +159,76 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
     for field in &metadata.fields {
         let field_name = &field.name;
         let field_name_str = field.name.to_string();
+        let mismatch = quote::quote! {
+            return Err(::wasm_dbms_api::prelude::DbmsError::Query(
+                ::wasm_dbms_api::prelude::QueryError::InvalidQuery(format!(
+                    "column '{column}' does not accept a value of type {value_type}",
+                    column = #field_name_str,
+                    value_type = __col_value.type_name(),
+                )),
+            ))
+        };
 
-        if field.custom_type {
+        // the value accepted for the column, converted to the field type
+        let accepted = if field.custom_type {
             let custom_ident = field
                 .custom_type_path
                 .as_ref()
                 .expect("custom_type field must have custom_type_path");
-            if field.nullable {
-                match_arms.push(quote::quote! {
-                    #field_name_str => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(__wasm_dbms_custom) = __col_value {
-                            if let Ok(__wasm_dbms_decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
-                                std::borrow::Cow::Borrowed(&__wasm_dbms_custom.encoded)
-                            ) {
-                                #field_name = Some(::wasm_dbms_api::prelude::Nullable::Value(__wasm_dbms_decoded));
-                            }
-                        } else if let ::wasm_dbms_api::prelude::Value::Null = __col_value {
-                            #field_name = Some(::wasm_dbms_api::prelude::Nullable::Null);
-                        }
-                    }
-                })
+            let decoded = quote::quote! {
+                match <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
+                    std::borrow::Cow::Borrowed(&__wasm_dbms_custom.encoded)
+                ) {
+                    Ok(__wasm_dbms_decoded) => __wasm_dbms_decoded,
+                    Err(_) => #mismatch,
+                }
+            };
+            let decoded = if field.nullable {
+                quote::quote! { ::wasm_dbms_api::prelude::Nullable::Value(#decoded) }
             } else {
-                match_arms.push(quote::quote! {
-                    #field_name_str => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(__wasm_dbms_custom) = __col_value {
-                            if let Ok(__wasm_dbms_decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
-                                std::borrow::Cow::Borrowed(&__wasm_dbms_custom.encoded)
-                            ) {
-                                #field_name = Some(__wasm_dbms_decoded);
-                            }
-                        }
-                    }
-                })
+                decoded
+            };
+            quote::quote! {
+                ::wasm_dbms_api::prelude::Value::Custom(__wasm_dbms_custom)
+                    if __wasm_dbms_custom.type_tag
+                        == <#custom_ident as ::wasm_dbms_api::prelude::CustomDataType>::TYPE_TAG =>
+                {
+                    #decoded
+                }
             }
         } else {
             let value_type = field
                 .value_type
                 .as_ref()
                 .expect("built-in field must have value_type");
-
             if field.nullable {
-                match_arms.push(quote::quote! {
-                    #field_name_str => {
-                        if let #value_type(__inner_value) = __col_value {
-                            #field_name = Some(::wasm_dbms_api::prelude::Nullable::Value(__inner_value.clone()));
-                        } else if let ::wasm_dbms_api::prelude::Value::Null = __col_value {
-                            #field_name = Some(::wasm_dbms_api::prelude::Nullable::Null);
-                        }
-                    }
-                })
+                quote::quote! {
+                    #value_type(__inner_value) => ::wasm_dbms_api::prelude::Nullable::Value(__inner_value.clone()),
+                }
             } else {
-                match_arms.push(quote::quote! {
-                    #field_name_str => {
-                        if let #value_type(__inner_value) = __col_value {
-                            #field_name = Some(__inner_value.clone());
-                        }
-                    }
-                })
+                quote::quote! {
+                    #value_type(__inner_value) => __inner_value.clone(),
+                }
             }
-        }
+        };
+        // `Value::Null` is accepted only by nullable columns
+        let null = if field.nullable {
+            quote::quote! {
+                ::wasm_dbms_api::prelude::Value::Null => ::wasm_dbms_api::prelude::Nullable::Null,
+            }
+        } else {
+            quote::quote! {}
+        };
+
+        match_arms.push(quote::quote! {
+            #field_name_str => {
+                #field_name = Some(match __col_value {
+                    #accepted
+                    #null
+                    _ => #mismatch,
+                });
+            }
+        });
     }
 
     let mut constructor_fields = vec![];
@@ -243,7 +242,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
     // locals are prefixed so that they cannot clash with the field bindings declared above
     quote::quote! {
         #[allow(clippy::copy_clone)]
-        fn from_values(__wasm_dbms_values: &[(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)], __wasm_dbms_where_clause: Option<::wasm_dbms_api::prelude::Filter>) -> Self {
+        fn from_values(__wasm_dbms_values: &[(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)], __wasm_dbms_where_clause: Option<::wasm_dbms_api::prelude::Filter>) -> ::wasm_dbms_api::prelude::DbmsResult<Self> {
             #(#field_initializers)*
 
             for (__wasm_dbms_column, __col_value) in __wasm_dbms_values {
@@ -253,10 +252,10 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
                 }
             }
 
-            Self {
+            Ok(Self {
                 #(#constructor_fields)*
                 where_clause: __wasm_dbms_where_clause,
-            }
+            })
         }
     }
 }
