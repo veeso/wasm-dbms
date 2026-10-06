@@ -12,6 +12,7 @@ pub mod schema;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::Path;
 
 use ::wasm_dbms::prelude::{DatabaseSchema as _, DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::*;
@@ -33,21 +34,39 @@ thread_local! {
     static DBMS_CTX: RefCell<Option<DbmsContext<FileMemoryProvider>>> = const { RefCell::new(None) };
 }
 
+/// Opens the database file at `path` and registers the example tables.
+///
+/// # Errors
+///
+/// Returns [`wit::DbmsError::MemoryError`] when the file cannot be opened or
+/// created, and the converted [`DbmsError`] when table registration fails.
+fn open_dbms(path: &Path) -> Result<DbmsContext<FileMemoryProvider>, wit::DbmsError> {
+    let provider =
+        FileMemoryProvider::new(path).map_err(|e| wit::DbmsError::MemoryError(e.to_string()))?;
+    let dbms_ctx = DbmsContext::new(provider);
+    ExampleDatabaseSchema::register_tables(&dbms_ctx).map_err(dbms_error_to_wit)?;
+    Ok(dbms_ctx)
+}
+
 /// Runs `f` against the lazily initialised DBMS context.
-fn with_dbms<F, R>(f: F) -> R
+///
+/// The context is created on first use with [`open_dbms`]. A failed
+/// initialization is not cached, so the next call retries it.
+///
+/// # Errors
+///
+/// Returns the initialization error from [`open_dbms`] without calling `f`.
+fn with_dbms<F, R>(f: F) -> Result<R, wit::DbmsError>
 where
     F: FnOnce(&DbmsContext<FileMemoryProvider>) -> R,
 {
     DBMS_CTX.with(|cell| {
         let mut ctx = cell.borrow_mut();
-        if ctx.is_none() {
-            let provider =
-                FileMemoryProvider::new(DB_FILE_PATH).expect("Failed to open database file");
-            let dbms_ctx = DbmsContext::new(provider);
-            ExampleDatabaseSchema::register_tables(&dbms_ctx).expect("Failed to register tables");
-            *ctx = Some(dbms_ctx);
-        }
-        f(ctx.as_ref().unwrap())
+        let dbms_ctx = match ctx.take() {
+            Some(dbms_ctx) => dbms_ctx,
+            None => open_dbms(Path::new(DB_FILE_PATH))?,
+        };
+        Ok(f(ctx.insert(dbms_ctx)))
     })
 }
 
@@ -672,7 +691,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
             db.select_raw(&table, query)
                 .map(|rows| rows.into_iter().map(dbms_row_to_wit).collect())
                 .map_err(dbms_error_to_wit)
-        })
+        })?
     }
 
     fn insert(
@@ -696,7 +715,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
                     .insert(&db, table_name, &col_values)
                     .map_err(dbms_error_to_wit)
             }
-        })
+        })?
     }
 
     fn aggregate(
@@ -714,7 +733,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
                 .aggregate(&db, table_name, query, &aggs)
                 .map(|rows| rows.into_iter().map(aggregated_row_to_wit).collect())
                 .map_err(dbms_error_to_wit)
-        })
+        })?
     }
 
     fn update(
@@ -740,7 +759,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
                     .update(&db, table_name, &col_values, filter)
                     .map_err(dbms_error_to_wit)
             }
-        })
+        })?
     }
 
     fn delete(
@@ -765,32 +784,32 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
                     .delete(&db, table_name, behavior, filter)
                     .map_err(dbms_error_to_wit)
             }
-        })
+        })?
     }
 
     fn begin_transaction() -> Result<wit::TransactionId, wit::DbmsError> {
-        with_dbms(|ctx| Ok(ctx.begin_transaction(vec![0u8])))
+        with_dbms(|ctx| ctx.begin_transaction(vec![0u8]))
     }
 
     fn commit(tx: wit::TransactionId) -> Result<(), wit::DbmsError> {
         with_dbms(|ctx| {
             let mut db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx);
             db.commit().map_err(dbms_error_to_wit)
-        })
+        })?
     }
 
     fn rollback(tx: wit::TransactionId) -> Result<(), wit::DbmsError> {
         with_dbms(|ctx| {
             let mut db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx);
             db.rollback().map_err(dbms_error_to_wit)
-        })
+        })?
     }
 
     fn has_drift() -> Result<bool, wit::DbmsError> {
         with_dbms(|ctx| {
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.has_drift().map_err(dbms_error_to_wit)
-        })
+        })?
     }
 
     fn pending_migrations() -> Result<Vec<wit::MigrationOp>, wit::DbmsError> {
@@ -799,7 +818,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
             db.pending_migrations()
                 .map(|ops| ops.into_iter().map(migration_op_to_wit).collect())
                 .map_err(dbms_error_to_wit)
-        })
+        })?
     }
 
     fn migrate(policy: wit::MigrationPolicy) -> Result<(), wit::DbmsError> {
@@ -807,15 +826,64 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         with_dbms(|ctx| {
             let mut db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.migrate(policy).map_err(dbms_error_to_wit)
-        })
+        })?
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+
+    /// Returns a path under the system temp directory that no other test or process uses.
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!(
+            "wasm-dbms-guest-{label}-{pid}-{nanos}-{count}",
+            pid = std::process::id(),
+            count = COUNTER.fetch_add(1, Ordering::Relaxed),
+        ))
+    }
+
+    #[test]
+    fn test_open_dbms_reports_unusable_database_path_as_wit_error() {
+        let dir = unique_temp_dir("dir-at-db-path");
+        std::fs::create_dir(&dir).expect("create test dir");
+        let db_path = dir.join(DB_FILE_PATH);
+        std::fs::create_dir(&db_path).expect("create directory at the database path");
+
+        let outcome = std::panic::catch_unwind(|| open_dbms(&db_path).map(|_| ()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let result = outcome.expect("guest initialization must not panic");
+        assert!(
+            matches!(result, Err(wit::DbmsError::MemoryError(_))),
+            "expected a memory error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_open_dbms_registers_tables_on_a_fresh_file() {
+        let dir = unique_temp_dir("fresh-db");
+        std::fs::create_dir(&dir).expect("create test dir");
+
+        let rows = open_dbms(&dir.join(DB_FILE_PATH)).map(|ctx| {
+            WasmDbmsDatabase::oneshot(&ctx, ExampleDatabaseSchema)
+                .select_raw("users", Query::builder().build())
+                .map(|rows| rows.len())
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(matches!(rows, Ok(Ok(0))), "got {rows:?}");
+    }
 
     fn sample_uuid() -> Value {
         let bytes = 0x550e_8400_e29b_41d4_a716_4466_5544_0000_u128.to_be_bytes();
