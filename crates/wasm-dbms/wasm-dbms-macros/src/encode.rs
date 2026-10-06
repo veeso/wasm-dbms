@@ -44,7 +44,13 @@ pub fn encode(
 }
 
 /// Generate implementation of `SIZE` const value.
+///
+/// A struct without fields has the fixed size `0`.
 fn impl_size_const(struct_data: &DataStruct) -> TokenStream2 {
+    if struct_data.fields.is_empty() {
+        return quote::quote! { ::wasm_dbms_api::prelude::DataSize::Fixed(0) };
+    }
+
     let tuple_expansion = size_tuple_expansion(struct_data);
 
     let anon_idents = utils::anon_ident_iter(None)
@@ -62,10 +68,17 @@ fn impl_size_const(struct_data: &DataStruct) -> TokenStream2 {
     }
 }
 
-/// Generate implementation of `SIZE` const value.
+/// Generate implementation of `ALIGNMENT` const value.
 ///
 /// If `alignment` is `Some` and the data size is not `FIXED`, the alignment will be set to the provided value.
+///
+/// A fixed-size struct is aligned to its size; a zero-size struct (no fields, or only zero-size
+/// fields) is aligned to `1`, because storage divides offsets by the alignment.
 fn impl_alignment_const(struct_data: &DataStruct, alignment: Option<u16>) -> TokenStream2 {
+    if struct_data.fields.is_empty() {
+        return quote::quote! { 1 };
+    }
+
     let tuple_expansion = size_tuple_expansion(struct_data);
 
     let anon_idents = utils::anon_ident_iter(None)
@@ -81,7 +94,7 @@ fn impl_alignment_const(struct_data: &DataStruct, alignment: Option<u16>) -> Tok
     quote::quote! {
         if let (#(::wasm_dbms_api::prelude::DataSize::Fixed(#anon_idents)),*) = (#tuple_expansion) {
             let total_size = #(#anon_idents)+*;
-            total_size
+            if total_size == 0 { 1 } else { total_size }
         }
         else {
             #quoted_alignment_value
@@ -122,6 +135,14 @@ fn impl_size(struct_data: &DataStruct) -> TokenStream2 {
 
 /// Generate implementation of `encode` method.
 fn impl_encode(struct_data: &DataStruct) -> TokenStream2 {
+    if struct_data.fields.is_empty() {
+        return quote::quote! {
+            fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
+                std::borrow::Cow::Borrowed(&[])
+            }
+        };
+    }
+
     // make token for each field for encoding
     let encodings = struct_data.fields.iter().map(|field| {
         let field_ty = &field.ty;
@@ -143,6 +164,15 @@ fn impl_encode(struct_data: &DataStruct) -> TokenStream2 {
 
 /// Generate implementation of `decode` method.
 fn impl_decode(struct_data: &DataStruct) -> TokenStream2 {
+    if struct_data.fields.is_empty() {
+        // `Self {}` is valid for both empty named structs and unit structs
+        return quote::quote! {
+            fn decode(_: std::borrow::Cow<[u8]>) -> ::wasm_dbms_api::prelude::MemoryResult<Self> {
+                Ok(Self {})
+            }
+        };
+    }
+
     let decodings = struct_data.fields.iter().map(|field| {
         let field_name = &field.ident;
         let field_ty = &field.ty;

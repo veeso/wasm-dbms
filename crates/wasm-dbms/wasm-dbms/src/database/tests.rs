@@ -4162,3 +4162,49 @@ fn table_fields_named_like_generated_locals_round_trip() {
         .expect("owner should be eager loaded");
     assert_eq!(owner.name, Some(Text("owner".to_string())));
 }
+
+/// Named struct without fields.
+#[derive(Debug, Clone, PartialEq, Eq, wasm_dbms_macros::Encode)]
+pub struct EmptyNamed {}
+
+/// Unit struct.
+#[derive(Debug, Clone, PartialEq, Eq, wasm_dbms_macros::Encode)]
+pub struct EmptyUnit;
+
+/// Struct embedding a zero-size field next to a fixed-size one.
+#[derive(Debug, Clone, PartialEq, Eq, wasm_dbms_macros::Encode)]
+pub struct WithEmptyField {
+    empty: EmptyNamed,
+    number: Uint32,
+}
+
+#[test]
+fn encode_derive_supports_empty_structs() {
+    use wasm_dbms_api::prelude::{DataSize, Encode};
+    use wasm_dbms_memory::align_up;
+
+    assert_eq!(<EmptyNamed as Encode>::SIZE, DataSize::Fixed(0));
+    assert_eq!(<EmptyNamed as Encode>::ALIGNMENT, 1);
+    assert_eq!(<EmptyUnit as Encode>::SIZE, DataSize::Fixed(0));
+    assert_eq!(<EmptyUnit as Encode>::ALIGNMENT, 1);
+    // a non-zero alignment keeps page math well defined
+    assert_eq!(align_up::<EmptyNamed>(5), 5);
+
+    let named = EmptyNamed {};
+    assert_eq!(named.size(), 0);
+    let encoded = named.encode();
+    assert!(encoded.is_empty());
+    assert_eq!(EmptyNamed::decode(encoded).unwrap(), named);
+
+    let unit = EmptyUnit;
+    assert_eq!(unit.size(), 0);
+    assert_eq!(EmptyUnit::decode(unit.encode()).unwrap(), unit);
+
+    let nested = WithEmptyField {
+        empty: EmptyNamed {},
+        number: Uint32(9),
+    };
+    assert_eq!(<WithEmptyField as Encode>::SIZE, DataSize::Fixed(4));
+    assert_eq!(<WithEmptyField as Encode>::ALIGNMENT, 4);
+    assert_eq!(WithEmptyField::decode(nested.encode()).unwrap(), nested);
+}
