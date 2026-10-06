@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 
 use wasm_dbms_api::prelude::{
-    Database as _, DeleteBehavior, Filter, InsertRecord as _, Nullable, OrderDirection, Query,
-    TableSchema as _, Text, Uint32, UpdateRecord as _, Value,
+    ColumnDef, Database as _, DeleteBehavior, Filter, InsertRecord as _, Nullable, OrderDirection,
+    Query, TableSchema as _, Text, Uint32, UpdateRecord as _, Value,
 };
 use wasm_dbms_macros::{DatabaseSchema, Table};
 use wasm_dbms_memory::prelude::HeapMemoryProvider;
@@ -4665,4 +4665,283 @@ fn several_decimal_and_uuid_columns_round_trip_in_one_table() {
             &label
         ]
     );
+}
+
+#[test]
+fn transaction_primary_key_lookup_sees_its_own_update() {
+    let ctx = setup();
+    insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
+
+    let tx = ctx.begin_transaction(vec![1]);
+    let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
+    let updated = TestSchema
+        .update(
+            &db,
+            "users",
+            &[(User::columns()[1], Value::Text(Text("Bob".to_string())))],
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        )
+        .unwrap();
+    assert_eq!(updated, 1);
+
+    let all_rows = db
+        .select_raw("users", Query::builder().all().build())
+        .unwrap();
+    assert_eq!(all_rows[0][1].1, Value::Text(Text("Bob".to_string())));
+
+    let by_primary_key = db
+        .select_raw(
+            "users",
+            Query::builder()
+                .all()
+                .filter(Some(Filter::eq("id", Value::Uint32(Uint32(1)))))
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(by_primary_key.len(), 1);
+    assert_eq!(by_primary_key[0][1].1, Value::Text(Text("Bob".to_string())));
+
+    // the remaining filter is evaluated on the updated row, not on the stored one
+    let select_by_id_and_name = |name: &str| {
+        db.select_raw(
+            "users",
+            Query::builder()
+                .all()
+                .filter(Some(
+                    Filter::eq("id", Value::Uint32(Uint32(1)))
+                        .and(Filter::eq("name", Value::Text(Text(name.to_string())))),
+                ))
+                .build(),
+        )
+        .unwrap()
+    };
+    assert_eq!(select_by_id_and_name("Bob").len(), 1);
+    assert!(select_by_id_and_name("Alice").is_empty());
+}
+
+#[test]
+fn transaction_update_by_primary_key_builds_on_its_previous_update() {
+    let ctx = setup();
+    insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
+
+    let tx = ctx.begin_transaction(vec![1]);
+    let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
+    let rename = |from: &str, to: &str| {
+        TestSchema
+            .update(
+                &db,
+                "users",
+                &[(User::columns()[1], Value::Text(Text(to.to_string())))],
+                Some(
+                    Filter::eq("id", Value::Uint32(Uint32(1)))
+                        .and(Filter::eq("name", Value::Text(Text(from.to_string())))),
+                ),
+            )
+            .unwrap()
+    };
+
+    assert_eq!(rename("Alice", "Bob"), 1);
+    assert_eq!(rename("Bob", "Carol"), 1);
+    assert_eq!(rename("Alice", "Dave"), 0);
+
+    let rows = db
+        .select_raw("users", Query::builder().all().build())
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][1].1, Value::Text(Text("Carol".to_string())));
+}
+
+fn select_name_indexed(
+    db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+    filter: Filter,
+) -> Vec<Vec<(ColumnDef, Value)>> {
+    db.select_raw(
+        "name_indexed_users",
+        Query::builder().all().filter(Some(filter)).build(),
+    )
+    .unwrap()
+}
+
+fn name_eq(name: &str) -> Filter {
+    Filter::eq("name", Value::Text(Text(name.to_string())))
+}
+
+fn update_name_indexed_in_tx(
+    db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+    patch: &[(ColumnDef, Value)],
+    filter: Filter,
+) {
+    let updated = NameIndexedTestSchema
+        .update(db, "name_indexed_users", patch, Some(filter))
+        .unwrap();
+    assert_eq!(updated, 1);
+}
+
+#[test]
+fn transaction_index_lookup_sees_update_of_non_indexed_column() {
+    let ctx = setup_name_indexed();
+    insert_name_indexed_user(
+        &WasmDbmsDatabase::oneshot(&ctx, NameIndexedTestSchema),
+        1,
+        "alice",
+        30,
+    );
+
+    let tx = ctx.begin_transaction(vec![1]);
+    let db = WasmDbmsDatabase::from_transaction(&ctx, NameIndexedTestSchema, tx);
+    update_name_indexed_in_tx(
+        &db,
+        &[(NameIndexedUser::columns()[2], Value::Uint32(Uint32(31)))],
+        name_eq("alice"),
+    );
+
+    let rows = select_name_indexed(&db, name_eq("alice"));
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][2].1, Value::Uint32(Uint32(31)));
+
+    // the remaining (non-indexed) filter sees the updated value only
+    let age_is = |age: u32| {
+        select_name_indexed(
+            &db,
+            name_eq("alice").and(Filter::eq("age", Value::Uint32(Uint32(age)))),
+        )
+    };
+    assert_eq!(age_is(31).len(), 1);
+    assert!(age_is(30).is_empty());
+}
+
+#[test]
+fn transaction_index_lookup_follows_update_of_indexed_column() {
+    let ctx = setup_name_indexed();
+    insert_name_indexed_user(
+        &WasmDbmsDatabase::oneshot(&ctx, NameIndexedTestSchema),
+        1,
+        "alice",
+        30,
+    );
+
+    let tx = ctx.begin_transaction(vec![1]);
+    let db = WasmDbmsDatabase::from_transaction(&ctx, NameIndexedTestSchema, tx);
+    update_name_indexed_in_tx(
+        &db,
+        &[(
+            NameIndexedUser::columns()[1],
+            Value::Text(Text("bob".to_string())),
+        )],
+        name_eq("alice"),
+    );
+    update_name_indexed_in_tx(
+        &db,
+        &[(NameIndexedUser::columns()[2], Value::Uint32(Uint32(32)))],
+        name_eq("bob"),
+    );
+
+    assert!(select_name_indexed(&db, name_eq("alice")).is_empty());
+    let rows = select_name_indexed(&db, name_eq("bob"));
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0].1, Value::Uint32(Uint32(1)));
+    assert_eq!(rows[0][2].1, Value::Uint32(Uint32(32)));
+}
+
+#[test]
+fn transaction_primary_key_lookup_follows_primary_key_update() {
+    let ctx = setup();
+    insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
+
+    let tx = ctx.begin_transaction(vec![1]);
+    let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
+    let updated = TestSchema
+        .update(
+            &db,
+            "users",
+            &[
+                (User::columns()[0], Value::Uint32(Uint32(2))),
+                (User::columns()[1], Value::Text(Text("Bob".to_string()))),
+            ],
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        )
+        .unwrap();
+    assert_eq!(updated, 1);
+
+    let by_id = |id: u32| {
+        db.select_raw(
+            "users",
+            Query::builder()
+                .all()
+                .filter(Some(Filter::eq("id", Value::Uint32(Uint32(id)))))
+                .build(),
+        )
+        .unwrap()
+    };
+    assert!(by_id(1).is_empty());
+    let rows = by_id(2);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][1].1, Value::Text(Text("Bob".to_string())));
+}
+
+#[test]
+fn transaction_primary_key_lookup_does_not_see_deleted_row() {
+    let ctx = setup();
+    insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
+
+    let tx = ctx.begin_transaction(vec![1]);
+    let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
+    TestSchema
+        .update(
+            &db,
+            "users",
+            &[(User::columns()[1], Value::Text(Text("Bob".to_string())))],
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        )
+        .unwrap();
+    let deleted = TestSchema
+        .delete(
+            &db,
+            "users",
+            DeleteBehavior::Restrict,
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        )
+        .unwrap();
+    assert_eq!(deleted, 1);
+
+    let rows = db
+        .select_raw(
+            "users",
+            Query::builder()
+                .all()
+                .filter(Some(Filter::eq("id", Value::Uint32(Uint32(1)))))
+                .build(),
+        )
+        .unwrap();
+    assert!(rows.is_empty());
+}
+
+#[test]
+fn transaction_primary_key_lookup_returns_reinserted_row_after_delete() {
+    let ctx = setup();
+    insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
+
+    let tx = ctx.begin_transaction(vec![1]);
+    let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
+    TestSchema
+        .delete(
+            &db,
+            "users",
+            DeleteBehavior::Restrict,
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        )
+        .unwrap();
+    insert_user(&db, 1, "Bob");
+
+    let rows = db
+        .select_raw(
+            "users",
+            Query::builder()
+                .all()
+                .filter(Some(Filter::eq("id", Value::Uint32(Uint32(1)))))
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][1].1, Value::Text(Text("Bob".to_string())));
 }
