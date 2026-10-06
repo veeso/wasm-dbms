@@ -5,6 +5,7 @@
   - [Table Definition](#table-definition)
     - [Required Derives](#required-derives)
     - [Table Attribute](#table-attribute)
+    - [Generic Tables](#generic-tables)
   - [Column Attributes](#column-attributes)
     - [Primary Key](#primary-key)
     - [Autoincrement](#autoincrement)
@@ -100,6 +101,38 @@ pub struct UserAccount {
 - Use `snake_case` for table names
 - Table names should be plural (e.g., `users`, `posts`, `order_items`)
 - Keep names short but descriptive
+
+### Generic Tables
+
+`#[derive(Table)]` and `#[derive(DatabaseSchema)]` accept type parameters and `where`
+clauses. The generics are carried over to every generated type and impl, so a table can be
+generic over a custom data type:
+
+```rust
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "tagged_items"]
+pub struct TaggedItem<T>
+where
+    T: CustomDataType,
+{
+    #[primary_key]
+    pub id: Uint32,
+    #[custom_type]
+    pub tag: T,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(TaggedItem<T> = "tagged_items")]
+pub struct TaggedSchema<T>
+where
+    T: CustomDataType,
+{
+    _tag: std::marker::PhantomData<T>,
+}
+```
+
+Type parameters must be `'static`, and the generated impls add that bound. Lifetime
+parameters and const generic parameters are rejected with a compile error.
 
 ---
 

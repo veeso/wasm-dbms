@@ -1,7 +1,7 @@
 // Rust guideline compliant 2026-03-01
 // X-WHERE-CLAUSE, X-NO-MOD-RS, M-CANONICAL-DOCS
 
-use syn::Ident;
+use syn::parse::{Parse, ParseStream};
 
 /// Attribute name for the `#[tables(...)]` annotation.
 const ATTRIBUTE_TABLES: &str = "tables";
@@ -17,53 +17,37 @@ pub struct SchemaMetadata {
 
 /// Parsed metadata for a single table within a `#[tables(...)]` attribute.
 pub struct TableEntry {
-    /// Struct identifier implementing `TableSchema` (e.g. `User`).
-    pub table: Ident,
-    /// Generated insert request type identifier (e.g. `UserInsertRequest`).
-    pub insert: Ident,
-    /// Generated update request type identifier (e.g. `UserUpdateRequest`).
-    pub update: Ident,
+    /// Type implementing `TableSchema` (e.g. `User` or `Demo<Payload>`).
+    pub table: syn::Type,
+}
+
+impl Parse for TableEntry {
+    /// Parses a `Type = "name"` entry.
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let table: syn::Type = input.parse()?;
+        input.parse::<syn::Token![=]>()?;
+        input.parse::<syn::LitStr>()?;
+
+        Ok(Self { table })
+    }
 }
 
 /// Parses `#[tables(User = "users", Post = "posts")]` attributes into
 /// [`SchemaMetadata`].
+///
+/// Table types may carry generic arguments, e.g. `#[tables(Demo<T> = "demo")]`.
 pub fn collect_schema_metadata(attrs: &[syn::Attribute]) -> syn::Result<SchemaMetadata> {
     let mut tables = Vec::new();
-    let mut names = vec![];
 
-    for attr in attrs {
-        if attr.path().is_ident(ATTRIBUTE_TABLES) {
-            attr.parse_nested_meta(|meta| {
-                let ident = meta
-                    .path
-                    .get_ident()
-                    .cloned()
-                    .ok_or_else(|| meta.error("expected identifier"))?;
-                let value: syn::LitStr = meta.value()?.parse()?;
-                let value = value.value();
-
-                names.push((ident, value));
-
-                Ok(())
-            })?;
-        }
-    }
-
-    for (ident, _) in names {
-        tables.push(collect_table_entry(ident)?);
+    for attr in attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident(ATTRIBUTE_TABLES))
+    {
+        let entries = attr.parse_args_with(
+            syn::punctuated::Punctuated::<TableEntry, syn::Token![,]>::parse_terminated,
+        )?;
+        tables.extend(entries);
     }
 
     Ok(SchemaMetadata { tables })
-}
-
-/// Derives associated type identifiers for a single table entry.
-fn collect_table_entry(table: Ident) -> syn::Result<TableEntry> {
-    let insert_ident = Ident::new(&format!("{table}InsertRequest"), table.span());
-    let update_ident = Ident::new(&format!("{table}UpdateRequest"), table.span());
-
-    Ok(TableEntry {
-        table: table.clone(),
-        insert: insert_ident,
-        update: update_ident,
-    })
 }

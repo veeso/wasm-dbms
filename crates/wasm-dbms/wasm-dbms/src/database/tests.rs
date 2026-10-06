@@ -3968,3 +3968,98 @@ fn private_table_struct_round_trips_through_insert_and_select() {
     assert_eq!(rows[0].id, Some(Uint32(1)));
     assert_eq!(rows[0].label, Some(Text("hidden".to_string())));
 }
+
+/// Custom data type used to instantiate the generic table fixtures.
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    wasm_dbms_macros::Encode,
+    wasm_dbms_macros::CustomDataType,
+)]
+#[type_tag = "priority"]
+pub struct Priority {
+    level: wasm_dbms_api::prelude::Uint8,
+}
+
+impl std::fmt::Display for Priority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "priority {level}", level = self.level.0)
+    }
+}
+
+impl wasm_dbms_api::prelude::DataType for Priority {}
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "generic_rows"]
+pub struct GenericRow<T>
+where
+    T: wasm_dbms_api::prelude::CustomDataType,
+{
+    #[primary_key]
+    pub id: Uint32,
+    #[custom_type]
+    pub payload: T,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(GenericRow<T> = "generic_rows")]
+pub struct GenericRowTestSchema<T>
+where
+    T: wasm_dbms_api::prelude::CustomDataType,
+{
+    _payload: std::marker::PhantomData<T>,
+}
+
+impl<T> GenericRowTestSchema<T>
+where
+    T: wasm_dbms_api::prelude::CustomDataType,
+{
+    fn new() -> Self {
+        Self {
+            _payload: std::marker::PhantomData,
+        }
+    }
+}
+
+#[test]
+fn generic_table_and_schema_round_trip_through_insert_and_select() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    GenericRowTestSchema::<Priority>::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, GenericRowTestSchema::<Priority>::new());
+
+    let payload = Priority {
+        level: wasm_dbms_api::prelude::Uint8(3),
+    };
+    db.insert::<GenericRow<Priority>>(GenericRowInsertRequest {
+        id: Uint32(1),
+        payload: payload.clone(),
+    })
+    .unwrap();
+
+    let rows = db
+        .select::<GenericRow<Priority>>(Query::builder().build())
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].payload, Some(payload.clone()));
+
+    // dynamic dispatch through the generic schema reaches the same table
+    let raw = db
+        .select_raw("generic_rows", Query::builder().build())
+        .unwrap();
+    assert_eq!(raw.len(), 1);
+    assert!(
+        raw[0]
+            .iter()
+            .any(|(column, value)| column.name == "payload"
+                && *value == Value::from(payload.clone()))
+    );
+}

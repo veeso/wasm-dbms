@@ -5,14 +5,16 @@ use crate::table::metadata::TableMetadata;
 
 /// Generate the `Record` implementation for `struct_name` using the provided `data` and `metadata`.
 ///
-/// The record type is declared with `vis`, the visibility of the table struct.
+/// The record type is declared with `vis`, the visibility of the table struct, and carries
+/// `generics`, the generics of the table struct.
 pub fn generate_record(
     struct_name: &Ident,
     vis: &syn::Visibility,
+    generics: &syn::Generics,
     metadata: &TableMetadata,
 ) -> TokenStream2 {
-    let struct_def_tokens = struct_def(vis, metadata);
-    let impl_tokens = impl_record(struct_name, metadata);
+    let struct_def_tokens = struct_def(vis, generics, metadata);
+    let impl_tokens = impl_record(struct_name, generics, metadata);
 
     quote::quote! {
         #struct_def_tokens
@@ -22,7 +24,11 @@ pub fn generate_record(
 }
 
 /// Generate the `Struct` definition for the `Record` type using the provided `metadata`.
-fn struct_def(vis: &syn::Visibility, metadata: &TableMetadata) -> TokenStream2 {
+fn struct_def(
+    vis: &syn::Visibility,
+    generics: &syn::Generics,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
     let mut fields = vec![];
 
     for field in &metadata.fields {
@@ -49,6 +55,7 @@ fn struct_def(vis: &syn::Visibility, metadata: &TableMetadata) -> TokenStream2 {
     }
 
     let record_ident = &metadata.record;
+    let where_clause = &generics.where_clause;
 
     let derives = if metadata.candid {
         quote::quote! {
@@ -62,20 +69,25 @@ fn struct_def(vis: &syn::Visibility, metadata: &TableMetadata) -> TokenStream2 {
 
     quote::quote! {
         #derives
-        #vis struct #record_ident {
+        #vis struct #record_ident #generics #where_clause {
             #(#fields)*
         }
     }
 }
 
-fn impl_record(struct_name: &Ident, metadata: &TableMetadata) -> TokenStream2 {
+fn impl_record(
+    struct_name: &Ident,
+    generics: &syn::Generics,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
     let impl_for = &metadata.record;
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let from_values_impl = impl_from_values(metadata);
     let to_values_impl = impl_to_values(metadata);
 
     quote::quote! {
-        impl ::wasm_dbms_api::prelude::TableRecord for #impl_for {
-            type Schema = #struct_name;
+        impl #impl_generics ::wasm_dbms_api::prelude::TableRecord for #impl_for #ty_generics #where_clause {
+            type Schema = #struct_name #ty_generics;
 
             #from_values_impl
 

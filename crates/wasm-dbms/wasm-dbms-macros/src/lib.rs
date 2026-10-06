@@ -236,6 +236,28 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 ///
 /// Every generated type is declared with the visibility of the annotated struct.
 ///
+/// ## Generics
+///
+/// Type parameters and the `where` clause of the struct are carried over to every
+/// generated type and impl, so a table can be generic over a custom data type:
+///
+/// ```rust,ignore
+/// #[derive(Debug, Clone, PartialEq, Eq, Table)]
+/// #[table = "tagged"]
+/// pub struct Tagged<T>
+/// where
+///     T: CustomDataType,
+/// {
+///     #[primary_key]
+///     id: Uint32,
+///     #[custom_type]
+///     tag: T,
+/// }
+/// ```
+///
+/// Type parameters must be `'static`; the generated impls add that bound. Lifetime
+/// and const generic parameters are rejected with a compile error.
+///
 /// Also, we will implement the `TableSchema` trait for the struct itself and derive `Encode` for `${StructName}`.
 ///
 /// ## Attributes
@@ -357,16 +379,21 @@ pub fn derive_custom_data_type(input: TokenStream) -> TokenStream {
 /// MySchema::register_tables(&ctx)?;
 /// ```
 ///
+/// # Generics
+///
+/// The schema struct may declare type parameters and a `where` clause; they are
+/// carried over to the generated impls. Table types in `#[tables(...)]` may carry
+/// generic arguments, e.g. `#[tables(Demo<T> = "demo")]`. Lifetime and const
+/// generic parameters are rejected with a compile error.
+///
 /// # Requirements
 ///
 /// - Each type in the `#[tables(...)]` attribute must implement
 ///   `TableSchema`.
-/// - The generated types (`UserInsertRequest`, `UserUpdateRequest`,
-///   `UserRecord`, etc.) must be in scope.
 #[proc_macro_derive(DatabaseSchema, attributes(tables))]
 pub fn derive_database_schema(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     self::database_schema::database_schema(input)
-        .expect("failed to derive `DatabaseSchema`")
+        .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

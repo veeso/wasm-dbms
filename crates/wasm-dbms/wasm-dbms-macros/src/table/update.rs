@@ -7,10 +7,11 @@ use crate::table::metadata::TableMetadata;
 pub fn generate_update_request(
     struct_name: &Ident,
     vis: &syn::Visibility,
+    generics: &syn::Generics,
     metadata: &TableMetadata,
 ) -> TokenStream2 {
-    let update_request_struct = generate_update_request_struct(vis, metadata);
-    let update_record_impl = impl_update_record(struct_name, metadata);
+    let update_request_struct = generate_update_request_struct(vis, generics, metadata);
+    let update_record_impl = impl_update_record(struct_name, generics, metadata);
 
     quote::quote! {
         #update_request_struct
@@ -38,7 +39,11 @@ pub fn generate_update_request(
 ///     pub where_clause: Option<Filter>,
 /// }
 /// ```
-fn generate_update_request_struct(vis: &syn::Visibility, metadata: &TableMetadata) -> TokenStream2 {
+fn generate_update_request_struct(
+    vis: &syn::Visibility,
+    generics: &syn::Generics,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
     let mut fields = vec![];
 
     for field in &metadata.fields {
@@ -50,6 +55,7 @@ fn generate_update_request_struct(vis: &syn::Visibility, metadata: &TableMetadat
     }
 
     let update_request_ident = &metadata.update;
+    let where_clause = &generics.where_clause;
 
     let derives = if metadata.candid {
         quote::quote! {
@@ -63,24 +69,29 @@ fn generate_update_request_struct(vis: &syn::Visibility, metadata: &TableMetadat
 
     quote::quote! {
         #derives
-        #vis struct #update_request_ident {
+        #vis struct #update_request_ident #generics #where_clause {
             #(#fields)*
             pub where_clause: Option<::wasm_dbms_api::prelude::Filter>,
         }
     }
 }
 
-fn impl_update_record(struct_name: &Ident, metadata: &TableMetadata) -> TokenStream2 {
+fn impl_update_record(
+    struct_name: &Ident,
+    generics: &syn::Generics,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
     let update_request_ident = &metadata.update;
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let record_ident = &metadata.record;
 
     let from_values_impl = impl_from_values(metadata);
     let into_values_impl = impl_update_values(metadata);
 
     quote::quote! {
-        impl ::wasm_dbms_api::prelude::UpdateRecord for #update_request_ident {
-            type Record = #record_ident;
-            type Schema = #struct_name;
+        impl #impl_generics ::wasm_dbms_api::prelude::UpdateRecord for #update_request_ident #ty_generics #where_clause {
+            type Record = #record_ident #ty_generics;
+            type Schema = #struct_name #ty_generics;
 
             #from_values_impl
             #into_values_impl
