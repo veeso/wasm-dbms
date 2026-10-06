@@ -71,18 +71,18 @@ mod utils;
 ///     }
 ///
 ///     fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
-///         let mut encoded = Vec::with_capacity(self.size() as usize);
-///         encoded.extend_from_slice(&self.id.encode());
-///         encoded.extend_from_slice(&self.name.encode());
-///         std::borrow::Cow::Owned(encoded)
+///         let mut __wasm_dbms_encoded = Vec::with_capacity(self.size() as usize);
+///         __wasm_dbms_encoded.extend_from_slice(&self.id.encode());
+///         __wasm_dbms_encoded.extend_from_slice(&self.name.encode());
+///         std::borrow::Cow::Owned(__wasm_dbms_encoded)
 ///     }
 ///
-///     fn decode(data: std::borrow::Cow<[u8]>) -> ::wasm_dbms_api::prelude::MemoryResult<Self> {
-///         let mut offset = 0;
-///         let id = Uint32::decode(std::borrow::Borrowed(&data[offset..]))?;
-///         offset += id.size() as usize;
-///         let name = Text::decode(std::borrow::Borrowed(&data[offset..]))?;
-///         offset += name.size() as usize;
+///     fn decode(__wasm_dbms_data: std::borrow::Cow<[u8]>) -> ::wasm_dbms_api::prelude::MemoryResult<Self> {
+///         let mut __wasm_dbms_offset = 0;
+///         let id = Uint32::decode(std::borrow::Borrowed(&__wasm_dbms_data[__wasm_dbms_offset..]))?;
+///         __wasm_dbms_offset += id.size() as usize;
+///         let name = Text::decode(std::borrow::Borrowed(&__wasm_dbms_data[__wasm_dbms_offset..]))?;
+///         __wasm_dbms_offset += name.size() as usize;
 ///         Ok(Self { id, name })
 ///     }
 /// }
@@ -278,6 +278,9 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 /// - `#[table = "table_name"]`: Specifies the name of the table in the database.
 /// - `#[unique]`: Marks a field to have a unique constraint.
 /// - `#[validate(ValidatorType)]`: Specifies a validator for the field.
+///
+/// A column cannot be named `where_clause`: the generated `${StructName}UpdateRequest` uses that
+/// name for its filter field, so the derive rejects it with a compile error.
 ///
 #[proc_macro_derive(
     Table,

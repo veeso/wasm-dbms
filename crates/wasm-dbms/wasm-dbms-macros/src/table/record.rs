@@ -142,11 +142,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             if field.nullable {
                 field_matches.push(quote::quote! {
                     #field_name => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = __col_value {
-                            if let Ok(decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
-                                std::borrow::Cow::Borrowed(&cv.encoded)
+                        if let ::wasm_dbms_api::prelude::Value::Custom(__wasm_dbms_custom) = __col_value {
+                            if let Ok(__wasm_dbms_decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
+                                std::borrow::Cow::Borrowed(&__wasm_dbms_custom.encoded)
                             ) {
-                                #field_ident = Some(::wasm_dbms_api::prelude::Nullable::Value(decoded));
+                                #field_ident = Some(::wasm_dbms_api::prelude::Nullable::Value(__wasm_dbms_decoded));
                             }
                         } else if let ::wasm_dbms_api::prelude::Value::Null = __col_value {
                             #field_ident = Some(::wasm_dbms_api::prelude::Nullable::Null);
@@ -156,11 +156,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             } else {
                 field_matches.push(quote::quote! {
                     #field_name => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = __col_value {
-                            if let Ok(decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
-                                std::borrow::Cow::Borrowed(&cv.encoded)
+                        if let ::wasm_dbms_api::prelude::Value::Custom(__wasm_dbms_custom) = __col_value {
+                            if let Ok(__wasm_dbms_decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
+                                std::borrow::Cow::Borrowed(&__wasm_dbms_custom.encoded)
                             ) {
-                                #field_ident = Some(decoded);
+                                #field_ident = Some(__wasm_dbms_decoded);
                             }
                         }
                     }
@@ -216,7 +216,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         let field_name = &fk.field;
 
         fk_matches.push(quote::quote! {
-            let has_fk_values = values.iter().any(|(source, _)| {
+            let __wasm_dbms_has_fk_values = __wasm_dbms_values.iter().any(|(source, _)| {
                 *source ==
                     ::wasm_dbms_api::prelude::ValuesSource::Foreign {
                         table: #table_name.to_string(),
@@ -225,11 +225,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             });
 
 
-            if has_fk_values {
+            if __wasm_dbms_has_fk_values {
                 #field_name = Some(Box::new(
                     #fk_from_record_path(
                         ::wasm_dbms_api::prelude::self_reference_values(
-                            &values,
+                            &__wasm_dbms_values,
                             #table_name,
                             #local_column,
                         )
@@ -239,18 +239,19 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         })
     }
 
+    // locals are prefixed so that they cannot clash with the field bindings declared above
     quote::quote! {
         #[allow(clippy::copy_clone)]
-        fn from_values(values: ::wasm_dbms_api::prelude::TableColumns) -> Self {
+        fn from_values(__wasm_dbms_values: ::wasm_dbms_api::prelude::TableColumns) -> Self {
             #(#field_inits)*
 
-            let this_record_values = values
+            let __wasm_dbms_this_values = __wasm_dbms_values
                 .iter()
                 .find(|(table_name, _)| *table_name == ::wasm_dbms_api::prelude::ValuesSource::This)
                 .map(|(_, cols)| cols);
 
-            for (column, __col_value) in this_record_values.unwrap_or(&vec![]) {
-                match column.name {
+            for (__wasm_dbms_column, __col_value) in __wasm_dbms_this_values.unwrap_or(&vec![]) {
+                match __wasm_dbms_column.name {
                     #(#field_matches)*
                     _ => {} // ignore unknown/fk columns
                 }
