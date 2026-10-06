@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use duckdb::Connection as DuckConnection;
 use rusqlite::Connection as SqliteConnection;
 use wasm_dbms::prelude::{DbmsContext, WasmDbmsDatabase};
@@ -9,6 +11,19 @@ use crate::schema::{
     BenchDatabaseSchema, CREATE_POSTS_SQL, CREATE_USERS_SQL, Post, PostInsertRequest, User,
     UserInsertRequest,
 };
+
+/// Generates `num_users` users and `num_posts` posts owned by those users.
+///
+/// Posts must reference an existing user, so when `num_users` is zero no
+/// posts are generated, whatever `num_posts` is.
+fn generate_users_and_posts(num_users: u32, num_posts: u32) -> (Vec<UserData>, Vec<PostData>) {
+    let mut data_gen = DataGenerator::new();
+    let users = data_gen.users(num_users);
+    let posts = NonZeroU32::new(num_users)
+        .map(|num_users| data_gen.posts(num_posts, num_users))
+        .unwrap_or_default();
+    (users, posts)
+}
 
 // ── wasm-dbms ──
 
@@ -63,11 +78,11 @@ pub fn setup_wasm_dbms_with_users(count: u32) -> BenchDbmsContext {
 }
 
 /// Sets up a wasm-dbms context pre-populated with users and posts.
+///
+/// No posts are inserted when `num_users` is zero.
 pub fn setup_wasm_dbms_with_users_and_posts(num_users: u32, num_posts: u32) -> BenchDbmsContext {
     let ctx = setup_wasm_dbms();
-    let mut data_gen = DataGenerator::new();
-    let users = data_gen.users(num_users);
-    let posts = data_gen.posts(num_posts, num_users);
+    let (users, posts) = generate_users_and_posts(num_users, num_posts);
     populate_wasm_dbms_users(&ctx, &users);
     populate_wasm_dbms_posts(&ctx, &posts);
     ctx
@@ -116,11 +131,11 @@ pub fn setup_rusqlite_with_users(count: u32) -> SqliteConnection {
 }
 
 /// Sets up rusqlite pre-populated with users and posts.
+///
+/// No posts are inserted when `num_users` is zero.
 pub fn setup_rusqlite_with_users_and_posts(num_users: u32, num_posts: u32) -> SqliteConnection {
     let conn = setup_rusqlite();
-    let mut data_gen = DataGenerator::new();
-    let users = data_gen.users(num_users);
-    let posts = data_gen.posts(num_posts, num_users);
+    let (users, posts) = generate_users_and_posts(num_users, num_posts);
     populate_rusqlite_users(&conn, &users);
     populate_rusqlite_posts(&conn, &posts);
     conn
@@ -169,12 +184,48 @@ pub fn setup_duckdb_with_users(count: u32) -> DuckConnection {
 }
 
 /// Sets up DuckDB pre-populated with users and posts.
+///
+/// No posts are inserted when `num_users` is zero.
 pub fn setup_duckdb_with_users_and_posts(num_users: u32, num_posts: u32) -> DuckConnection {
     let conn = setup_duckdb();
-    let mut data_gen = DataGenerator::new();
-    let users = data_gen.users(num_users);
-    let posts = data_gen.posts(num_posts, num_users);
+    let (users, posts) = generate_users_and_posts(num_users, num_posts);
     populate_duckdb_users(&conn, &users);
     populate_duckdb_posts(&conn, &posts);
     conn
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn count_rows(conn: &SqliteConnection, table: &str) -> u32 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .expect("count rows")
+    }
+
+    #[test]
+    fn test_setup_with_zero_users_generates_no_posts() {
+        let conn = setup_rusqlite_with_users_and_posts(0, 3);
+
+        assert_eq!(count_rows(&conn, "users"), 0);
+        assert_eq!(count_rows(&conn, "posts"), 0);
+    }
+
+    #[test]
+    fn test_setup_with_users_assigns_posts_to_existing_users() {
+        let conn = setup_rusqlite_with_users_and_posts(2, 5);
+
+        assert_eq!(count_rows(&conn, "users"), 2);
+        assert_eq!(count_rows(&conn, "posts"), 5);
+        let orphans: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM posts WHERE user_id NOT IN (SELECT id FROM users)",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count orphan posts");
+        assert_eq!(orphans, 0);
+    }
 }
