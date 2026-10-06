@@ -271,8 +271,8 @@ mod tests {
         fn from_values(
             _values: &[(ColumnDef, Value)],
             _where_clause: Option<wasm_dbms_api::prelude::Filter>,
-        ) -> Self {
-            Self
+        ) -> wasm_dbms_api::prelude::DbmsResult<Self> {
+            Ok(Self)
         }
 
         fn update_values(&self) -> Vec<(ColumnDef, Value)> {
@@ -403,8 +403,8 @@ mod tests {
         fn from_values(
             _values: &[(ColumnDef, Value)],
             _where_clause: Option<wasm_dbms_api::prelude::Filter>,
-        ) -> Self {
-            Self
+        ) -> wasm_dbms_api::prelude::DbmsResult<Self> {
+            Ok(Self)
         }
 
         fn update_values(&self) -> Vec<(ColumnDef, Value)> {
@@ -548,8 +548,8 @@ mod tests {
         fn from_values(
             _values: &[(ColumnDef, Value)],
             _where_clause: Option<wasm_dbms_api::prelude::Filter>,
-        ) -> Self {
-            Self
+        ) -> wasm_dbms_api::prelude::DbmsResult<Self> {
+            Ok(Self)
         }
 
         fn update_values(&self) -> Vec<(ColumnDef, Value)> {
@@ -856,8 +856,8 @@ mod tests {
         fn from_values(
             _values: &[(ColumnDef, Value)],
             _where_clause: Option<wasm_dbms_api::prelude::Filter>,
-        ) -> Self {
-            Self
+        ) -> wasm_dbms_api::prelude::DbmsResult<Self> {
+            Ok(Self)
         }
 
         fn update_values(&self) -> Vec<(ColumnDef, Value)> {

@@ -124,7 +124,7 @@ fn impl_insert_record(
 ///    let mut content: Option<Text> = None;
 ///    let mut user_id: Option<Uint32> = None;
 ///    for (column, value) in values {
-///        match __wasm_dbms_column.name {
+///        match column.name {
 ///            "id" => {
 ///                if let Value::Uint32(v) = value {
 ///                    id = Some(*v);

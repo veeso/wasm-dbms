@@ -133,7 +133,8 @@ fn bench_single_update(c: &mut Criterion) {
                     Value::Text(Text(format!("updated_{counter}"))),
                 )],
                 Some(Filter::eq("id", Value::Uint32(Uint32(500)))),
-            );
+            )
+            .expect("invalid update patch");
             db.update::<User>(patch).expect("update failed");
             counter += 1;
         });

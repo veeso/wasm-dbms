@@ -173,8 +173,11 @@ mod tests {
         type Record = UserRecord;
         type Schema = User;
 
-        fn from_values(_values: &[(ColumnDef, Value)], _where_clause: Option<Filter>) -> Self {
-            Self
+        fn from_values(
+            _values: &[(ColumnDef, Value)],
+            _where_clause: Option<Filter>,
+        ) -> wasm_dbms_api::prelude::DbmsResult<Self> {
+            Ok(Self)
         }
 
         fn update_values(&self) -> Vec<(ColumnDef, Value)> {
