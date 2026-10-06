@@ -10,6 +10,7 @@ use wasm_dbms_api::prelude::{
     ColumnDef, DbmsResult, DeleteBehavior, Filter, TableSchema, UpdateRecord as _, Value,
 };
 
+pub(crate) use self::overlay::TableOverlay;
 pub use self::overlay::{DatabaseOverlay, IndexOverlay};
 
 /// A transaction represents a sequence of operations performed as a single

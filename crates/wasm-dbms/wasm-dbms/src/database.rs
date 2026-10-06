@@ -23,7 +23,7 @@ use crate::context::DbmsContext;
 use crate::database::migration::snapshots;
 use crate::schema::DatabaseSchema;
 use crate::transaction::journal::{Journal, JournaledWriter};
-use crate::transaction::{DatabaseOverlay, Transaction, TransactionOp};
+use crate::transaction::{DatabaseOverlay, TableOverlay, Transaction, TransactionOp};
 
 /// Default capacity for SELECT queries.
 const DEFAULT_SELECT_CAPACITY: usize = 128;
@@ -594,6 +594,32 @@ where
         }
     }
 
+    /// Applies the transaction `changes` to a stored row, then checks it against `filter`.
+    ///
+    /// Returns [`None`] when the transaction removed the row or the patched row does not match.
+    fn patch_and_filter(
+        &self,
+        changes: Option<&TableOverlay>,
+        values: Vec<(ColumnDef, Value)>,
+        filter: Option<&Filter>,
+    ) -> DbmsResult<Option<Vec<(ColumnDef, Value)>>> {
+        let values = match changes {
+            Some(overlay) => match overlay.patch_row(values) {
+                Some(patched_values) => patched_values,
+                None => return Ok(None),
+            },
+            None => values,
+        };
+
+        if let Some(filter) = filter
+            && !self.record_matches_filter(&values, filter)?
+        {
+            return Ok(None);
+        }
+
+        Ok(Some(values))
+    }
+
     #[expect(
         clippy::type_complexity,
         reason = "complex return type is necessary for returning addresses and overlay PKs"
@@ -624,6 +650,7 @@ where
 
         let mut indexed_rows = Vec::new();
         let pk_name = T::primary_key();
+        let table_changes = table_overlay.table_overlay(T::table_name());
 
         for address in &search_result.addresses {
             let record: T = table_registry
@@ -642,16 +669,16 @@ where
                 continue;
             }
 
-            if let Some(remaining_filter) = &analyzed.remaining_filter
-                && !self.record_matches_filter(&values, remaining_filter)?
+            // The index only tracks indexed columns, so a stored row may still carry changes
+            // that the transaction made to other columns.
+            if let Some(values) =
+                self.patch_and_filter(table_changes, values, analyzed.remaining_filter.as_ref())?
             {
-                continue;
+                indexed_rows.push(values);
             }
-
-            indexed_rows.push(values);
         }
 
-        if let Some(overlay) = table_overlay.table_overlay(T::table_name()) {
+        if let Some(overlay) = table_changes {
             let mut pending_overlay_pks = search_result.overlay_pks.clone();
 
             for row in overlay.iter_inserted() {
@@ -686,18 +713,13 @@ where
                         let record: T = table_registry
                             .read_at(address, &mut *mm)
                             .map_err(DbmsError::from)?;
-                        let values = record.to_values();
-                        let Some(patched_values) = overlay.patch_row(values) else {
-                            continue;
-                        };
-
-                        if let Some(remaining_filter) = &analyzed.remaining_filter
-                            && !self.record_matches_filter(&patched_values, remaining_filter)?
-                        {
-                            continue;
+                        if let Some(values) = self.patch_and_filter(
+                            Some(overlay),
+                            record.to_values(),
+                            analyzed.remaining_filter.as_ref(),
+                        )? {
+                            indexed_rows.push(values);
                         }
-
-                        indexed_rows.push(patched_values);
                     }
                 }
             }
