@@ -2,6 +2,7 @@
 
 - [Overview](#overview)
 - [Syntax](#syntax)
+  - [Attribute Forms](#attribute-forms)
 - [Built-in Sanitizers](#built-in-sanitizers)
   - [String Sanitizers](#string-sanitizers)
   - [Numeric Sanitizers](#numeric-sanitizers)
@@ -52,6 +53,37 @@ pub struct User {
     pub age: Uint8,
 }
 ```
+
+### Attribute Forms
+
+The first argument of `#[sanitizer(...)]` is always the path of the sanitizer
+type. The arguments that follow depend on how the sanitizer is declared:
+
+| Form          | Syntax                                           | Use when                                        |
+| ------------- | ------------------------------------------------ | ----------------------------------------------- |
+| Unit          | `#[sanitizer(TrimSanitizer)]`                    | The sanitizer is a unit struct with no settings |
+| Tuple         | `#[sanitizer(RoundToScaleSanitizer(2))]`         | The sanitizer is a tuple struct                 |
+| Named options | `#[sanitizer(ClampSanitizer, min = 0, max = 9)]` | The sanitizer is a struct with named fields     |
+
+Rules:
+
+- The sanitizer path may be qualified, for example
+  `#[sanitizer(wasm_dbms_api::prelude::TrimSanitizer)]`.
+- Tuple arguments are positional and are passed to the tuple struct in order.
+  Named options are `name = value` pairs, written after the sanitizer path and
+  separated by commas. Values are Rust expressions, so negative numbers such as
+  `min = -100` are allowed.
+- A tuple sanitizer cannot be combined with named options:
+  `#[sanitizer(RoundToScaleSanitizer(2), scale = 3)]` is rejected.
+- The sanitizer path must come first. `#[sanitizer(min = 0, ClampSanitizer)]`
+  is rejected.
+- Every named option must be an assignment. `#[sanitizer(ClampSanitizer, 5)]`
+  is rejected.
+- An empty attribute, `#[sanitizer()]`, is rejected.
+- Invalid attributes fail at compile time with an error pointing at the
+  offending tokens.
+- A field can have several `#[sanitizer(...)]` attributes. They run in the order
+  they are written, as described in [Sanitization Order](#sanitization-order).
 
 ---
 
