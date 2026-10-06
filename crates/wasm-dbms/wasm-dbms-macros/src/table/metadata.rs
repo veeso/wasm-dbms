@@ -1012,4 +1012,63 @@ mod tests {
             assert!(result.is_err(), "`{ty_str}` should be rejected");
         }
     }
+
+    fn sanitizer_attr(args: TokenStream2) -> syn::Attribute {
+        syn::parse_quote! { #[sanitizer(#args)] }
+    }
+
+    #[test]
+    fn test_should_parse_unit_tuple_and_named_sanitizers() {
+        let unit = parse_sanitizer(&sanitizer_attr(quote::quote! { TrimSanitizer }))
+            .expect("unit sanitizer should parse");
+        assert!(matches!(unit, Sanitizer::Unit { name } if name.is_ident("TrimSanitizer")));
+
+        let qualified = parse_sanitizer(&sanitizer_attr(
+            quote::quote! { wasm_dbms_api::prelude::TrimSanitizer },
+        ))
+        .expect("qualified unit sanitizer should parse");
+        assert!(matches!(qualified, Sanitizer::Unit { name } if name.segments.len() == 3));
+
+        let tuple = parse_sanitizer(&sanitizer_attr(quote::quote! { RoundToScaleSanitizer(2) }))
+            .expect("tuple sanitizer should parse");
+        assert!(matches!(
+            tuple,
+            Sanitizer::Tuple { name, args }
+                if name.is_ident("RoundToScaleSanitizer") && args.len() == 1
+        ));
+
+        let named = parse_sanitizer(&sanitizer_attr(
+            quote::quote! { ClampSanitizer, min = -10, max = 100 },
+        ))
+        .expect("named sanitizer should parse");
+        assert!(matches!(
+            named,
+            Sanitizer::NamedArgs { name, args }
+                if name.is_ident("ClampSanitizer")
+                    && args.contains_key(&Ident::new("min", proc_macro2::Span::call_site()))
+                    && args.contains_key(&Ident::new("max", proc_macro2::Span::call_site()))
+        ));
+    }
+
+    #[test]
+    fn test_should_reject_invalid_sanitizer_attributes() {
+        let invalid = [
+            quote::quote! {},
+            quote::quote! { RoundToScaleSanitizer(2), min = 0 },
+            quote::quote! { ClampSanitizer, 5 },
+            quote::quote! { ClampSanitizer, min },
+            quote::quote! { ClampSanitizer, (a, b) = 0 },
+            quote::quote! { min = 0, ClampSanitizer },
+            quote::quote! { "TrimSanitizer" },
+            quote::quote! { (TrimSanitizer)(1) },
+        ];
+
+        for args in invalid {
+            let args_str = args.to_string();
+            assert!(
+                parse_sanitizer(&sanitizer_attr(args)).is_err(),
+                "`{args_str}` should be rejected"
+            );
+        }
+    }
 }

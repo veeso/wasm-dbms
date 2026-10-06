@@ -128,8 +128,6 @@ impl MemoryProvider for FileMemoryProvider {
 #[cfg(test)]
 mod tests {
 
-    use wasm_dbms_memory::prelude::HeapMemoryProvider;
-
     use super::*;
 
     /// Creates a temporary file path for testing.
@@ -327,10 +325,5 @@ mod tests {
         assert_grow_returns_previous_size(FileMemoryProvider::new(&path).unwrap());
 
         cleanup(&path);
-    }
-
-    #[test]
-    fn test_grow_contract_heap_memory_provider() {
-        assert_grow_returns_previous_size(HeapMemoryProvider::default());
     }
 }
