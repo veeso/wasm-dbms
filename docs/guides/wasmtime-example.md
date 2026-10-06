@@ -60,7 +60,7 @@ This raw/dynamic API is intentional: WIT cannot express Rust generics or user-de
 
 The guest (`crates/wasm-dbms/example/guest/`) compiles to `wasm32-wasip2` and exports the WIT `database` interface. Internally it:
 
-1. Initializes a `DbmsContext<FileMemoryProvider>` lazily on first call
+1. Initializes a `DbmsContext<FileMemoryProvider>` lazily on first call; if the database file cannot be opened or the tables cannot be registered, the call returns a `dbms-error` (for example `memory-error`) instead of trapping, and the next call retries
 2. Registers example tables (`users`, `posts`) using `#[derive(Table)]`
 3. Converts between WIT variant values and wasm-dbms `Value` types
 4. Dispatches operations through a `DatabaseSchema` implementation
