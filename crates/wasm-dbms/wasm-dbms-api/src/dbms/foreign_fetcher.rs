@@ -7,9 +7,13 @@ use crate::prelude::{ColumnDef, Database};
 
 /// Fetches related records from foreign tables referenced by foreign keys.
 ///
+/// A relation is identified by the referenced table and the local foreign key column; records
+/// of the referenced table are looked up by the referenced column declared for that foreign key
+/// (`ForeignKeyDef::foreign_column`), which is not necessarily the primary key.
+///
 /// This trait provides two methods:
 ///
-/// - [`ForeignFetcher::fetch`] retrieves a single foreign record by primary key.
+/// - [`ForeignFetcher::fetch`] retrieves a single foreign record by referenced column value.
 ///   Used during integrity checks (insert/update validation) to verify that a
 ///   foreign key reference points to an existing record.
 ///
@@ -24,38 +28,45 @@ pub trait ForeignFetcher: Default {
     /// * `database` - The database from which to fetch the data.
     /// * `table` - The name of the foreign table to query.
     /// * `local_column` - The local column that holds the foreign key reference.
-    /// * `pk_value` - The primary key value to look up in the foreign table.
+    /// * `value` - The referenced column value to look up in the foreign table.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A result containing the fetched table columns or an error.
+    /// Returns [`QueryError::BrokenForeignKeyReference`](crate::prelude::QueryError::BrokenForeignKeyReference)
+    /// if no record holds `value`, or an error if the relation is unknown or the query fails.
     fn fetch(
         &self,
         database: &impl Database,
         table: &str,
         local_column: &'static str,
-        pk_value: Value,
+        value: Value,
     ) -> DbmsResult<TableColumns>;
 
     /// Batch-fetches foreign records for eager relation loading.
     ///
     /// Resolves the N+1 query problem by fetching all foreign records whose
-    /// primary key is contained in `pk_values` in a single `Filter::In` query.
+    /// referenced column value is contained in `values` in a single `Filter::In` query.
     ///
     /// # Arguments
     ///
     /// * `database` - The database from which to fetch the data.
     /// * `table` - The name of the foreign table to query.
-    /// * `pk_values` - The distinct primary key values to look up.
+    /// * `local_column` - The local column that holds the foreign key reference.
+    /// * `values` - The distinct referenced column values to look up.
     ///
     /// # Returns
     ///
-    /// A map from each primary key value to its fetched column data.
+    /// A map from each referenced column value to its fetched column data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the relation is unknown or the query fails.
     fn fetch_batch(
         &self,
         database: &impl Database,
         table: &str,
-        pk_values: &[Value],
+        local_column: &'static str,
+        values: &[Value],
     ) -> DbmsResult<HashMap<Value, Vec<(ColumnDef, Value)>>>;
 }
 
@@ -69,7 +80,7 @@ impl ForeignFetcher for NoForeignFetcher {
         _database: &impl Database,
         _table: &str,
         _local_column: &'static str,
-        _pk_value: Value,
+        _value: Value,
     ) -> DbmsResult<TableColumns> {
         unimplemented!("NoForeignFetcher should have a table without foreign keys");
     }
@@ -78,7 +89,8 @@ impl ForeignFetcher for NoForeignFetcher {
         &self,
         _database: &impl Database,
         _table: &str,
-        _pk_values: &[Value],
+        _local_column: &'static str,
+        _values: &[Value],
     ) -> DbmsResult<HashMap<Value, Vec<(ColumnDef, Value)>>> {
         unimplemented!("NoForeignFetcher should have a table without foreign keys");
     }
@@ -104,7 +116,12 @@ mod tests {
     #[should_panic(expected = "NoForeignFetcher should have a table without foreign keys")]
     fn test_no_foreign_fetcher_batch() {
         let fetcher = NoForeignFetcher;
-        let _ = fetcher.fetch_batch(&MockDatabase, "some_table", &[Value::Uint32(1.into())]);
+        let _ = fetcher.fetch_batch(
+            &MockDatabase,
+            "some_table",
+            "some_column",
+            &[Value::Uint32(1.into())],
+        );
     }
 
     struct MockDatabase;

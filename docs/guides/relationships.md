@@ -70,6 +70,10 @@ When you define a foreign key:
 2. The referenced table must be registered in your database schema
 3. Foreign key values must reference existing records (enforced on insert/update)
 
+Existence checks, eager loading and delete behaviors all match foreign key values against
+the declared `column`. A referenced column other than the primary key should be `#[unique]`,
+so that each value identifies a single record.
+
 ### Nullable Foreign Keys
 
 Declare an optional relation by wrapping the foreign key type in `Nullable`:
