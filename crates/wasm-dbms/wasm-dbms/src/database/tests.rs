@@ -3938,3 +3938,33 @@ fn qualified_field_types_map_to_built_in_columns() {
     assert_eq!(rows[0].nickname, Some(Nullable::Null));
     assert_eq!(rows[0].score, Some(Nullable::Value(Uint32(7))));
 }
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "private_rows"]
+struct PrivateRow {
+    #[primary_key]
+    id: Uint32,
+    label: Text,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(PrivateRow = "private_rows")]
+struct PrivateRowTestSchema;
+
+#[test]
+fn private_table_struct_round_trips_through_insert_and_select() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    PrivateRowTestSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, PrivateRowTestSchema);
+
+    db.insert::<PrivateRow>(PrivateRowInsertRequest {
+        id: Uint32(1),
+        label: Text("hidden".to_string()),
+    })
+    .unwrap();
+
+    let rows = db.select::<PrivateRow>(Query::builder().build()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(Uint32(1)));
+    assert_eq!(rows[0].label, Some(Text("hidden".to_string())));
+}

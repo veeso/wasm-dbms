@@ -2,7 +2,8 @@ use proc_macro2::TokenStream as TokenStream2;
 
 use crate::table::metadata::TableMetadata;
 
-pub fn generate_foreign_fetcher(metadata: &TableMetadata) -> TokenStream2 {
+/// Generate the foreign fetcher type, declared with `vis`, if the table has foreign keys.
+pub fn generate_foreign_fetcher(vis: &syn::Visibility, metadata: &TableMetadata) -> TokenStream2 {
     let Some(foreign_fetcher) = metadata.foreign_fetcher.as_ref() else {
         return quote::quote! {};
     };
@@ -12,7 +13,7 @@ pub fn generate_foreign_fetcher(metadata: &TableMetadata) -> TokenStream2 {
 
     quote::quote! {
         #[derive(Default)]
-        pub struct #foreign_fetcher;
+        #vis struct #foreign_fetcher;
 
         impl ::wasm_dbms_api::prelude::ForeignFetcher for #foreign_fetcher {
             #fetch_impl

@@ -589,7 +589,9 @@ impl Migrate for Event {
 
 ## Generated Types
 
-The `Table` macro generates several types for each table.
+The `Table` macro generates several types for each table. Generated types use the
+same visibility as the table struct, so a private table struct can derive `Table`
+and its generated types stay private too.
 
 ### Record Type
 

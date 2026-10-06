@@ -18,10 +18,11 @@ pub fn table(input: DeriveInput) -> syn::Result<TokenStream2> {
     };
     let metadata = self::metadata::collect_table_metadata(&input.ident, data, &input.attrs)?;
     let table_schema_tokens = self::table_schema::generate_table_schema(&input.ident, &metadata)?;
-    let record_impl = self::record::generate_record(&input.ident, &metadata);
-    let insert_impl = self::insert::generate_insert_request(&input.ident, &metadata);
-    let update_impl = self::update::generate_update_request(&input.ident, &metadata);
-    let foreign_fetcher_impl = self::foreign_fetcher::generate_foreign_fetcher(&metadata);
+    let record_impl = self::record::generate_record(&input.ident, &input.vis, &metadata);
+    let insert_impl = self::insert::generate_insert_request(&input.ident, &input.vis, &metadata);
+    let update_impl = self::update::generate_update_request(&input.ident, &input.vis, &metadata);
+    let foreign_fetcher_impl =
+        self::foreign_fetcher::generate_foreign_fetcher(&input.vis, &metadata);
     let encode_impl = crate::encode::encode(input, metadata.alignment)?;
 
     Ok(quote::quote! {

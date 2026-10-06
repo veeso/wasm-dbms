@@ -234,6 +234,8 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
 /// - `${StructName}UpdateRequest` - implementing `UpdateRecord`
 /// - `${StructName}ForeignFetcher` (only if foreign keys are present)
 ///
+/// Every generated type is declared with the visibility of the annotated struct.
+///
 /// Also, we will implement the `TableSchema` trait for the struct itself and derive `Encode` for `${StructName}`.
 ///
 /// ## Attributes
