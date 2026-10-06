@@ -53,9 +53,26 @@ where
 
 // ── Value conversion ────────────────────────────────────────────────
 
-fn wit_value_to_dbms(v: wit::Value) -> Value {
+/// Converts a WIT [`wit::Value`] into a wasm-dbms [`Value`].
+///
+/// String-encoded variants are parsed strictly so that every value produced by
+/// [`dbms_value_to_wit`] converts back to an equal [`Value`]:
+///
+/// - `decimal-val`: exact decimal notation, e.g. `-12.3450`.
+/// - `date-val`: `YYYY-MM-DD`, validated against the calendar.
+/// - `datetime-val`: `YYYY-MM-DDTHH:MM:SS[.ffffff](Z|±HH:MM)`, the RFC 3339
+///   subset emitted by [`DateTime`]'s `Display` implementation.
+/// - `json-val`: any well-formed JSON document.
+/// - `uuid-val`: the hyphenated 36-character form.
+///
+/// # Errors
+///
+/// Returns [`wit::DbmsError::InvalidQuery`] when a string-encoded value is
+/// malformed, so invalid input never reaches the database as `NULL` or as a
+/// default value.
+fn wit_value_to_dbms(v: wit::Value) -> Result<Value, wit::DbmsError> {
     use wasm_dbms_api::prelude as t;
-    match v {
+    let value = match v {
         wit::Value::BoolVal(b) => Value::Boolean(t::Boolean(b)),
         wit::Value::U8Val(n) => Value::Uint8(t::Uint8(n)),
         wit::Value::U16Val(n) => Value::Uint16(t::Uint16(n)),
@@ -67,42 +84,158 @@ fn wit_value_to_dbms(v: wit::Value) -> Value {
         wit::Value::I64Val(n) => Value::Int64(t::Int64(n)),
         wit::Value::TextVal(s) => Value::Text(t::Text(s)),
         wit::Value::BlobVal(b) => Value::Blob(t::Blob(b)),
-        wit::Value::DecimalVal(s) => Value::Decimal(t::Decimal(
-            rust_decimal::Decimal::from_str_exact(&s).unwrap_or_default(),
-        )),
-        wit::Value::DateVal(s) => parse_date(&s).map_or(Value::Null, Value::Date),
-        wit::Value::DatetimeVal(_) => {
-            // The DateTime grammar (with microseconds and timezone offset)
-            // isn't worth re-parsing here. Pass DateTime values via the Text
-            // variant if you need to round-trip them through the WIT boundary.
-            Value::Null
-        }
-        wit::Value::JsonVal(s) => serde_json::from_str::<serde_json::Value>(&s)
-            .map(|j| Value::Json(t::Json::from(j)))
-            .unwrap_or(Value::Null),
-        wit::Value::UuidVal(_) => {
-            // Same rationale as DateTime — round-trip via Text instead.
-            Value::Null
-        }
+        wit::Value::DecimalVal(s) => rust_decimal::Decimal::from_str_exact(&s)
+            .map(|d| Value::Decimal(t::Decimal(d)))
+            .map_err(|e| invalid_value("decimal", &s, &e.to_string()))?,
+        wit::Value::DateVal(s) => parse_date(&s)
+            .map(Value::Date)
+            .ok_or_else(|| invalid_value("date", &s, "expected a calendar date as YYYY-MM-DD"))?,
+        wit::Value::DatetimeVal(s) => parse_datetime(&s).map(Value::DateTime).ok_or_else(|| {
+            invalid_value(
+                "date-time",
+                &s,
+                "expected YYYY-MM-DDTHH:MM:SS[.ffffff] followed by Z or ±HH:MM",
+            )
+        })?,
+        wit::Value::JsonVal(s) => s
+            .parse::<t::Json>()
+            .map(Value::Json)
+            .map_err(|e| invalid_value("json", &s, &e.to_string()))?,
+        wit::Value::UuidVal(s) => parse_uuid(&s).map(Value::Uuid).ok_or_else(|| {
+            invalid_value("uuid", &s, "expected the hyphenated 36-character form")
+        })?,
         wit::Value::CustomVal(c) => Value::Custom(t::CustomValue {
             type_tag: c.type_tag,
             encoded: c.encoded,
             display: c.display,
         }),
         wit::Value::NullVal => Value::Null,
+    };
+    Ok(value)
+}
+
+/// Builds the error returned for a malformed string-encoded WIT value.
+fn invalid_value(kind: &str, raw: &str, reason: &str) -> wit::DbmsError {
+    wit::DbmsError::InvalidQuery(format!("invalid {kind} value `{raw}`: {reason}"))
+}
+
+/// Parses `s` as an unsigned decimal number made of `min_len..=max_len` ASCII digits.
+fn parse_digits<T>(s: &str, min_len: usize, max_len: usize) -> Option<T>
+where
+    T: std::str::FromStr,
+{
+    let well_formed =
+        (min_len..=max_len).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit());
+    well_formed.then(|| s.parse().ok()).flatten()
+}
+
+/// Returns the number of days in `month` of `year`, or `None` for an invalid month.
+fn days_in_month(year: u16, month: u8) -> Option<u8> {
+    let leap_year =
+        year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => Some(31),
+        4 | 6 | 9 | 11 => Some(30),
+        2 if leap_year => Some(29),
+        2 => Some(28),
+        _ => None,
     }
 }
 
-/// Parses a `YYYY-MM-DD` date string into a [`wasm_dbms_api::prelude::Date`].
+/// Parses a `YYYY-MM-DD` date string into a calendar-valid [`Date`].
 ///
-/// The parser is intentionally narrow — anything outside the canonical
-/// `Display` form returns `None` and is mapped to `Value::Null` by the caller.
-fn parse_date(s: &str) -> Option<wasm_dbms_api::prelude::Date> {
-    let mut parts = s.splitn(3, '-');
-    let year = parts.next()?.parse::<u16>().ok()?;
-    let month = parts.next()?.parse::<u8>().ok()?;
-    let day = parts.next()?.parse::<u8>().ok()?;
-    Some(wasm_dbms_api::prelude::Date { year, month, day })
+/// Returns `None` when the string is not in the `Display` form of [`Date`] or
+/// names a day that does not exist, such as `2025-02-30`.
+fn parse_date(s: &str) -> Option<Date> {
+    let mut parts = s.split('-');
+    let year = parse_digits::<u16>(parts.next()?, 4, 5)?;
+    let month = parse_digits::<u8>(parts.next()?, 2, 2)?;
+    let day = parse_digits::<u8>(parts.next()?, 2, 2)?;
+    if parts.next().is_some() {
+        return None;
+    }
+    days_in_month(year, month)
+        .is_some_and(|max_day| (1..=max_day).contains(&day))
+        .then_some(Date { year, month, day })
+}
+
+/// Parses an RFC 3339 date-time string into a calendar-valid [`DateTime`].
+///
+/// Accepts `YYYY-MM-DDTHH:MM:SS`, an optional fraction of one to six digits,
+/// and either `Z` or a `±HH:MM` offset smaller than one day, which covers the
+/// `Display` form of [`DateTime`].
+fn parse_datetime(s: &str) -> Option<DateTime> {
+    let (date, time) = s.split_once('T')?;
+    let Date { year, month, day } = parse_date(date)?;
+
+    let (clock, timezone_offset_minutes) = match time.strip_suffix('Z') {
+        Some(clock) => (clock, 0),
+        None => {
+            let offset_start = time.rfind(['+', '-'])?;
+            let (clock, offset) = time.split_at(offset_start);
+            (clock, parse_offset(offset)?)
+        }
+    };
+
+    let (hms, fraction) = match clock.split_once('.') {
+        Some((hms, fraction)) => (hms, Some(fraction)),
+        None => (clock, None),
+    };
+    let mut hms = hms.split(':');
+    let hour = parse_digits::<u8>(hms.next()?, 2, 2).filter(|h| *h < 24)?;
+    let minute = parse_digits::<u8>(hms.next()?, 2, 2).filter(|m| *m < 60)?;
+    let second = parse_digits::<u8>(hms.next()?, 2, 2).filter(|s| *s < 60)?;
+    if hms.next().is_some() {
+        return None;
+    }
+    let microsecond = match fraction {
+        Some(fraction) => {
+            let digits = parse_digits::<u32>(fraction, 1, 6)?;
+            digits * 10_u32.pow(6 - fraction.len() as u32)
+        }
+        None => 0,
+    };
+
+    Some(DateTime {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        microsecond,
+        timezone_offset_minutes,
+    })
+}
+
+/// Parses a `±HH:MM` timezone offset smaller than one day into minutes.
+fn parse_offset(offset: &str) -> Option<i16> {
+    let (sign, rest) = match offset.split_at_checked(1)? {
+        ("+", rest) => (1, rest),
+        ("-", rest) => (-1, rest),
+        _ => return None,
+    };
+    let (hours, minutes) = rest.split_once(':')?;
+    let hours = parse_digits::<i16>(hours, 2, 2).filter(|h| *h < 24)?;
+    let minutes = parse_digits::<i16>(minutes, 2, 2).filter(|m| *m < 60)?;
+    Some(sign * (hours * 60 + minutes))
+}
+
+/// Parses a hyphenated UUID string such as `550e8400-e29b-41d4-a716-446655440000`.
+///
+/// Hex digits may be upper or lower case.
+fn parse_uuid(s: &str) -> Option<Uuid> {
+    let well_formed = s.len() == 36
+        && s.bytes().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            _ => b.is_ascii_hexdigit(),
+        });
+    if !well_formed {
+        return None;
+    }
+    let hex = s.replace('-', "");
+    let bits = u128::from_str_radix(&hex, 16).ok()?;
+    Uuid::decode(std::borrow::Cow::Owned(bits.to_be_bytes().to_vec())).ok()
 }
 
 fn dbms_value_to_wit(v: Value) -> wit::Value {
@@ -291,9 +424,16 @@ fn wit_delete_behavior(b: wit::DeleteBehavior) -> DeleteBehavior {
 
 // ── Row conversion ──────────────────────────────────────────────────
 
-fn wit_row_to_named_values(row: Vec<wit::ColumnValue>) -> Vec<(String, Value)> {
+/// Converts a WIT row into named wasm-dbms values.
+///
+/// # Errors
+///
+/// Returns the first conversion error reported by [`wit_value_to_dbms`].
+fn wit_row_to_named_values(
+    row: Vec<wit::ColumnValue>,
+) -> Result<Vec<(String, Value)>, wit::DbmsError> {
     row.into_iter()
-        .map(|cv| (cv.name, wit_value_to_dbms(cv.value)))
+        .map(|cv| wit_value_to_dbms(cv.value).map(|value| (cv.name, value)))
         .collect()
 }
 
@@ -540,7 +680,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         values: wit::Row,
         tx: Option<wit::TransactionId>,
     ) -> Result<(), wit::DbmsError> {
-        let named_values = wit_row_to_named_values(values);
+        let named_values = wit_row_to_named_values(values)?;
         with_dbms(|ctx| {
             let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
             let table_name = intern_str(&table);
@@ -584,7 +724,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         tx: Option<wit::TransactionId>,
     ) -> Result<u64, wit::DbmsError> {
         let filter = parse_filter_json(filter)?;
-        let named_values = wit_row_to_named_values(values);
+        let named_values = wit_row_to_named_values(values)?;
         with_dbms(|ctx| {
             let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
             let table_name = intern_str(&table);
@@ -668,5 +808,132 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
             let mut db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.migrate(policy).map_err(dbms_error_to_wit)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::*;
+
+    fn sample_uuid() -> Value {
+        let bytes = 0x550e_8400_e29b_41d4_a716_4466_5544_0000_u128.to_be_bytes();
+        Value::Uuid(Uuid::decode(Cow::Owned(bytes.to_vec())).expect("valid UUID bytes"))
+    }
+
+    fn sample_datetime(timezone_offset_minutes: i16) -> Value {
+        Value::DateTime(DateTime {
+            year: 2025,
+            month: 1,
+            day: 2,
+            hour: 3,
+            minute: 4,
+            second: 5,
+            microsecond: 123_456,
+            timezone_offset_minutes,
+        })
+    }
+
+    fn assert_invalid(value: wit::Value) {
+        let display = format!("{value:?}");
+        let outcome = wit_value_to_dbms(value);
+        assert!(
+            matches!(outcome, Err(wit::DbmsError::InvalidQuery(_))),
+            "expected a conversion error for {display}, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn test_wit_typed_values_round_trip() {
+        let values = [
+            sample_uuid(),
+            sample_datetime(0),
+            sample_datetime(150),
+            sample_datetime(-300),
+            Value::Date(Date {
+                year: 2024,
+                month: 2,
+                day: 29,
+            }),
+            Value::Decimal(Decimal(
+                rust_decimal::Decimal::from_str_exact("-12.3450").expect("valid decimal"),
+            )),
+            Value::Json(r#"{"a":[1,2]}"#.parse::<Json>().expect("valid JSON")),
+        ];
+
+        for value in values {
+            let round_tripped = wit_value_to_dbms(dbms_value_to_wit(value.clone()))
+                .unwrap_or_else(|e| panic!("{value:?} must round-trip, got {e:?}"));
+            assert_eq!(round_tripped, value);
+        }
+    }
+
+    #[test]
+    fn test_wit_datetime_accepts_rfc3339_utc_designator() {
+        let value = wit_value_to_dbms(wit::Value::DatetimeVal("2025-01-02T03:04:05Z".into()))
+            .expect("RFC 3339 date-time must parse");
+        assert_eq!(
+            value,
+            Value::DateTime(DateTime {
+                year: 2025,
+                month: 1,
+                day: 2,
+                hour: 3,
+                minute: 4,
+                second: 5,
+                microsecond: 0,
+                timezone_offset_minutes: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn test_wit_malformed_values_are_errors() {
+        assert_invalid(wit::Value::DecimalVal("not-a-decimal".into()));
+        assert_invalid(wit::Value::DecimalVal(String::new()));
+        assert_invalid(wit::Value::DateVal("2025-02-30".into()));
+        assert_invalid(wit::Value::DateVal("2023-02-29".into()));
+        assert_invalid(wit::Value::DateVal("2025-13-01".into()));
+        assert_invalid(wit::Value::DateVal("2025-1-1".into()));
+        assert_invalid(wit::Value::DateVal("2025-01-01-01".into()));
+        assert_invalid(wit::Value::JsonVal("{".into()));
+        assert_invalid(wit::Value::UuidVal("not-a-uuid".into()));
+        assert_invalid(wit::Value::UuidVal(
+            "550e8400-e29b-41d4-a716-44665544000g".into(),
+        ));
+        assert_invalid(wit::Value::DatetimeVal("garbage".into()));
+        assert_invalid(wit::Value::DatetimeVal(
+            "2025-02-30T00:00:00.000000+00:00".into(),
+        ));
+        assert_invalid(wit::Value::DatetimeVal(
+            "2025-01-02T24:00:00.000000+00:00".into(),
+        ));
+        assert_invalid(wit::Value::DatetimeVal(
+            "2025-01-02T03:04:05.1234567+00:00".into(),
+        ));
+        assert_invalid(wit::Value::DatetimeVal(
+            "2025-01-02T03:04:05.000000+24:00".into(),
+        ));
+        assert_invalid(wit::Value::DatetimeVal("2025-01-02T03:04:05".into()));
+    }
+
+    #[test]
+    fn test_wit_row_conversion_propagates_malformed_values() {
+        let row = vec![
+            wit::ColumnValue {
+                name: "id".into(),
+                value: wit::Value::U32Val(1),
+            },
+            wit::ColumnValue {
+                name: "payload".into(),
+                value: wit::Value::JsonVal("{".into()),
+            },
+        ];
+
+        assert!(matches!(
+            wit_row_to_named_values(row),
+            Err(wit::DbmsError::InvalidQuery(_))
+        ));
     }
 }
