@@ -4,8 +4,14 @@ use syn::Ident;
 use crate::table::metadata::TableMetadata;
 
 /// Generate the `Record` implementation for `struct_name` using the provided `data` and `metadata`.
-pub fn generate_record(struct_name: &Ident, metadata: &TableMetadata) -> TokenStream2 {
-    let struct_def_tokens = struct_def(metadata);
+///
+/// The record type is declared with `vis`, the visibility of the table struct.
+pub fn generate_record(
+    struct_name: &Ident,
+    vis: &syn::Visibility,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
+    let struct_def_tokens = struct_def(vis, metadata);
     let impl_tokens = impl_record(struct_name, metadata);
 
     quote::quote! {
@@ -16,7 +22,7 @@ pub fn generate_record(struct_name: &Ident, metadata: &TableMetadata) -> TokenSt
 }
 
 /// Generate the `Struct` definition for the `Record` type using the provided `metadata`.
-fn struct_def(metadata: &TableMetadata) -> TokenStream2 {
+fn struct_def(vis: &syn::Visibility, metadata: &TableMetadata) -> TokenStream2 {
     let mut fields = vec![];
 
     for field in &metadata.fields {
@@ -56,7 +62,7 @@ fn struct_def(metadata: &TableMetadata) -> TokenStream2 {
 
     quote::quote! {
         #derives
-        pub struct #record_ident {
+        #vis struct #record_ident {
             #(#fields)*
         }
     }

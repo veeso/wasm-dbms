@@ -3,8 +3,13 @@ use syn::Ident;
 
 use crate::table::metadata::TableMetadata;
 
-pub fn generate_update_request(struct_name: &Ident, metadata: &TableMetadata) -> TokenStream2 {
-    let update_request_struct = generate_update_request_struct(metadata);
+/// Generate the update request type for `struct_name`, declared with `vis`.
+pub fn generate_update_request(
+    struct_name: &Ident,
+    vis: &syn::Visibility,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
+    let update_request_struct = generate_update_request_struct(vis, metadata);
     let update_record_impl = impl_update_record(struct_name, metadata);
 
     quote::quote! {
@@ -33,7 +38,7 @@ pub fn generate_update_request(struct_name: &Ident, metadata: &TableMetadata) ->
 ///     pub where_clause: Option<Filter>,
 /// }
 /// ```
-fn generate_update_request_struct(metadata: &TableMetadata) -> TokenStream2 {
+fn generate_update_request_struct(vis: &syn::Visibility, metadata: &TableMetadata) -> TokenStream2 {
     let mut fields = vec![];
 
     for field in &metadata.fields {
@@ -58,7 +63,7 @@ fn generate_update_request_struct(metadata: &TableMetadata) -> TokenStream2 {
 
     quote::quote! {
         #derives
-        pub struct #update_request_ident {
+        #vis struct #update_request_ident {
             #(#fields)*
             pub where_clause: Option<::wasm_dbms_api::prelude::Filter>,
         }
