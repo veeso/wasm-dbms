@@ -82,6 +82,8 @@ just test_wasm_dbms_example
 cargo run --release -p wasm-dbms-example-host -- .artifact/wasm-dbms-example-guest.wasm
 ```
 
+Each run creates a fresh, uniquely named directory under the system temporary directory, preopens it as the guest's root, and removes it when the demo exits. The guest's `wasm-dbms.db` lives only in that directory, so the demo never reads, modifies, or deletes a `wasm-dbms.db` in your current directory.
+
 Expected output:
 
 ```txt

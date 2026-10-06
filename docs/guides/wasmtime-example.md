@@ -72,7 +72,7 @@ The bridge layer in `lib.rs` handles all the type conversions between the WIT bo
 The host (`crates/wasm-dbms/example/host/`) is a native Rust binary using Wasmtime. It:
 
 1. Creates a Wasmtime engine with Component Model enabled
-2. Sets up a WASI context with a preopened directory for the database file
+2. Creates a fresh, uniquely named directory under the system temporary directory and preopens it as the guest's root, so the database file never touches existing data
 3. Loads the guest `.wasm` component and instantiates it
 4. Calls the exported `database` functions to demonstrate all operations
 
@@ -138,7 +138,7 @@ Or run manually:
 cargo run --release -p wasm-dbms-example-host -- .artifact/wasm-dbms-example-guest.wasm
 ```
 
-The demo inserts users and posts, queries them with filters and ordering, demonstrates transaction commit (data persists) and rollback (data discarded), then cleans up.
+The demo inserts users and posts, queries them with filters and ordering, demonstrates transaction commit (data persists) and rollback (data discarded), then removes the directory it created for this run. A `wasm-dbms.db` file in your current directory is never read, modified, or deleted.
 
 ---
 
