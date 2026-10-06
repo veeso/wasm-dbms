@@ -26,6 +26,7 @@ impl Parse for TableEntry {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let table: syn::Type = input.parse()?;
         input.parse::<syn::Token![=]>()?;
+        // the name literal is only checked for syntax: the engine uses `TableSchema::table_name()`
         input.parse::<syn::LitStr>()?;
 
         Ok(Self { table })

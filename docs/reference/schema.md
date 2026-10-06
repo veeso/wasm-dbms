@@ -47,6 +47,7 @@ wasm-dbms schemas are defined entirely in Rust using derive macros and attribute
 > - **Table name**: at most **255 bytes** (UTF-8).
 > - **Column name**: at most **255 bytes** (UTF-8). Applies to every column, including the primary key and any column referenced by an index or foreign key.
 > - **Custom data type name**: at most **255 bytes** (UTF-8).
+> - **Reserved column name**: `where_clause` cannot be used as a column name, because the generated update request stores its filter in a field with that name.
 > - **Foreign key target** (table name and column name): each at most **255 bytes**.
 > - **Columns per index**: at most **255**.
 > - **Columns per table**: at most **65,535**.
@@ -333,6 +334,8 @@ pub struct Post {
 | `entity`  | Rust struct name of the referenced table |
 | `table`   | Table name (from `#[table = "..."]`)     |
 | `column`  | Column name in the referenced table      |
+
+The referenced column does not need to be the primary key, but it should be `#[unique]`. Existence checks, eager loading, delete behaviors and updates all use the declared column; updating it rewrites the referencing rows.
 
 **Nullable foreign key:**
 

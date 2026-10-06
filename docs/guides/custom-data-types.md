@@ -167,6 +167,8 @@ pub struct Address {
 }
 ```
 
+A struct without fields (`struct Empty {}` or `struct Empty;`) is also supported. It encodes to zero bytes: `SIZE` is `DataSize::Fixed(0)` and `ALIGNMENT` is `1`. The alignment is also `1` for any fixed-size struct whose total size is `0`, because storage divides offsets by the alignment.
+
 **Key `Encode` concepts:**
 
 | Constant             | Description                              |
