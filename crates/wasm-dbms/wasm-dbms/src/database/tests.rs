@@ -3825,6 +3825,62 @@ fn nullable_foreign_key_accepts_null_and_eager_loads_present_relation() {
     assert_eq!(manager.name, Some(Text("boss".to_string())));
 }
 
+fn update_manager(
+    db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+    id: u32,
+    manager_id: Value,
+) -> wasm_dbms_api::prelude::DbmsResult<u64> {
+    let patch = EmployeeUpdateRequest::from_values(
+        &[(Employee::columns()[2], manager_id)],
+        Some(Filter::eq("id", Value::Uint32(Uint32(id)))),
+    );
+    db.update::<Employee>(patch)
+}
+
+fn manager_of(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>, id: u32) -> Value {
+    let rows = db
+        .select_raw(
+            "employees",
+            Query::builder()
+                .filter(Some(Filter::eq("id", Value::Uint32(Uint32(id)))))
+                .build(),
+        )
+        .unwrap();
+    rows[0]
+        .iter()
+        .find(|(column, _)| column.name == "manager_id")
+        .map(|(_, value)| value.clone())
+        .expect("manager_id column should be present")
+}
+
+#[test]
+fn nullable_foreign_key_update_skips_existence_check_for_null() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    EmployeeTestSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, EmployeeTestSchema);
+
+    insert_employee(&db, 1, "boss", None).unwrap();
+    insert_employee(&db, 2, "worker", Some(1)).unwrap();
+
+    // set a present relation to null
+    assert_eq!(update_manager(&db, 2, Value::Null).unwrap(), 1);
+    assert_eq!(manager_of(&db, 2), Value::Null);
+
+    // set null back to an existing relation
+    assert_eq!(update_manager(&db, 2, Value::Uint32(Uint32(1))).unwrap(), 1);
+    assert_eq!(manager_of(&db, 2), Value::Uint32(Uint32(1)));
+
+    // a non-null reference to a missing record is still rejected
+    let err = update_manager(&db, 2, Value::Uint32(Uint32(99))).unwrap_err();
+    assert!(matches!(
+        err,
+        wasm_dbms_api::prelude::DbmsError::Query(
+            wasm_dbms_api::prelude::QueryError::BrokenForeignKeyReference { .. }
+        )
+    ));
+    assert_eq!(manager_of(&db, 2), Value::Uint32(Uint32(1)));
+}
+
 #[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "qualified_types"]
 pub struct QualifiedTypes {

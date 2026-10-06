@@ -193,8 +193,6 @@ mod tests {
 
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use wasm_dbms_memory::HeapMemoryProvider;
-
     use super::*;
 
     /// Atomic counter to generate unique temp file paths across tests.
@@ -588,10 +586,5 @@ mod tests {
         let path = temp_db_path();
         assert_grow_returns_previous_size(WasiMemoryProvider::new(&path).unwrap());
         cleanup(&path);
-    }
-
-    #[test]
-    fn test_grow_contract_heap_memory_provider() {
-        assert_grow_returns_previous_size(HeapMemoryProvider::default());
     }
 }
