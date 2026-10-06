@@ -44,6 +44,16 @@ The WIT definition (`/wit/dbms.wit`) exposes a `database` interface with these o
 
 Values are passed as a `value` variant type that covers booleans, integers, floats, strings, blobs, and null. Filters are JSON-serialized strings matching the `wasm_dbms_api::Filter` type.
 
+Decimals, dates, date-times, JSON documents, and UUIDs travel as strings. The guest parses them strictly and returns an `invalid-query` error for a malformed value, such as `2025-02-30` or `{`, instead of storing a default or null value:
+
+| Variant        | Accepted form                                                       |
+| -------------- | ------------------------------------------------------------------- |
+| `decimal-val`  | Exact decimal notation, for example `-12.3450`                      |
+| `date-val`     | `YYYY-MM-DD`, validated against the calendar                        |
+| `datetime-val` | `YYYY-MM-DDTHH:MM:SS`, optional `.ffffff`, then `Z` or `±HH:MM`     |
+| `json-val`     | Any well-formed JSON document                                       |
+| `uuid-val`     | Hyphenated form, for example `550e8400-e29b-41d4-a716-446655440000` |
+
 This raw/dynamic API is intentional: WIT cannot express Rust generics or user-defined table schemas, so type safety is enforced inside the guest by the wasm-dbms engine.
 
 ### Guest Component
