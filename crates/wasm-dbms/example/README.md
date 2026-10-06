@@ -132,3 +132,15 @@ Expected output:
    ```rust
    "comments" => Ok(schema::Comment::columns()),
    ```
+
+5. Add the table name to `registered_table_names()` in `guest/src/lib.rs`, so that the guest resolves `"comments"` to the schema's static table name:
+
+   ```rust
+   fn registered_table_names() -> [&'static str; 3] {
+       [
+           schema::User::table_name(),
+           schema::Post::table_name(),
+           schema::Comment::table_name(),
+       ]
+   }
+   ```
