@@ -242,7 +242,14 @@ pub struct ColumnChanges {
 }
 ```
 
-In JSON, `ColumnChanges::foreign_key` has three distinct forms: the field is omitted when the foreign key is unchanged, `null` when it is dropped, and a foreign-key snapshot object when it is added or replaced.
+In JSON, `ColumnChanges::foreign_key` has three distinct forms:
+
+- the field is omitted when the foreign key is unchanged;
+- `null` when the foreign key is dropped;
+- a foreign-key snapshot object when it is added or replaced.
+
+This representation targets JSON and other self-describing, human-readable
+formats. Candid uses its own encoding, which keeps both option layers.
 
 ### Apply Order
 
