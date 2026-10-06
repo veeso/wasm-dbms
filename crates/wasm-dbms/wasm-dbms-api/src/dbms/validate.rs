@@ -4,6 +4,7 @@
 //! whether the value passes the validation or not.
 
 mod case;
+mod chain;
 mod color;
 mod email;
 mod locale;
@@ -12,6 +13,7 @@ mod strlen;
 mod web;
 
 pub use self::case::{CamelCaseValidator, KebabCaseValidator, SnakeCaseValidator};
+pub use self::chain::ValidatorChain;
 pub use self::color::RgbColorValidator;
 pub use self::email::EmailValidator;
 pub use self::locale::{CountryIso639Validator, CountryIso3166Validator};

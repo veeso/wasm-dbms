@@ -4449,3 +4449,49 @@ fn foreign_key_on_a_non_primary_column_guards_deletes_and_primary_key_updates() 
             .is_empty()
     );
 }
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "validated_names"]
+pub struct ValidatedName {
+    #[primary_key]
+    #[autoincrement]
+    pub id: Uint32,
+    #[validate(wasm_dbms_api::prelude::MinStrlenValidator(2))]
+    #[validate(wasm_dbms_api::prelude::MaxStrlenValidator(20))]
+    #[sanitizer(wasm_dbms_api::prelude::TrimSanitizer)]
+    #[sanitizer(wasm_dbms_api::prelude::LowerCaseSanitizer)]
+    pub name: Text,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(ValidatedName = "validated_names")]
+pub struct ValidatedNameTestSchema;
+
+#[test]
+fn repeated_validators_and_sanitizers_all_run_in_source_order() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    ValidatedNameTestSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, ValidatedNameTestSchema);
+    let insert_name = |name: String| {
+        db.insert::<ValidatedName>(ValidatedNameInsertRequest {
+            id: wasm_dbms_api::prelude::Autoincrement::Auto,
+            name: Text(name.clone()),
+        })?;
+        let rows = db.select::<ValidatedName>(
+            Query::builder()
+                .filter(Some(Filter::eq(
+                    "name",
+                    Value::Text(Text(name.trim().to_lowercase())),
+                )))
+                .build(),
+        )?;
+        Ok::<_, wasm_dbms_api::prelude::DbmsError>(rows[0].clone())
+    };
+
+    assert!(insert_name("x".to_string()).is_err());
+    assert!(insert_name("x".repeat(21)).is_err());
+    assert_eq!(
+        insert_name("  ALICE  ".to_string()).unwrap().name,
+        Some(Text("alice".into()))
+    );
+}

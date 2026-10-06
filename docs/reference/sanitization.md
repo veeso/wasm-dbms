@@ -327,6 +327,10 @@ pub struct User {
 // After LowerCaseSanitizer: "alice@example.com"
 ```
 
+Each sanitizer receives the output of the previous one, and the first error stops the chain.
+The generated table schema combines them into a `SanitizerChain`, which you can also build
+yourself when implementing `TableSchema` by hand.
+
 **Sanitizers run before validators:**
 
 ```rust

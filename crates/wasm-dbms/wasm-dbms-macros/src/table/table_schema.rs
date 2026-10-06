@@ -288,23 +288,37 @@ fn to_values(fields: &[Field]) -> TokenStream2 {
 }
 
 /// Generate the match arms for the validators function.
+///
+/// A column with several `#[validate(...)]` attributes gets a `ValidatorChain` running them in
+/// declaration order.
 fn validators(fields: &[Field]) -> TokenStream2 {
     let mut arms = vec![];
 
     for field in fields {
-        if let Some(validator) = &field.validate {
-            let field_name = field.name.to_string();
-            let validator_struct = &validator.path;
-            let args = &validator.args;
-            if args.is_empty() {
-                arms.push(quote::quote! {
-                    #field_name => Some(Box::new(#validator_struct)),
-                });
-            } else {
-                arms.push(quote::quote! {
-                    #field_name => Some(Box::new(#validator_struct(#(#args),*))),
-                });
-            }
+        let validators: Vec<_> = field
+            .validate
+            .iter()
+            .map(|validator| {
+                let validator_struct = &validator.path;
+                let args = &validator.args;
+                if args.is_empty() {
+                    quote::quote! { #validator_struct }
+                } else {
+                    quote::quote! { #validator_struct(#(#args),*) }
+                }
+            })
+            .collect();
+        let field_name = field.name.to_string();
+        match validators.as_slice() {
+            [] => {}
+            [validator] => arms.push(quote::quote! {
+                #field_name => Some(Box::new(#validator)),
+            }),
+            validators => arms.push(quote::quote! {
+                #field_name => Some(Box::new(::wasm_dbms_api::prelude::ValidatorChain::new(vec![
+                    #(Box::new(#validators)),*
+                ]))),
+            }),
         }
     }
 
@@ -320,34 +334,40 @@ fn validators(fields: &[Field]) -> TokenStream2 {
 }
 
 /// Generate the match arms for the sanitizers function.
+///
+/// A column with several `#[sanitizer(...)]` attributes gets a `SanitizerChain` applying them in
+/// declaration order.
 fn sanitizers(fields: &[Field]) -> TokenStream2 {
     let mut arms = vec![];
 
     for field in fields {
-        if let Some(sanitizer) = &field.sanitize {
-            let field_name = field.name.to_string();
-            match sanitizer {
-                Sanitizer::Unit { name } => {
-                    arms.push(quote::quote! {
-                        #field_name => Some(Box::new(#name)),
-                    });
-                }
-                Sanitizer::Tuple { name, args } => {
-                    arms.push(quote::quote! {
-                        #field_name => Some(Box::new(#name(#(#args),*))),
-                    });
-                }
+        let sanitizers: Vec<_> = field
+            .sanitize
+            .iter()
+            .map(|sanitizer| match sanitizer {
+                Sanitizer::Unit { name } => quote::quote! { #name },
+                Sanitizer::Tuple { name, args } => quote::quote! { #name(#(#args),*) },
                 Sanitizer::NamedArgs { name, args } => {
                     let fields = args.iter().map(|(ident, expr)| {
                         quote::quote! {
                             #ident: #expr
                         }
                     });
-                    arms.push(quote::quote! {
-                        #field_name => Some(Box::new(#name { #(#fields),* })),
-                    });
+                    quote::quote! { #name { #(#fields),* } }
                 }
-            }
+            })
+            .collect();
+        let field_name = field.name.to_string();
+        match sanitizers.as_slice() {
+            [] => {}
+            [sanitizer] => arms.push(quote::quote! {
+                #field_name => Some(Box::new(#sanitizer)),
+            }),
+            sanitizers => arms.push(quote::quote! {
+                #field_name => Some(Box::new(::wasm_dbms_api::prelude::SanitizerChain::new(vec![
+                    #(Box::new(#sanitizers)),*
+                ]))),
+            }),
         }
     }
 

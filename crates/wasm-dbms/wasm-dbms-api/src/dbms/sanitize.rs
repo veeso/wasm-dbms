@@ -5,6 +5,7 @@
 //!
 //! This module contains the [`Sanitize`] trait which should be implemented by all sanitizers.
 
+mod chain;
 mod clamp;
 mod collapse_whitespace;
 mod lowercase;
@@ -16,6 +17,7 @@ mod trim;
 mod uppercase;
 mod url_encoding;
 
+pub use self::chain::SanitizerChain;
 pub use self::clamp::{ClampSanitizer, ClampUnsignedSanitizer};
 pub use self::collapse_whitespace::CollapseWhitespaceSanitizer;
 pub use self::lowercase::LowerCaseSanitizer;
