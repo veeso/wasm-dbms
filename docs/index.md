@@ -28,6 +28,25 @@ wasm-dbms supports any WASM runtime (Wasmtime, Wasmer, WasmEdge). For the Intern
 
 ---
 
+## Why wasm-dbms?
+
+A WASM module is a sandbox with a linear memory and little else. Most embedded databases expect a filesystem and a C
+toolchain, so using them from WASM means porting a native engine, depending on storage provided by one specific host,
+or building tables by hand on a key-value store. wasm-dbms is a relational engine designed for the sandbox instead:
+
+- **Runs wherever WASM runs**: pure Rust, builds for `wasm32-unknown-unknown`, no C toolchain, WASI or JavaScript
+  glue required
+- **Storage is a trait**: the engine works on 64 KiB pages behind `MemoryProvider`, so the same database runs on the
+  heap, on a file, on Internet Computer stable memory, or on your own storage
+- **The schema is Rust code**: tables are structs, queries are typed, and mistakes are compile errors
+- **Relational, not key-value**: foreign keys, joins, transactions, indexes and migrations are built in
+- **Ships inside your module**: no connection, no network round trip, no service to operate
+
+Read [Why wasm-dbms?](./why-wasm-dbms.md) for the full reasoning and a comparison with SQLite on WASM, Turso, GlueSQL,
+DuckDB-Wasm, PGlite, key-value stores and host-provided storage.
+
+---
+
 ## Documentation
 
 ### Guides

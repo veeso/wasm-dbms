@@ -15,6 +15,36 @@
 An embeddable relational database engine written in Rust, designed to run inside WASM runtimes. Internet Computer
 canisters are supported through the dedicated [ic-dbms](https://github.com/veeso/ic-dbms) project.
 
+## Why wasm-dbms?
+
+A WASM module is a sandbox with a linear memory and little else. Most embedded databases expect a filesystem and a C
+toolchain, so using them from WASM means porting a native engine, depending on storage provided by one specific host,
+or building tables by hand on a key-value store. wasm-dbms is a relational engine designed for the sandbox instead:
+
+- **Runs wherever WASM runs**: pure Rust, builds for `wasm32-unknown-unknown`, no C toolchain, WASI or JavaScript
+  glue required
+- **Storage is a trait**: the engine works on 64 KiB pages behind `MemoryProvider`, so the same database runs on the
+  heap, on a file, on Internet Computer stable memory, or on your own storage
+- **The schema is Rust code**: tables are structs, queries are typed, and mistakes are compile errors
+- **Relational, not key-value**: foreign keys, joins, transactions, indexes and migrations are built in
+- **Ships inside your module**: no connection, no network round trip, no service to operate
+
+### How It Compares
+
+| Option                    | Engine language | How you query                 | Where it runs                             |
+| ------------------------- | --------------- | ----------------------------- | ----------------------------------------- |
+| **wasm-dbms**             | Rust            | Typed Rust API, WIT interface | Any WASM runtime                          |
+| SQLite compiled to WASM   | C               | SQL                           | Browsers, WASI runtimes                   |
+| Turso Database            | Rust            | SQL (SQLite compatible)       | Native, browsers through WASM bindings    |
+| GlueSQL                   | Rust            | SQL, query builder            | Native, browsers and Node.js              |
+| DuckDB-Wasm               | C++             | SQL (analytics)               | Browsers                                  |
+| PGlite                    | C               | SQL (Postgres)                | Browsers, Node.js, Bun                    |
+| Embedded key-value stores | Rust            | Get, put, range               | Native targets, custom backends elsewhere |
+| Host-provided storage     | Host specific   | Host SQL or key-value API     | That host only                            |
+
+wasm-dbms is not the best fit for every project. The [full comparison](https://wasm-dbms.cc/why-wasm-dbms.html)
+explains when to choose each alternative, and when wasm-dbms is the wrong tool.
+
 ## Overview
 
 This repository contains two crate families:
@@ -79,7 +109,7 @@ database.insert::<User>(UserInsertRequest {
 let users = database.select::<User>(Query::builder().all().build())?;
 ```
 
-The `MemoryProvider` trait abstracts storage — use `HeapMemoryProvider` for testing, `FileMemoryProvider` for
+The `MemoryProvider` trait abstracts storage — use `HeapMemoryProvider` for testing, `WasiMemoryProvider` for
 Wasmtime/WASI, or implement your own for any WASM runtime.
 
 ### Component Model (WIT)
