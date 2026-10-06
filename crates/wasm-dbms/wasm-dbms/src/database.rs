@@ -213,16 +213,12 @@ where
     where
         T: TableSchema,
     {
-        let pk = Self::extract_pk::<T>(record_values)?;
-
-        for (table, columns) in self.schema.referenced_tables(T::table_name()) {
-            for column in columns.iter() {
-                let filter = Filter::eq(column, pk.clone());
-                let query = Query::builder().field(column).filter(Some(filter)).build();
-                let rows = self.schema.select(self, table, query)?;
-                if !rows.is_empty() {
-                    return Ok(true);
-                }
+        for (table, column, value) in self.referencing_columns::<T>(record_values)? {
+            let filter = Filter::eq(column, value);
+            let query = Query::builder().field(column).filter(Some(filter)).build();
+            let rows = self.schema.select(self, table, query)?;
+            if !rows.is_empty() {
+                return Ok(true);
             }
         }
         Ok(false)
@@ -236,33 +232,57 @@ where
     where
         T: TableSchema,
     {
-        let pk = Self::extract_pk::<T>(record_values)?;
-
         let mut count = 0;
-        for (table, columns) in self.schema.referenced_tables(T::table_name()) {
-            for column in columns.iter() {
-                let filter = Filter::eq(column, pk.clone());
-                let res = self
-                    .schema
-                    .delete(self, table, DeleteBehavior::Cascade, Some(filter))?;
-                count += res;
-            }
+        for (table, column, value) in self.referencing_columns::<T>(record_values)? {
+            let filter = Filter::eq(column, value);
+            count += self
+                .schema
+                .delete(self, table, DeleteBehavior::Cascade, Some(filter))?;
         }
         Ok(count)
     }
 
-    /// Extracts the primary key value from a record's column-value pairs.
-    fn extract_pk<T>(record_values: &[(ColumnDef, Value)]) -> DbmsResult<Value>
+    /// Lists the foreign key columns referencing the given record of `T`.
+    ///
+    /// Each entry is the referencing table, its foreign key column and the value of the
+    /// referenced column of the record, i.e. the value a referencing row stores.
+    fn referencing_columns<T>(
+        &self,
+        record_values: &[(ColumnDef, Value)],
+    ) -> DbmsResult<Vec<(&'static str, &'static str, Value)>>
     where
         T: TableSchema,
     {
-        record_values
-            .iter()
-            .find(|(col_def, _)| col_def.primary_key)
-            .ok_or(DbmsError::Query(QueryError::UnknownColumn(
-                T::primary_key().to_string(),
-            )))
-            .map(|(_, v)| v.clone())
+        let mut referencing = Vec::new();
+        for (table, columns) in self.schema.referenced_tables(T::table_name()) {
+            for column in columns {
+                let referenced_column = self.referenced_column::<T>(table, column);
+                let value = record_values
+                    .iter()
+                    .find(|(col_def, _)| col_def.name == referenced_column)
+                    .map(|(_, value)| value.clone())
+                    .ok_or_else(|| {
+                        DbmsError::Query(QueryError::UnknownColumn(referenced_column.to_string()))
+                    })?;
+                referencing.push((table, column, value));
+            }
+        }
+        Ok(referencing)
+    }
+
+    /// Returns the column of `T` referenced by the foreign key `column` of `table`.
+    ///
+    /// Falls back to the primary key of `T` when the schema does not expose column metadata.
+    fn referenced_column<T>(&self, table: &str, column: &str) -> &'static str
+    where
+        T: TableSchema,
+    {
+        self.schema
+            .table_columns(table)
+            .ok()
+            .and_then(|columns| columns.iter().find(|col_def| col_def.name == column))
+            .and_then(|col_def| col_def.foreign_key.as_ref())
+            .map_or(T::primary_key(), |fk| fk.foreign_column)
     }
 
     /// Retrieves the current overlay from the active transaction.
@@ -344,7 +364,7 @@ where
             let fk_columns = Self::collect_fk_values::<T>(results, relation)?;
 
             for (local_column, pk_values) in &fk_columns {
-                let batch_map = fetcher.fetch_batch(self, relation, pk_values)?;
+                let batch_map = fetcher.fetch_batch(self, relation, local_column, pk_values)?;
 
                 Self::verify_fk_batch(&batch_map, pk_values, relation)?;
                 Self::attach_foreign_data(results, &batch_map, relation, local_column);
@@ -785,6 +805,9 @@ where
     }
 
     /// Updates primary key references in tables referencing the updated table.
+    ///
+    /// Only foreign keys that reference the primary key are rewritten; foreign keys referencing
+    /// another column of `T` keep their value.
     fn update_pk_referencing_updated_table<T>(
         &self,
         old_pk: Value,
@@ -804,6 +827,9 @@ where
                 ref_cols
                     .into_iter()
                     .map(move |ref_col| (ref_table, ref_col))
+            })
+            .filter(|(ref_table, ref_col)| {
+                self.referenced_column::<T>(ref_table, ref_col) == pk_name
             })
         {
             let ref_patch_value = (

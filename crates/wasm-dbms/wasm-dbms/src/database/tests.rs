@@ -4240,8 +4240,17 @@ pub struct KeyUser {
     pub nickname: Nullable<Text>,
 }
 
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "key_posts"]
+pub struct KeyPost {
+    #[primary_key]
+    pub id: Uint32,
+    #[foreign_key(entity = "KeyUser", table = "key_users", column = "code")]
+    pub owner: Uint32,
+}
+
 #[derive(DatabaseSchema)]
-#[tables(KeyUser = "key_users")]
+#[tables(KeyUser = "key_users", KeyPost = "key_posts")]
 pub struct KeySchema;
 
 fn key_user_code(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>) -> Option<Uint32> {
@@ -4330,4 +4339,113 @@ fn dynamic_update_rejects_a_custom_value_of_another_type() {
         .select::<GenericRow<Priority>>(Query::builder().build())
         .unwrap();
     assert_eq!(rows[0].payload, Some(payload));
+}
+
+#[test]
+fn foreign_key_uses_the_declared_referenced_column() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    KeySchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, KeySchema);
+    db.insert::<KeyUser>(KeyUserInsertRequest {
+        id: 1.into(),
+        code: 10.into(),
+        nickname: Nullable::Null,
+    })
+    .unwrap();
+
+    assert!(
+        db.insert::<KeyPost>(KeyPostInsertRequest {
+            id: 1.into(),
+            owner: 10.into(),
+        })
+        .is_ok()
+    );
+    assert!(
+        db.insert::<KeyPost>(KeyPostInsertRequest {
+            id: 2.into(),
+            owner: 1.into(),
+        })
+        .is_err()
+    );
+
+    // eager loading resolves the relation through `code`
+    let posts = db
+        .select::<KeyPost>(Query::builder().all().with("key_users").build())
+        .unwrap();
+    assert_eq!(posts.len(), 1);
+    let owner = posts[0]
+        .owner
+        .as_ref()
+        .expect("owner should be eager loaded");
+    assert_eq!(owner.id, Some(Uint32(1)));
+    assert_eq!(owner.code, Some(Uint32(10)));
+}
+
+#[test]
+fn foreign_key_on_a_non_primary_column_guards_deletes_and_primary_key_updates() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    KeySchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, KeySchema);
+    for (id, code) in [(1, 10), (10, 20)] {
+        db.insert::<KeyUser>(KeyUserInsertRequest {
+            id: id.into(),
+            code: code.into(),
+            nickname: Nullable::Null,
+        })
+        .unwrap();
+    }
+    db.insert::<KeyPost>(KeyPostInsertRequest {
+        id: 1.into(),
+        owner: 10.into(),
+    })
+    .unwrap();
+
+    // user 1 (code 10) is referenced by the post: restrict must reject the delete
+    let restricted = db.delete::<KeyUser>(
+        DeleteBehavior::Restrict,
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    assert!(restricted.is_err());
+
+    // changing the primary key of user 10 (code 20) must not rewrite the post, whose owner
+    // value 10 is a `code`, not a primary key
+    let patch = KeyUserUpdateRequest {
+        id: Some(Uint32(7)),
+        where_clause: Some(Filter::eq("id", Value::Uint32(Uint32(10)))),
+        ..Default::default()
+    };
+    assert_eq!(db.update::<KeyUser>(patch).unwrap(), 1);
+    let raw = db
+        .select_raw("key_posts", Query::builder().build())
+        .unwrap();
+    assert!(
+        raw[0]
+            .iter()
+            .any(|(column, value)| column.name == "owner" && *value == Value::Uint32(Uint32(10)))
+    );
+
+    // user 7 (code 20) is not referenced
+    assert_eq!(
+        db.delete::<KeyUser>(
+            DeleteBehavior::Restrict,
+            Some(Filter::eq("id", Value::Uint32(Uint32(7)))),
+        )
+        .unwrap(),
+        1
+    );
+
+    // cascade removes the post referencing code 10
+    assert_eq!(
+        db.delete::<KeyUser>(
+            DeleteBehavior::Cascade,
+            Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        )
+        .unwrap(),
+        2
+    );
+    assert!(
+        db.select::<KeyPost>(Query::builder().build())
+            .unwrap()
+            .is_empty()
+    );
 }
