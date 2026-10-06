@@ -2,7 +2,8 @@
 //!
 //! Every allocation is forwarded unchanged to [`System`]; the allocator only
 //! records the largest request made by each thread, so tests running in
-//! parallel do not observe each other's allocations.
+//! parallel do not observe each other's allocations. The allocator is installed
+//! for the whole unit-test binary of this crate.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;

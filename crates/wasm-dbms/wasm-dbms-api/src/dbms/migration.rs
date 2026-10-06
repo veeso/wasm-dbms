@@ -171,8 +171,11 @@ pub struct ColumnChanges {
     /// New foreign-key state. `Some(None)` means the foreign key was dropped;
     /// `Some(Some(fk))` means it was added or replaced.
     ///
-    /// In human-readable formats such as JSON, `None` omits the field,
-    /// `Some(None)` is written as `null`, and `Some(Some(fk))` as the snapshot.
+    /// The serde representation is meant for self-describing, human-readable
+    /// formats such as JSON: `None` omits the field, `Some(None)` is written as
+    /// `null`, and `Some(Some(fk))` as the snapshot. It must not be used with
+    /// non-self-describing binary serde formats, because the omitted field
+    /// shifts the positions of the following ones. Candid has its own encoding.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
