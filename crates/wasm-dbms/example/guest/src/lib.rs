@@ -11,7 +11,6 @@ pub mod file_provider;
 pub mod schema;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::path::Path;
 
 use ::wasm_dbms::prelude::{DatabaseSchema as _, DbmsContext, WasmDbmsDatabase};
@@ -495,24 +494,28 @@ fn table_columns(table: &str) -> DbmsResult<&'static [ColumnDef]> {
     }
 }
 
-thread_local! {
-    static INTERNED_STRINGS: RefCell<HashMap<String, &'static str>> = RefCell::new(HashMap::new());
+/// Returns the names of every table registered by [`ExampleDatabaseSchema`].
+fn registered_table_names() -> [&'static str; 2] {
+    [schema::User::table_name(), schema::Post::table_name()]
 }
 
-/// Interns a string into `&'static str`, reusing previously leaked copies.
+/// Resolves a caller-provided table name to the `&'static str` name of a
+/// registered table.
 ///
-/// `DatabaseSchema` methods require `&'static str` table names, but the
-/// WIT boundary delivers owned `String`s. This function ensures each
-/// unique string value is leaked at most once.
-fn intern_str(s: &str) -> &'static str {
-    INTERNED_STRINGS.with_borrow_mut(|map| {
-        if let Some(existing) = map.get(s) {
-            return *existing;
-        }
-        let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
-        map.insert(s.to_string(), leaked);
-        leaked
-    })
+/// `DatabaseSchema` methods require `&'static str` table names, while the WIT
+/// boundary delivers owned `String`s. Looking the name up in the finite set of
+/// registered tables yields the schema's own static name, so no
+/// caller-provided string is ever leaked or retained.
+///
+/// # Errors
+///
+/// Returns [`wit::DbmsError::TableNotFound`] when no registered table has the
+/// given name.
+fn resolve_table_name(name: &str) -> Result<&'static str, wit::DbmsError> {
+    registered_table_names()
+        .into_iter()
+        .find(|table| *table == name)
+        .ok_or_else(|| wit::DbmsError::TableNotFound(name.to_string()))
 }
 
 // ── Migration conversion ────────────────────────────────────────────
@@ -700,9 +703,10 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         tx: Option<wit::TransactionId>,
     ) -> Result<(), wit::DbmsError> {
         let named_values = wit_row_to_named_values(values)?;
+        let table_name = resolve_table_name(&table)?;
         with_dbms(|ctx| {
-            let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
-            let table_name = intern_str(&table);
+            let col_values =
+                match_column_defs(table_name, named_values).map_err(dbms_error_to_wit)?;
 
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
@@ -726,8 +730,8 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         let query = wit_query_to_dbms(query).map_err(wit::DbmsError::InvalidQuery)?;
         let aggs: Vec<AggregateFunction> =
             aggregates.into_iter().map(wit_aggregate_to_dbms).collect();
+        let table_name = resolve_table_name(&table)?;
         with_dbms(|ctx| {
-            let table_name = intern_str(&table);
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             ExampleDatabaseSchema
                 .aggregate(&db, table_name, query, &aggs)
@@ -744,9 +748,10 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     ) -> Result<u64, wit::DbmsError> {
         let filter = parse_filter_json(filter)?;
         let named_values = wit_row_to_named_values(values)?;
+        let table_name = resolve_table_name(&table)?;
         with_dbms(|ctx| {
-            let col_values = match_column_defs(&table, named_values).map_err(dbms_error_to_wit)?;
-            let table_name = intern_str(&table);
+            let col_values =
+                match_column_defs(table_name, named_values).map_err(dbms_error_to_wit)?;
 
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
@@ -770,9 +775,8 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     ) -> Result<u64, wit::DbmsError> {
         let filter = parse_filter_json(filter)?;
         let behavior = wit_delete_behavior(behavior);
+        let table_name = resolve_table_name(&table)?;
         with_dbms(|ctx| {
-            let table_name = intern_str(&table);
-
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
                 ExampleDatabaseSchema
@@ -1003,5 +1007,30 @@ mod tests {
             wit_row_to_named_values(row),
             Err(wit::DbmsError::InvalidQuery(_))
         ));
+    }
+
+    #[test]
+    fn test_resolve_table_name_rejects_many_distinct_unknown_names() {
+        for n in 0..1_000 {
+            let name = format!("missing_{n}");
+            let error = resolve_table_name(&name).expect_err("unknown table must be rejected");
+            assert!(
+                matches!(&error, wit::DbmsError::TableNotFound(table) if *table == name),
+                "unexpected error {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_resolve_table_name_returns_the_static_schema_name() {
+        for (requested, expected) in [
+            (String::from("users"), schema::User::table_name()),
+            (String::from("posts"), schema::Post::table_name()),
+        ] {
+            let resolved = resolve_table_name(&requested).expect("registered table");
+            assert_eq!(resolved, expected);
+            assert!(std::ptr::eq(resolved, expected));
+            assert!(!std::ptr::eq(resolved, requested.as_str()));
+        }
     }
 }

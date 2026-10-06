@@ -174,7 +174,19 @@ To add your own tables to the example:
    "comments" => Ok(schema::Comment::columns()),
    ```
 
-5. **Rebuild** with `just build_wasm_dbms_example`.
+5. **Register the table name** in `registered_table_names()` (`guest/src/lib.rs`). The guest resolves caller-provided table names against this finite list, so unknown names are rejected with `table-not-found` and are never retained:
+
+   ```rust
+   fn registered_table_names() -> [&'static str; 3] {
+       [
+           schema::User::table_name(),
+           schema::Post::table_name(),
+           schema::Comment::table_name(),
+       ]
+   }
+   ```
+
+6. **Rebuild** with `just build_wasm_dbms_example`.
 
 ---
 
