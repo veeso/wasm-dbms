@@ -4063,3 +4063,102 @@ fn generic_table_and_schema_round_trip_through_insert_and_select() {
                 && *value == Value::from(payload.clone()))
     );
 }
+
+/// Table whose column names match identifiers used inside the generated code.
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "shadowing_rows"]
+pub struct ShadowingRow {
+    #[primary_key]
+    pub id: Uint32,
+    pub data: Text,
+    pub values: Text,
+    pub offset: Uint32,
+    pub column: Nullable<Text>,
+    pub this_record_values: Text,
+    #[custom_type]
+    pub cv: Priority,
+    #[custom_type]
+    pub decoded: Nullable<Priority>,
+    #[foreign_key(entity = "User", table = "users", column = "id")]
+    pub has_fk_values: Uint32,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(User = "users", ShadowingRow = "shadowing_rows")]
+pub struct ShadowingTestSchema;
+
+/// `Encode` struct whose field names match the generated decoder locals.
+#[derive(Debug, Clone, PartialEq, Eq, wasm_dbms_macros::Encode)]
+pub struct EncodedRow {
+    data: Text,
+    offset: Uint32,
+    number: Uint32,
+}
+
+#[test]
+fn encode_derive_round_trips_fields_named_like_decoder_locals() {
+    use wasm_dbms_api::prelude::Encode as _;
+
+    let row = EncodedRow {
+        data: Text("payload".to_string()),
+        offset: Uint32(7),
+        number: Uint32(42),
+    };
+    let encoded = row.encode();
+    assert_eq!(EncodedRow::decode(encoded).unwrap(), row);
+}
+
+#[test]
+fn table_fields_named_like_generated_locals_round_trip() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    ShadowingTestSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, ShadowingTestSchema);
+    insert_user(&db, 1, "owner");
+
+    let priority = |level: u8| Priority {
+        level: wasm_dbms_api::prelude::Uint8(level),
+    };
+    let columns = ShadowingRow::columns();
+    let insert = ShadowingRowInsertRequest::from_values(&[
+        (columns[0], Value::Uint32(Uint32(1))),
+        (columns[1], Value::Text(Text("data".to_string()))),
+        (columns[2], Value::Text(Text("values".to_string()))),
+        (columns[3], Value::Uint32(Uint32(3))),
+        (columns[4], Value::Text(Text("column".to_string()))),
+        (columns[5], Value::Text(Text("this".to_string()))),
+        (columns[6], Value::from(priority(1))),
+        (columns[7], Value::from(priority(2))),
+        (columns[8], Value::Uint32(Uint32(1))),
+    ])
+    .unwrap();
+    db.insert::<ShadowingRow>(insert).unwrap();
+
+    let patch = ShadowingRowUpdateRequest::from_values(
+        &[
+            (columns[1], Value::Text(Text("new data".to_string()))),
+            (columns[2], Value::Text(Text("new values".to_string()))),
+            (columns[4], Value::Null),
+            (columns[6], Value::from(priority(5))),
+        ],
+        Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+    );
+    assert_eq!(db.update::<ShadowingRow>(patch).unwrap(), 1);
+
+    let rows = db
+        .select::<ShadowingRow>(Query::builder().all().with("users").build())
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row.data, Some(Text("new data".to_string())));
+    assert_eq!(row.values, Some(Text("new values".to_string())));
+    assert_eq!(row.offset, Some(Uint32(3)));
+    assert_eq!(row.column, Some(Nullable::Null));
+    assert_eq!(row.this_record_values, Some(Text("this".to_string())));
+    assert_eq!(row.cv, Some(priority(5)));
+    assert_eq!(row.decoded, Some(Nullable::Value(priority(2))));
+    let owner = row
+        .has_fk_values
+        .as_ref()
+        .expect("owner should be eager loaded");
+    assert_eq!(owner.name, Some(Text("owner".to_string())));
+}

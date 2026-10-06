@@ -684,6 +684,10 @@ let update = UserUpdateRequest::builder()
 database.update::<User>(update)?;
 ```
 
+The generated update request stores its filter in a `where_clause` field, so
+`where_clause` is a reserved column name: a table field with that name is rejected with a
+compile error.
+
 **Builder methods:**
 
 - `set_{field_name}(value)` - Set a field value

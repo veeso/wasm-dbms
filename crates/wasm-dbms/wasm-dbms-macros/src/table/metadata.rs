@@ -18,6 +18,9 @@ const ATTRIBUTE_DEFAULT: &str = "default";
 const ATTRIBUTE_RENAMED_FROM: &str = "renamed_from";
 const ATTRIBUTE_MIGRATE: &str = "migrate";
 
+/// Column name reserved for the filter field of the generated update request.
+const RESERVED_WHERE_CLAUSE: &str = "where_clause";
+
 /// Representation of a foreign key in a table
 pub struct ForeignKey {
     /// Entity referenced (e.g. `User`)
@@ -639,6 +642,13 @@ fn get_fields(
             .as_ref()
             .cloned()
             .ok_or(syn::Error::new_spanned(field, "All fields must be named"))?;
+        if name == RESERVED_WHERE_CLAUSE {
+            return Err(syn::Error::new_spanned(
+                &name,
+                "`where_clause` is a reserved column name: the generated update request uses it \
+                 for its filter",
+            ));
+        }
         let primary_key = &name == primary_key;
 
         let is_fk = foreign_keys.iter().any(|fk| fk.field == name);
@@ -1011,6 +1021,25 @@ mod tests {
             });
             assert!(result.is_err(), "`{ty_str}` should be rejected");
         }
+    }
+
+    #[test]
+    fn test_should_reject_reserved_where_clause_column() {
+        let err = metadata_for(syn::parse_quote! {
+            #[table = "where_clause_column"]
+            struct WhereRow {
+                #[primary_key]
+                id: Uint32,
+                where_clause: Text,
+            }
+        })
+        .err()
+        .expect("`where_clause` column should be rejected");
+        assert_eq!(
+            err.to_string(),
+            "`where_clause` is a reserved column name: the generated update request uses it for \
+             its filter"
+        );
     }
 
     fn sanitizer_attr(args: TokenStream2) -> syn::Attribute {

@@ -123,7 +123,7 @@ fn impl_update_record(
 ///    let mut user_id: Option<Uint32> = None;
 ///
 ///    for (column, value) in values {
-///        match column.name {
+///        match __wasm_dbms_column.name {
 ///            "id" => {
 ///                if let Value::Uint32(v) = value {
 ///                    id = Some(*v);
@@ -180,11 +180,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             if field.nullable {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = __col_value {
-                            if let Ok(decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
-                                std::borrow::Cow::Borrowed(&cv.encoded)
+                        if let ::wasm_dbms_api::prelude::Value::Custom(__wasm_dbms_custom) = __col_value {
+                            if let Ok(__wasm_dbms_decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
+                                std::borrow::Cow::Borrowed(&__wasm_dbms_custom.encoded)
                             ) {
-                                #field_name = Some(::wasm_dbms_api::prelude::Nullable::Value(decoded));
+                                #field_name = Some(::wasm_dbms_api::prelude::Nullable::Value(__wasm_dbms_decoded));
                             }
                         } else if let ::wasm_dbms_api::prelude::Value::Null = __col_value {
                             #field_name = Some(::wasm_dbms_api::prelude::Nullable::Null);
@@ -194,11 +194,11 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
             } else {
                 match_arms.push(quote::quote! {
                     #field_name_str => {
-                        if let ::wasm_dbms_api::prelude::Value::Custom(cv) = __col_value {
-                            if let Ok(decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
-                                std::borrow::Cow::Borrowed(&cv.encoded)
+                        if let ::wasm_dbms_api::prelude::Value::Custom(__wasm_dbms_custom) = __col_value {
+                            if let Ok(__wasm_dbms_decoded) = <#custom_ident as ::wasm_dbms_api::prelude::Encode>::decode(
+                                std::borrow::Cow::Borrowed(&__wasm_dbms_custom.encoded)
                             ) {
-                                #field_name = Some(decoded);
+                                #field_name = Some(__wasm_dbms_decoded);
                             }
                         }
                     }
@@ -240,13 +240,14 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
         });
     }
 
+    // locals are prefixed so that they cannot clash with the field bindings declared above
     quote::quote! {
         #[allow(clippy::copy_clone)]
-        fn from_values(values: &[(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)], where_clause: Option<::wasm_dbms_api::prelude::Filter>) -> Self {
+        fn from_values(__wasm_dbms_values: &[(::wasm_dbms_api::prelude::ColumnDef, ::wasm_dbms_api::prelude::Value)], __wasm_dbms_where_clause: Option<::wasm_dbms_api::prelude::Filter>) -> Self {
             #(#field_initializers)*
 
-            for (column, __col_value) in values {
-                match column.name {
+            for (__wasm_dbms_column, __col_value) in __wasm_dbms_values {
+                match __wasm_dbms_column.name {
                     #(#match_arms)*
                     _ => {/* Ignore unknown columns */}
                 }
@@ -254,7 +255,7 @@ fn impl_from_values(metadata: &TableMetadata) -> TokenStream2 {
 
             Self {
                 #(#constructor_fields)*
-                where_clause,
+                where_clause: __wasm_dbms_where_clause,
             }
         }
     }

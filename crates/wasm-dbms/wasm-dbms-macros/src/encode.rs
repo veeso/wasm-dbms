@@ -128,15 +128,15 @@ fn impl_encode(struct_data: &DataStruct) -> TokenStream2 {
         let field_name = &field.ident;
 
         quote::quote! {
-            encoded.extend_from_slice(&<#field_ty as ::wasm_dbms_api::prelude::Encode>::encode(&self.#field_name));
+            __wasm_dbms_encoded.extend_from_slice(&<#field_ty as ::wasm_dbms_api::prelude::Encode>::encode(&self.#field_name));
         }
     });
 
     quote::quote! {
         fn encode(&'_ self) -> std::borrow::Cow<'_, [u8]> {
-            let mut encoded = Vec::with_capacity(self.size() as usize);
+            let mut __wasm_dbms_encoded = Vec::with_capacity(self.size() as usize);
             #(#encodings)*
-            std::borrow::Cow::Owned(encoded)
+            std::borrow::Cow::Owned(__wasm_dbms_encoded)
         }
     }
 }
@@ -148,8 +148,8 @@ fn impl_decode(struct_data: &DataStruct) -> TokenStream2 {
         let field_ty = &field.ty;
 
         quote::quote! {
-            let #field_name = <#field_ty as ::wasm_dbms_api::prelude::Encode>::decode(std::borrow::Cow::Borrowed(&data[offset..]))?;
-            offset += #field_name.size() as usize;
+            let #field_name = <#field_ty as ::wasm_dbms_api::prelude::Encode>::decode(std::borrow::Cow::Borrowed(&__wasm_dbms_data[__wasm_dbms_offset..]))?;
+            __wasm_dbms_offset += <#field_ty as ::wasm_dbms_api::prelude::Encode>::size(&#field_name) as usize;
         }
     });
 
@@ -159,9 +159,10 @@ fn impl_decode(struct_data: &DataStruct) -> TokenStream2 {
         .map(|field| &field.ident)
         .collect::<Vec<_>>();
 
+    // locals are prefixed so that they cannot be shadowed by the field bindings
     quote::quote! {
-        fn decode(data: std::borrow::Cow<[u8]>) -> ::wasm_dbms_api::prelude::MemoryResult<Self> {
-            let mut offset = 0;
+        fn decode(__wasm_dbms_data: std::borrow::Cow<[u8]>) -> ::wasm_dbms_api::prelude::MemoryResult<Self> {
+            let mut __wasm_dbms_offset = 0;
             #(#decodings)*
 
             Ok(Self {
