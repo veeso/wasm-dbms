@@ -103,6 +103,10 @@ Queries containing joins must be executed via `Database::select_join`. Calling
 `Database::select::<T>` with a joined query returns
 `QueryError::JoinInsideTypedSelect`.
 
+A join condition matches only equal, non-null values. A `NULL` join key never
+matches another row, including a row whose join key is also `NULL`. Outer joins
+retain such rows as unmatched and fill the missing side with `Value::Null`.
+
 ### Eager Loading
 
 ```rust

@@ -1,0 +1,166 @@
+# INSERT INTO table (columns) VALUES (values)
+#
+# Format: see src/parser/tests/fixtures.rs.
+
+=== single column
+INSERT INTO users (id) VALUES (1)
+---
+(insert users (columns id) (values 1))
+
+=== every literal kind
+INSERT INTO users (id, name, score, active, nickname)
+VALUES (1, 'Alice', 9.5, TRUE, NULL);
+---
+(insert users (columns id name score active nickname)
+  (values 1 'Alice' 9.5 true null))
+
+=== placeholders are numbered in order of appearance
+insert into users (id, name, email) values (?, ?, ?)
+---
+(insert users (columns id name email) (values ?0 ?1 ?2))
+
+=== placeholders mixed with literals
+INSERT INTO posts (id, title, user_id) VALUES (?, 'Hello', ?)
+---
+(insert posts (columns id title user_id) (values ?0 'Hello' ?1))
+
+=== negative numbers
+INSERT INTO t (a, b, c) VALUES (-1, - 2.50, -0)
+---
+(insert t (columns a b c) (values -1 -2.50 0))
+
+=== false literal
+INSERT INTO flags (id, enabled) VALUES (7, false)
+---
+(insert flags (columns id enabled) (values 7 false))
+
+=== integer limits
+INSERT INTO t (a, b) VALUES (18446744073709551615, -9223372036854775808)
+---
+(insert t (columns a b) (values 18446744073709551615 -9223372036854775808))
+
+=== quoted reserved names
+INSERT INTO "order" ("select", "from") VALUES (1, 2)
+---
+(insert order (columns select from) (values 1 2))
+
+=== quoted names with spaces
+INSERT INTO "my table" ("first name") VALUES ('x')
+---
+(insert "my table" (columns "first name") (values 'x'))
+
+=== string escapes and comment markers inside strings
+INSERT INTO t (a, b, c, d) VALUES ('it''s', '', 'semi;colon -- not a comment', '/* neither */')
+---
+(insert t (columns a b c d)
+  (values 'it''s' '' 'semi;colon -- not a comment' '/* neither */'))
+
+=== question mark inside a string is not a placeholder
+INSERT INTO t (a, b) VALUES ('what?', ?)
+---
+(insert t (columns a b) (values 'what?' ?0))
+
+=== column names that match aggregate functions
+INSERT INTO stats (count, sum, min, max, avg) VALUES (1, 2, 3, 4, 5)
+---
+(insert stats (columns count sum min max avg) (values 1 2 3 4 5))
+
+=== error: missing column list
+INSERT INTO users VALUES (1, 'Alice')
+---
+error 1:19: INSERT requires an explicit column list
+
+=== error: missing into
+INSERT users (id) VALUES (1)
+---
+error 1:8: expected `INTO`, found identifier `users`
+
+=== error: missing table name
+INSERT INTO (id) VALUES (1)
+---
+error 1:13: expected a table name, found `(`
+
+=== error: reserved word as table name
+INSERT INTO order (id) VALUES (1)
+---
+error 1:13: expected a table name, found keyword `ORDER` (reserved words must be double-quoted to be used as names)
+
+=== error: reserved word as column name
+INSERT INTO users (id, group) VALUES (1, 2)
+---
+error 1:24: expected a column name, found keyword `GROUP` (reserved words must be double-quoted to be used as names)
+
+=== error: empty column list
+INSERT INTO users () VALUES ()
+---
+error 1:20: expected a column name, found `)`
+
+=== error: duplicate column
+INSERT INTO users (id, name, id) VALUES (1, 'a', 2)
+---
+error 1:30: duplicate column `id`
+
+=== error: more columns than values
+INSERT INTO users (id, name) VALUES (1)
+---
+error 1:30: column count (2) does not match value count (1)
+
+=== error: more values than columns
+INSERT INTO users (id) VALUES (1, 2)
+---
+error 1:24: column count (1) does not match value count (2)
+
+=== error: missing values keyword
+INSERT INTO users (id) (1)
+---
+error 1:24: expected `VALUES`, found `(`
+
+=== error: multi-row insert
+INSERT INTO users (id) VALUES (1), (2)
+---
+error 1:34: multi-row INSERT is not supported
+
+=== error: insert from select
+INSERT INTO users (id) SELECT id FROM other
+---
+error 1:24: expected `VALUES`, found keyword `SELECT`
+
+=== error: column reference as value
+INSERT INTO users (id) VALUES (other_id)
+---
+error 1:32: expected a literal or `?`, found identifier `other_id`
+
+=== error: arithmetic in values
+INSERT INTO users (id) VALUES (1 + 2)
+---
+error 1:34: unexpected character `+`
+
+=== error: unclosed value list
+INSERT INTO users (id) VALUES (1
+---
+error 1:33: expected `,` or `)`, found end of input
+
+=== error: unclosed column list
+INSERT INTO users (id VALUES (1)
+---
+error 1:23: expected `,` or `)`, found keyword `VALUES`
+
+=== error: minus before a string
+INSERT INTO users (id) VALUES (-'a')
+---
+error 1:33: expected a number after `-`, found string literal
+
+=== error: qualified column in the column list
+INSERT INTO users (users.id) VALUES (1)
+---
+error 1:25: expected `,` or `)`, found `.`
+
+=== error: trailing comma in values
+INSERT INTO users (id) VALUES (1,)
+---
+error 1:34: expected a literal or `?`, found `)`
+
+=== error: double-quoted string as value
+INSERT INTO users (name) VALUES ("Alice")
+---
+error 1:34: expected a literal or `?`, found identifier `Alice`

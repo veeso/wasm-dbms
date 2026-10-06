@@ -1,0 +1,83 @@
+# DELETE FROM table WHERE condition [CASCADE | RESTRICT]
+#
+# Format: see src/parser/tests/fixtures.rs.
+
+=== restrict is the default
+DELETE FROM users WHERE id = 1
+---
+(delete users (where (= id 1)) restrict)
+
+=== explicit restrict
+DELETE FROM users WHERE id = 1 RESTRICT;
+---
+(delete users (where (= id 1)) restrict)
+
+=== cascade
+delete from users where id = ? cascade
+---
+(delete users (where (= id ?0)) cascade)
+
+=== cascade after a compound condition
+DELETE FROM posts WHERE user_id = 3 AND draft = TRUE CASCADE
+---
+(delete posts (where (and (= user_id 3) (= draft true))) cascade)
+
+=== quoted reserved table name
+DELETE FROM "group" WHERE id = 1
+---
+(delete group (where (= id 1)) restrict)
+
+=== qualified column
+DELETE FROM users WHERE users.id = 1
+---
+(delete users (where (= users.id 1)) restrict)
+
+=== error: missing where
+DELETE FROM users
+---
+error missing-where
+
+=== error: missing where with a semicolon
+DELETE FROM users;
+---
+error missing-where
+
+=== error: missing where before cascade
+DELETE FROM users CASCADE
+---
+error missing-where
+
+=== error: missing from
+DELETE users WHERE id = 1
+---
+error 1:8: expected `FROM`, found identifier `users`
+
+=== error: missing table name
+DELETE FROM WHERE id = 1
+---
+error 1:13: expected a table name, found keyword `WHERE` (reserved words must be double-quoted to be used as names)
+
+=== error: both behaviors
+DELETE FROM users WHERE id = 1 CASCADE RESTRICT
+---
+error 1:40: expected end of statement, found keyword `RESTRICT`
+
+=== error: limit in delete
+DELETE FROM users WHERE id = 1 LIMIT 1
+---
+error 1:32: expected end of statement, found keyword `LIMIT`
+
+=== error: table alias in delete
+DELETE FROM users u WHERE u.id = 1
+---
+error 1:19: expected `WHERE`, found identifier `u`
+
+=== error: delete with a select list
+DELETE * FROM users WHERE id = 1
+---
+error 1:8: expected `FROM`, found `*`
+
+=== error: truncate is not supported
+TRUNCATE TABLE users
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found identifier `TRUNCATE`

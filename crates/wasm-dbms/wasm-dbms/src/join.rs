@@ -181,14 +181,19 @@ where
             left_rows
                 .iter()
                 .filter_map(|row| self.get_column_value(row, left_table, left_col).cloned())
+                .filter(|value| !value.is_null())
                 .filter(|value| seen.insert(value.clone()))
                 .collect()
         };
 
-        if unique_join_values.is_empty() || keep_unmatched_right {
+        if keep_unmatched_right {
             return self
                 .schema
                 .select(dbms, right_table, Query::builder().all().build());
+        }
+
+        if unique_join_values.is_empty() {
+            return Ok(Vec::new());
         }
 
         self.schema.select(
@@ -237,7 +242,11 @@ where
                     .find(|(c, _)| c.name == right_col)
                     .map(|(_, v)| v);
 
-                if left_value == right_value && left_value.is_some() {
+                if let (Some(left), Some(right)) = (left_value, right_value)
+                    && !left.is_null()
+                    && !right.is_null()
+                    && left == right
+                {
                     let mut new_row = left_row.clone();
                     new_row.push((right_table.to_string(), right_row.clone()));
                     results.push(new_row);
@@ -370,8 +379,8 @@ where
 mod tests {
 
     use wasm_dbms_api::prelude::{
-        Database as _, DbmsError, Filter, InsertRecord as _, JoinColumnDef, Query, QueryError,
-        TableSchema as _, Text, Uint32, Value,
+        Database as _, DbmsError, Filter, InsertRecord as _, JoinColumnDef, Nullable, Query,
+        QueryError, TableSchema as _, Text, Uint32, Value,
     };
     use wasm_dbms_macros::{DatabaseSchema, Table};
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
@@ -387,6 +396,7 @@ mod tests {
         #[primary_key]
         pub id: Uint32,
         pub name: Text,
+        pub code: Nullable<Uint32>,
     }
 
     #[derive(Debug, Table, Clone, PartialEq, Eq)]
@@ -396,6 +406,7 @@ mod tests {
         pub id: Uint32,
         pub name: Text,
         pub dept_id: Uint32,
+        pub dept_code: Nullable<Uint32>,
     }
 
     #[derive(DatabaseSchema)]
@@ -497,6 +508,62 @@ mod tests {
         ])
         .unwrap();
         db.insert::<IndexedEmployee>(insert).unwrap();
+    }
+
+    #[test]
+    fn test_inner_join_does_not_match_null_keys() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_emp(&db, 10, "alice", 1);
+        insert_emp(&db, 11, "bob", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "code", "dept_code")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_outer_join_keeps_rows_with_null_keys_unmatched() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .full_join("employees", "code", "dept_code")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert_eq!(results.len(), 2);
+        let non_null_ids: Vec<Vec<(&str, Value)>> = results
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .filter(|(column, value)| column.name == "id" && !value.is_null())
+                    .map(|(column, value)| {
+                        (
+                            column
+                                .table
+                                .as_deref()
+                                .expect("join column must name its table"),
+                            value.clone(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            non_null_ids,
+            vec![
+                vec![("departments", Value::from(1u32))],
+                vec![("employees", Value::from(10u32))],
+            ]
+        );
     }
 
     #[test]

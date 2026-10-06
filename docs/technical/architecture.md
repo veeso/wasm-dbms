@@ -13,6 +13,7 @@
       - [wasm-dbms-api](#wasm-dbms-api)
       - [wasm-dbms-memory](#wasm-dbms-memory)
       - [wasm-dbms](#wasm-dbms)
+      - [wasm-dbms-sql](#wasm-dbms-sql)
       - [wasm-dbms-macros](#wasm-dbms-macros)
   - [Data Flow](#data-flow)
     - [Insert Operation](#insert-operation)
@@ -207,6 +208,7 @@ wasm-dbms/
 │   │   ├── wasm-dbms-api/          # Shared types and traits
 │   │   ├── wasm-dbms-memory/       # Memory abstraction and page management
 │   │   ├── wasm-dbms/              # Core DBMS engine
+│   │   ├── wasm-dbms-sql/          # SQL front-end (parser, planner, executor)
 │   │   └── wasm-dbms-macros/       # Procedural macros (Encode, Table, CustomDataType, DatabaseSchema)
 │   │
 │   └── wasi-dbms/                  # WASI-specific crates
@@ -218,8 +220,11 @@ wasm-dbms/
 ### Dependency Graph
 
 ```
-wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms
+wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms <── wasm-dbms-sql
 ```
+
+`wasm-dbms-sql` is optional: nothing depends on it, so programs that do not use
+SQL do not link it.
 
 Application layers, such as [ic-dbms](https://github.com/veeso/ic-dbms), depend on these crates from separate repositories.
 
@@ -265,6 +270,23 @@ Application layers, such as [ic-dbms](https://github.com/veeso/ic-dbms), depend 
 - Foreign key integrity checks
 - JOIN execution engine
 - `DatabaseSchema` trait for dynamic dispatch
+
+#### wasm-dbms-sql
+
+**Purpose:** SQL front-end for the DBMS engine
+
+**Contents:**
+
+- Lexer and recursive-descent parser for the [SQL dialect](../reference/sql.md)
+- Syntax tree types (`wasm_dbms_sql::ast`)
+- Planner that resolves names against the schema, converts literals and
+  parameters to column types, and builds `Query` and `Filter` values
+- `SqlEngine`, which runs statements through `WasmDbmsDatabase` and
+  `DatabaseSchema` and tracks one SQL transaction per caller
+
+The result and error types (`SqlResult`, `SqlError`) live in `wasm-dbms-api`
+behind its `sql` feature, so that adapters can expose SQL without depending on
+the engine.
 
 #### wasm-dbms-macros
 

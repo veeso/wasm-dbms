@@ -1,0 +1,122 @@
+# UPDATE table SET assignments WHERE condition
+#
+# Format: see src/parser/tests/fixtures.rs.
+
+=== single assignment
+UPDATE users SET name = 'Bob' WHERE id = 1
+---
+(update users (set (name 'Bob')) (where (= id 1)))
+
+=== several assignments
+UPDATE users SET name = 'Bob', age = 31, email = NULL WHERE id = 1;
+---
+(update users (set (name 'Bob') (age 31) (email null)) (where (= id 1)))
+
+=== placeholders in set and where share one numbering
+update users set name = ?, age = ? where id = ?
+---
+(update users (set (name ?0) (age ?1)) (where (= id ?2)))
+
+=== quoted reserved names
+UPDATE "order" SET "group" = 1 WHERE "select" = 2
+---
+(update order (set (group 1)) (where (= select 2)))
+
+=== qualified column in where
+UPDATE users SET age = 1 WHERE users.id = 5
+---
+(update users (set (age 1)) (where (= users.id 5)))
+
+=== statement over several lines
+UPDATE users
+   SET active = FALSE
+ WHERE last_login < '2026-01-01'
+   AND active = TRUE
+---
+(update users (set (active false))
+  (where (and (< last_login '2026-01-01') (= active true))))
+
+=== negative and decimal values
+UPDATE accounts SET balance = -10.25, overdraft = -3 WHERE id = 9
+---
+(update accounts (set (balance -10.25) (overdraft -3)) (where (= id 9)))
+
+=== error: missing where
+UPDATE users SET name = 'Bob'
+---
+error missing-where
+
+=== error: missing where with a semicolon
+UPDATE users SET name = 'Bob';
+---
+error missing-where
+
+=== error: where without a condition
+UPDATE users SET name = 'Bob' WHERE
+---
+error 1:36: expected a column name, found end of input
+
+=== error: missing set
+UPDATE users name = 'Bob' WHERE id = 1
+---
+error 1:14: expected `SET`, found identifier `name`
+
+=== error: missing assignment value
+UPDATE users SET name = WHERE id = 1
+---
+error 1:25: expected a literal or `?`, found keyword `WHERE`
+
+=== error: missing equals sign
+UPDATE users SET name 'Bob' WHERE id = 1
+---
+error 1:23: expected `=`, found string literal
+
+=== error: duplicate assignment
+UPDATE users SET name = 'a', name = 'b' WHERE id = 1
+---
+error 1:30: duplicate column `name`
+
+=== error: assignment from another column
+UPDATE users SET name = nickname WHERE id = 1
+---
+error 1:25: expected a literal or `?`, found identifier `nickname`
+
+=== error: arithmetic in set
+UPDATE users SET age = age - 1 WHERE id = 1
+---
+error 1:24: expected a literal or `?`, found identifier `age`
+
+=== error: plus sign is not part of the dialect
+UPDATE users SET age = age + 1 WHERE id = 1
+---
+error 1:28: unexpected character `+`
+
+=== error: qualified column in set
+UPDATE users SET users.name = 'a' WHERE id = 1
+---
+error 1:23: expected `=`, found `.`
+
+=== error: trailing comma in set
+UPDATE users SET name = 'a', WHERE id = 1
+---
+error 1:30: expected a column name, found keyword `WHERE` (reserved words must be double-quoted to be used as names)
+
+=== error: order by in update
+UPDATE users SET name = 'a' ORDER BY id
+---
+error 1:29: expected `WHERE`, found keyword `ORDER`
+
+=== error: table alias in update
+UPDATE users u SET name = 'a' WHERE id = 1
+---
+error 1:14: expected `SET`, found identifier `u`
+
+=== error: missing table name
+UPDATE SET name = 'a' WHERE id = 1
+---
+error 1:8: expected a table name, found keyword `SET` (reserved words must be double-quoted to be used as names)
+
+=== error: cascade is not valid for update
+UPDATE users SET name = 'a' WHERE id = 1 CASCADE
+---
+error 1:42: expected end of statement, found keyword `CASCADE`

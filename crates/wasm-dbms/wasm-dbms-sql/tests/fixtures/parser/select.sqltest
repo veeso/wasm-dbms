@@ -1,0 +1,283 @@
+# SELECT: select list, FROM, WHERE, ORDER BY, LIMIT, OFFSET, DISTINCT.
+# Joins are in join.sqltest; aggregates, GROUP BY, and HAVING are in
+# aggregate.sqltest.
+#
+# Format: see src/parser/tests/fixtures.rs.
+
+=== star
+SELECT * FROM users
+---
+(select (columns *) (from users))
+
+=== column list
+SELECT id, name FROM users;
+---
+(select (columns id name) (from users))
+
+=== qualified columns
+SELECT users.id, users.name FROM users
+---
+(select (columns users.id users.name) (from users))
+
+=== column aliases
+SELECT id AS user_id, name AS "full name" FROM users
+---
+(select (columns (as id user_id) (as name "full name")) (from users))
+
+=== table alias with as
+SELECT u.id FROM users AS u
+---
+(select (columns u.id) (from (as users u)))
+
+=== table alias without as
+SELECT u.id FROM users u WHERE u.id = 1
+---
+(select (columns u.id) (from (as users u)) (where (= u.id 1)))
+
+=== distinct
+SELECT DISTINCT city FROM users
+---
+(select distinct (columns city) (from users))
+
+=== distinct star
+select distinct * from users
+---
+(select distinct (columns *) (from users))
+
+=== distinct on several columns
+SELECT DISTINCT city, country FROM users ORDER BY country
+---
+(select distinct (columns city country) (from users) (order-by (country asc)))
+
+=== where
+SELECT * FROM users WHERE age >= 18 AND name LIKE 'A%'
+---
+(select (columns *) (from users) (where (and (>= age 18) (like name 'A%'))))
+
+=== order by with the default direction
+SELECT * FROM users ORDER BY name
+---
+(select (columns *) (from users) (order-by (name asc)))
+
+=== order by several columns
+SELECT * FROM users ORDER BY age DESC, name ASC, id
+---
+(select (columns *) (from users) (order-by (age desc) (name asc) (id asc)))
+
+=== order by a qualified column
+SELECT * FROM users ORDER BY users.name desc
+---
+(select (columns *) (from users) (order-by (users.name desc)))
+
+=== limit
+SELECT * FROM users LIMIT 10
+---
+(select (columns *) (from users) (limit 10))
+
+=== offset without limit
+SELECT * FROM users OFFSET 5
+---
+(select (columns *) (from users) (offset 5))
+
+=== limit then offset
+SELECT * FROM users LIMIT 10 OFFSET 20
+---
+(select (columns *) (from users) (limit 10) (offset 20))
+
+=== offset then limit
+SELECT * FROM users OFFSET 20 LIMIT 10
+---
+(select (columns *) (from users) (limit 10) (offset 20))
+
+=== limit zero
+SELECT * FROM users LIMIT 0
+---
+(select (columns *) (from users) (limit 0))
+
+=== placeholders in where, limit, and offset
+SELECT * FROM users WHERE age > ? LIMIT ? OFFSET ?
+---
+(select (columns *) (from users) (where (> age ?0)) (limit ?1) (offset ?2))
+
+=== every clause over several lines
+SELECT id, name
+FROM users
+WHERE active = TRUE
+ORDER BY name
+LIMIT 5
+OFFSET 10;
+---
+(select (columns id name) (from users) (where (= active true))
+  (order-by (name asc)) (limit 5) (offset 10))
+
+=== quoted reserved names
+SELECT "select", "from" FROM "table" WHERE "where" = 1 ORDER BY "order"
+---
+(select (columns select from) (from table) (where (= where 1)) (order-by (order asc)))
+
+=== columns named like aggregate functions
+SELECT count, max, min FROM stats ORDER BY sum
+---
+(select (columns count max min) (from stats) (order-by (sum asc)))
+
+=== lowercase keywords
+select id from users where id in (1, 2) order by id desc limit 1
+---
+(select (columns id) (from users) (where (in id 1 2)) (order-by (id desc)) (limit 1))
+
+=== comments between clauses
+SELECT id -- the key
+FROM users /* the table */
+WHERE id = 1
+---
+(select (columns id) (from users) (where (= id 1)))
+
+=== error: missing select list
+SELECT FROM users
+---
+error 1:8: expected a column name, found keyword `FROM` (reserved words must be double-quoted to be used as names)
+
+=== error: missing from
+SELECT id
+---
+error 1:10: expected `FROM`, found end of input
+
+=== error: select without a table
+SELECT 1
+---
+error 1:8: expected a column name, found number `1`
+
+=== error: star with other items
+SELECT *, id FROM users
+---
+error 1:9: `*` cannot be combined with other select items
+
+=== error: star after a column
+SELECT id, * FROM users
+---
+error 1:12: expected a column name, found `*`
+
+=== error: qualified star
+SELECT users.* FROM users
+---
+error 1:14: qualified wildcard `table.*` is not supported
+
+=== error: trailing comma in the select list
+SELECT id, FROM users
+---
+error 1:12: expected a column name, found keyword `FROM` (reserved words must be double-quoted to be used as names)
+
+=== error: column alias without as
+SELECT name n FROM users
+---
+error 1:13: expected `FROM`, found identifier `n`
+
+=== error: missing alias after as
+SELECT name AS FROM users
+---
+error 1:16: expected an alias, found keyword `FROM` (reserved words must be double-quoted to be used as names)
+
+=== error: string literal in the select list
+SELECT 'x' FROM users
+---
+error 1:8: expected a column name, found string literal
+
+=== error: missing table name
+SELECT * FROM
+---
+error 1:14: expected a table name, found end of input
+
+=== error: subquery in from
+SELECT * FROM (SELECT * FROM users)
+---
+error 1:15: expected a table name, found `(`
+
+=== error: comma join
+SELECT * FROM users, posts
+---
+error 1:20: expected end of statement, found `,`
+
+=== error: where after order by
+SELECT * FROM users ORDER BY id WHERE id = 1
+---
+error 1:33: expected end of statement, found keyword `WHERE`
+
+=== error: duplicate limit
+SELECT * FROM users LIMIT 1 LIMIT 2
+---
+error 1:29: expected end of statement, found keyword `LIMIT`
+
+=== error: negative limit
+SELECT * FROM users LIMIT -1
+---
+error 1:27: expected a non-negative integer or `?` after `LIMIT`, found `-`
+
+=== error: decimal limit
+SELECT * FROM users LIMIT 1.5
+---
+error 1:27: expected a non-negative integer or `?` after `LIMIT`, found number `1.5`
+
+=== error: missing offset value
+SELECT * FROM users OFFSET
+---
+error 1:27: expected a non-negative integer or `?` after `OFFSET`, found end of input
+
+=== error: limit with two numbers
+SELECT * FROM users LIMIT 5, 10
+---
+error 1:28: expected end of statement, found `,`
+
+=== error: order without by
+SELECT * FROM users ORDER name
+---
+error 1:27: expected `BY`, found identifier `name`
+
+=== error: order by position
+SELECT * FROM users ORDER BY 1
+---
+error 1:30: expected a column name, found number `1`
+
+=== error: order by nulls first
+SELECT * FROM users ORDER BY name NULLS FIRST
+---
+error 1:35: expected end of statement, found identifier `NULLS`
+
+=== error: union
+SELECT id FROM a UNION SELECT id FROM b
+---
+error 1:18: expected end of statement, found keyword `UNION`
+
+=== error: distinct on
+SELECT DISTINCT ON (city) city FROM users
+---
+error 1:17: expected a column name, found keyword `ON` (reserved words must be double-quoted to be used as names)
+
+=== error: unknown function in the select list
+SELECT upper(name) FROM users
+---
+error 1:8: unknown function `upper`; only COUNT, SUM, AVG, MIN and MAX are supported
+
+=== error: arithmetic in the select list
+SELECT price * 2 FROM items
+---
+error 1:14: expected `FROM`, found `*`
+
+=== error: aggregate in where
+SELECT * FROM users WHERE COUNT(*) > 1
+---
+error 1:27: aggregate functions are not allowed in `WHERE`
+
+=== error: two statements
+SELECT * FROM a; SELECT * FROM b
+---
+error 1:18: multiple statements are not supported
+
+=== error: where without a condition
+SELECT * FROM users WHERE
+---
+error 1:26: expected a column name, found end of input
+
+=== error: table alias that is a reserved word
+SELECT * FROM users AS order
+---
+error 1:24: expected an alias, found keyword `ORDER` (reserved words must be double-quoted to be used as names)

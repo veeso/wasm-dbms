@@ -15,6 +15,8 @@ pub use crate::dbms::query::{
     JsonCmp, JsonFilter, OrderDirection, Query, QueryBuilder, QueryError, QueryResult, Select,
 };
 pub use crate::dbms::sanitize::*;
+#[cfg(feature = "sql")]
+pub use crate::dbms::sql::{SqlError, SqlResult, SqlRow};
 pub use crate::dbms::table::*;
 pub use crate::dbms::transaction::{TransactionError, TransactionId};
 pub use crate::dbms::types::*;

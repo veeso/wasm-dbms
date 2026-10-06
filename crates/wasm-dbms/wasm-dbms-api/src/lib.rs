@@ -20,8 +20,10 @@
 //!
 //! ## Feature flags
 //!
-//! - `candid`: Enables `CandidType` derives on all public types and exposes
-//!   Candid-specific API boundary types (`JoinColumnDef`, `CandidDataTypeKind`).
+//! | name     | description                                                                        | default |
+//! |----------|------------------------------------------------------------------------------------|---------|
+//! | `candid` | Derives `CandidType` on all public types for Candid API boundaries.                |         |
+//! | `sql`    | Exposes the shared SQL types (`SqlError`, `SqlResult`, `SqlRow`) in `dbms::sql`.   |         |
 
 #![doc(html_playground_url = "https://play.rust-lang.org")]
 

@@ -1,0 +1,153 @@
+# SELECT ... JOIN table ON left = right
+#
+# Format: see src/parser/tests/fixtures.rs.
+
+=== join is an inner join
+SELECT * FROM users JOIN posts ON users.id = posts.user_id
+---
+(select (columns *) (from users) (join inner posts (on users.id posts.user_id)))
+
+=== inner join
+SELECT * FROM users INNER JOIN posts ON users.id = posts.user_id
+---
+(select (columns *) (from users) (join inner posts (on users.id posts.user_id)))
+
+=== left join
+SELECT * FROM users LEFT JOIN posts ON users.id = posts.user_id
+---
+(select (columns *) (from users) (join left posts (on users.id posts.user_id)))
+
+=== left outer join
+SELECT * FROM users LEFT OUTER JOIN posts ON users.id = posts.user_id
+---
+(select (columns *) (from users) (join left posts (on users.id posts.user_id)))
+
+=== right join
+SELECT * FROM users RIGHT JOIN posts ON users.id = posts.user_id
+---
+(select (columns *) (from users) (join right posts (on users.id posts.user_id)))
+
+=== right outer join
+SELECT * FROM users RIGHT OUTER JOIN posts ON users.id = posts.user_id
+---
+(select (columns *) (from users) (join right posts (on users.id posts.user_id)))
+
+=== full join
+SELECT * FROM users FULL JOIN posts ON users.id = posts.user_id
+---
+(select (columns *) (from users) (join full posts (on users.id posts.user_id)))
+
+=== full outer join
+SELECT * FROM users FULL OUTER JOIN posts ON users.id = posts.user_id
+---
+(select (columns *) (from users) (join full posts (on users.id posts.user_id)))
+
+=== lowercase join keywords
+select * from a left outer join b on a.id = b.a_id
+---
+(select (columns *) (from a) (join left b (on a.id b.a_id)))
+
+=== table aliases
+SELECT u.name, p.title FROM users AS u JOIN posts p ON u.id = p.user_id
+---
+(select (columns u.name p.title) (from (as users u))
+  (join inner (as posts p) (on u.id p.user_id)))
+
+=== condition keeps the written order of its sides
+SELECT * FROM users JOIN posts ON posts.user_id = users.id
+---
+(select (columns *) (from users) (join inner posts (on posts.user_id users.id)))
+
+=== unqualified join columns
+SELECT * FROM users JOIN posts ON id = user_id
+---
+(select (columns *) (from users) (join inner posts (on id user_id)))
+
+=== several joins
+SELECT users.name, posts.title, comments.body
+FROM users
+JOIN posts ON users.id = posts.user_id
+LEFT JOIN comments ON posts.id = comments.post_id
+---
+(select (columns users.name posts.title comments.body) (from users)
+  (join inner posts (on users.id posts.user_id))
+  (join left comments (on posts.id comments.post_id)))
+
+=== join with where, order by, limit, and offset
+SELECT users.name, posts.title FROM users JOIN posts ON users.id = posts.user_id WHERE posts.published = TRUE ORDER BY posts.title DESC LIMIT 5 OFFSET 5
+---
+(select (columns users.name posts.title) (from users)
+  (join inner posts (on users.id posts.user_id))
+  (where (= posts.published true))
+  (order-by (posts.title desc)) (limit 5) (offset 5))
+
+=== join with column aliases
+SELECT users.name AS author, posts.title AS headline FROM users JOIN posts ON users.id = posts.user_id
+---
+(select (columns (as users.name author) (as posts.title headline)) (from users)
+  (join inner posts (on users.id posts.user_id)))
+
+=== error: join without on
+SELECT * FROM users JOIN posts
+---
+error 1:31: expected `ON`, found end of input
+
+=== error: using clause
+SELECT * FROM users JOIN posts USING (id)
+---
+error 1:32: expected `ON`, found keyword `USING`
+
+=== error: compound join condition
+SELECT * FROM users JOIN posts ON users.id = posts.user_id AND posts.draft = FALSE
+---
+error 1:60: a join condition must be a single `left = right` comparison
+
+=== error: join condition with or
+SELECT * FROM users JOIN posts ON users.id = posts.user_id OR users.id = posts.editor_id
+---
+error 1:60: a join condition must be a single `left = right` comparison
+
+=== error: join condition that is not an equality
+SELECT * FROM users JOIN posts ON users.id > posts.user_id
+---
+error 1:44: expected `=`, found `>`
+
+=== error: join on a literal
+SELECT * FROM users JOIN posts ON users.id = 1
+---
+error 1:46: expected a column name, found number `1`
+
+=== error: cross join
+SELECT * FROM users CROSS JOIN posts
+---
+error 1:21: expected end of statement, found keyword `CROSS`
+
+=== error: natural join
+SELECT * FROM users NATURAL JOIN posts
+---
+error 1:21: expected end of statement, found keyword `NATURAL`
+
+=== error: inner outer join
+SELECT * FROM users INNER OUTER JOIN posts ON users.id = posts.user_id
+---
+error 1:27: expected `JOIN`, found keyword `OUTER`
+
+=== error: left without join
+SELECT * FROM users LEFT posts ON users.id = posts.user_id
+---
+error 1:26: expected `JOIN`, found identifier `posts`
+
+=== error: join without a table
+SELECT * FROM users JOIN ON users.id = posts.user_id
+---
+error 1:26: expected a table name, found keyword `ON` (reserved words must be double-quoted to be used as names)
+
+=== error: join on a subquery
+SELECT * FROM users JOIN (SELECT * FROM posts) p ON users.id = p.user_id
+---
+error 1:26: expected a table name, found `(`
+
+=== error: parenthesized join condition
+SELECT * FROM users JOIN posts ON (users.id = posts.user_id)
+---
+error 1:35: expected a column name, found `(`

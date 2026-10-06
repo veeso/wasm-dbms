@@ -8,12 +8,46 @@
 //! through a single shared reference.
 
 use std::cell::{Cell, RefCell};
+use std::hash::{Hash, Hasher};
+use std::rc::{Rc, Weak};
 
 use wasm_dbms_api::prelude::{DbmsResult, TransactionId};
 use wasm_dbms_memory::prelude::{MemoryManager, MemoryProvider, SchemaRegistry, TableRegistryPage};
 
 use crate::transaction::journal::Journal;
 use crate::transaction::session::TransactionSession;
+
+/// Opaque identity of a [`DbmsContext`].
+///
+/// The identity remains stable when the context is moved. It does not keep the
+/// context alive, so context-associated caches can discard stale entries.
+#[derive(Clone, Debug)]
+pub struct ContextId(Weak<()>);
+
+impl ContextId {
+    /// Returns whether the context that owns this identity still exists.
+    #[must_use]
+    pub fn is_alive(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+}
+
+impl PartialEq for ContextId {
+    fn eq(&self, other: &Self) -> bool {
+        Weak::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for ContextId {}
+
+impl Hash for ContextId {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        self.0.as_ptr().hash(state);
+    }
+}
 
 /// Owns all mutable DBMS state behind interior-mutable wrappers.
 ///
@@ -33,6 +67,9 @@ pub struct DbmsContext<M>
 where
     M: MemoryProvider,
 {
+    /// Stable identity used by state that is associated with this context.
+    identity: Rc<()>,
+
     /// Memory manager for page-level operations.
     pub(crate) mm: RefCell<MemoryManager<M>>,
 
@@ -65,6 +102,7 @@ where
         let mut mm = MemoryManager::init(memory);
         let schema_registry = SchemaRegistry::load(&mut mm).unwrap_or_default();
         Self {
+            identity: Rc::new(()),
             mm: RefCell::new(mm),
             schema_registry: RefCell::new(schema_registry),
             transaction_session: RefCell::new(TransactionSession::default()),
@@ -72,6 +110,11 @@ where
             drift: Cell::new(None),
             migrating: Cell::new(false),
         }
+    }
+
+    /// Returns the stable identity of this context.
+    pub fn id(&self) -> ContextId {
+        ContextId(Rc::downgrade(&self.identity))
     }
 
     /// Registers a table schema, persisting it in stable memory.
@@ -162,6 +205,17 @@ mod tests {
         let tx_id = ctx.begin_transaction(owner.clone());
         assert!(ctx.has_transaction(&tx_id, &owner));
         assert!(!ctx.has_transaction(&tx_id, &[4, 5, 6]));
+    }
+
+    #[test]
+    fn test_context_identity_is_stable_and_unique() {
+        let first = DbmsContext::new(HeapMemoryProvider::default());
+        let first_id = first.id();
+        let moved = first;
+        let second = DbmsContext::new(HeapMemoryProvider::default());
+
+        assert_eq!(first_id, moved.id());
+        assert_ne!(first_id, second.id());
     }
 
     #[test]

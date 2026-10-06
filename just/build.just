@@ -25,6 +25,7 @@ build_wasm_dbms:
   cargo build --target wasm32-unknown-unknown --release --package "wasm-dbms-api"
   cargo build --target wasm32-unknown-unknown --release --package "wasm-dbms-memory"
   cargo build --target wasm32-unknown-unknown --release --package "wasm-dbms"
+  cargo build --target wasm32-unknown-unknown --release --package "wasm-dbms-sql"
 
 # Build generic wasi-dbms crates for wasm32-unknown-unknown
 [group('build')]

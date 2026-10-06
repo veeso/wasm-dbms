@@ -1,0 +1,325 @@
+# Conditions (WHERE): comparisons, IN, LIKE, IS NULL, AND / OR / NOT, and
+# parentheses. Every case uses `DELETE FROM t WHERE ...`, so the condition
+# starts at column 21.
+#
+# Format: see src/parser/tests/fixtures.rs.
+
+=== equals
+DELETE FROM t WHERE a = 1
+---
+(delete t (where (= a 1)) restrict)
+
+=== every comparison operator
+DELETE FROM t WHERE a = 1 AND b != 2 AND c <> 3 AND d < 4 AND e <= 5 AND f > 6 AND g >= 7
+---
+(delete t
+  (where
+    (and (and (and (and (and (and (= a 1) (!= b 2)) (!= c 3)) (< d 4)) (<= e 5)) (> f 6))
+      (>= g 7)))
+  restrict)
+
+=== and binds tighter than or (or first)
+DELETE FROM t WHERE a = 1 OR b = 2 AND c = 3
+---
+(delete t (where (or (= a 1) (and (= b 2) (= c 3)))) restrict)
+
+=== and binds tighter than or (and first)
+DELETE FROM t WHERE a = 1 AND b = 2 OR c = 3
+---
+(delete t (where (or (and (= a 1) (= b 2)) (= c 3))) restrict)
+
+=== parentheses override precedence
+DELETE FROM t WHERE (a = 1 OR b = 2) AND c = 3
+---
+(delete t (where (and (or (= a 1) (= b 2)) (= c 3))) restrict)
+
+=== or is left associative
+DELETE FROM t WHERE a = 1 OR b = 2 OR c = 3
+---
+(delete t (where (or (or (= a 1) (= b 2)) (= c 3))) restrict)
+
+=== and is left associative
+DELETE FROM t WHERE a = 1 AND b = 2 AND c = 3
+---
+(delete t (where (and (and (= a 1) (= b 2)) (= c 3))) restrict)
+
+=== parentheses can group to the right
+DELETE FROM t WHERE a = 1 AND (b = 2 AND c = 3)
+---
+(delete t (where (and (= a 1) (and (= b 2) (= c 3)))) restrict)
+
+=== not binds tighter than and
+DELETE FROM t WHERE NOT a = 1 AND b = 2
+---
+(delete t (where (and (not (= a 1)) (= b 2))) restrict)
+
+=== not binds tighter than or
+DELETE FROM t WHERE NOT a = 1 OR b = 2
+---
+(delete t (where (or (not (= a 1)) (= b 2))) restrict)
+
+=== not applied to a group
+DELETE FROM t WHERE NOT (a = 1 OR b = 2)
+---
+(delete t (where (not (or (= a 1) (= b 2)))) restrict)
+
+=== double not
+DELETE FROM t WHERE NOT NOT a = 1
+---
+(delete t (where (not (not (= a 1)))) restrict)
+
+=== not after and
+DELETE FROM t WHERE a = 1 AND NOT b = 2
+---
+(delete t (where (and (= a 1) (not (= b 2)))) restrict)
+
+=== redundant parentheses
+DELETE FROM t WHERE ((a = 1))
+---
+(delete t (where (= a 1)) restrict)
+
+=== in list
+DELETE FROM t WHERE a IN (1, 2, 3)
+---
+(delete t (where (in a 1 2 3)) restrict)
+
+=== in list with one string
+DELETE FROM t WHERE name IN ('x')
+---
+(delete t (where (in name 'x')) restrict)
+
+=== not in
+DELETE FROM t WHERE a NOT IN (1, 2)
+---
+(delete t (where (not-in a 1 2)) restrict)
+
+=== in list with placeholders
+DELETE FROM t WHERE a IN (?, ?, 3)
+---
+(delete t (where (in a ?0 ?1 3)) restrict)
+
+=== in list with mixed literal kinds
+DELETE FROM t WHERE a IN (-1, 2.5, 'x', TRUE)
+---
+(delete t (where (in a -1 2.5 'x' true)) restrict)
+
+=== like
+DELETE FROM t WHERE name LIKE 'A%'
+---
+(delete t (where (like name 'A%')) restrict)
+
+=== not like
+DELETE FROM t WHERE name NOT LIKE '%test_'
+---
+(delete t (where (not-like name '%test_')) restrict)
+
+=== like with a placeholder
+DELETE FROM t WHERE name LIKE ?
+---
+(delete t (where (like name ?0)) restrict)
+
+=== is null
+DELETE FROM t WHERE a IS NULL
+---
+(delete t (where (is-null a)) restrict)
+
+=== is not null
+DELETE FROM t WHERE a IS NOT NULL
+---
+(delete t (where (is-not-null a)) restrict)
+
+=== not combined with is null
+DELETE FROM t WHERE NOT a IS NULL
+---
+(delete t (where (not (is-null a))) restrict)
+
+=== lowercase keywords
+DELETE FROM t WHERE a is not null and b in (1) or not c like 'x'
+---
+(delete t (where (or (and (is-not-null a) (in b 1)) (not (like c 'x')))) restrict)
+
+=== qualified columns
+DELETE FROM t WHERE t.a = 1 AND t.b IS NULL
+---
+(delete t (where (and (= t.a 1) (is-null t.b))) restrict)
+
+=== every literal kind in comparisons
+DELETE FROM t WHERE a > -1 AND b <= 2.5 AND c = 'x' AND d = TRUE AND e != FALSE
+---
+(delete t
+  (where (and (and (and (and (> a -1) (<= b 2.5)) (= c 'x')) (= d true)) (!= e false)))
+  restrict)
+
+=== placeholders are numbered left to right
+DELETE FROM t WHERE a = ? AND (b = ? OR c IN (?, ?)) AND d LIKE ?
+---
+(delete t
+  (where (and (and (= a ?0) (or (= b ?1) (in c ?2 ?3))) (like d ?4)))
+  restrict)
+
+=== no whitespace around operators and parentheses
+DELETE FROM t WHERE a>=1 AND(b<2)OR c!='x'
+---
+(delete t (where (or (and (>= a 1) (< b 2)) (!= c 'x'))) restrict)
+
+=== condition over several lines with comments
+DELETE FROM t WHERE a = 1 -- first
+  AND /* second */ b = 2
+  OR c = 3
+---
+(delete t (where (or (and (= a 1) (= b 2)) (= c 3))) restrict)
+
+=== quoted reserved column names
+DELETE FROM t WHERE "order" = 1 AND "null" IS NULL
+---
+(delete t (where (and (= order 1) (is-null null))) restrict)
+
+=== error: comparison with null
+DELETE FROM t WHERE a = NULL
+---
+error 1:25: cannot compare with `NULL`; use `IS NULL` or `IS NOT NULL`
+
+=== error: not-equal comparison with null
+DELETE FROM t WHERE a != NULL
+---
+error 1:26: cannot compare with `NULL`; use `IS NULL` or `IS NOT NULL`
+
+=== error: null in an in list
+DELETE FROM t WHERE a IN (1, NULL)
+---
+error 1:30: `NULL` is not allowed in an `IN` list
+
+=== error: empty in list
+DELETE FROM t WHERE a IN ()
+---
+error 1:27: expected a literal or `?`, found `)`
+
+=== error: in without parentheses
+DELETE FROM t WHERE a IN 1
+---
+error 1:26: expected `(`, found number `1`
+
+=== error: unclosed in list
+DELETE FROM t WHERE a IN (1, 2
+---
+error 1:31: expected `,` or `)`, found end of input
+
+=== error: subquery in an in list
+DELETE FROM t WHERE a IN (SELECT id FROM u)
+---
+error 1:27: expected a literal or `?`, found keyword `SELECT`
+
+=== error: like with a number
+DELETE FROM t WHERE a LIKE 5
+---
+error 1:28: `LIKE` requires a string literal or `?` pattern
+
+=== error: like with a column
+DELETE FROM t WHERE a LIKE b
+---
+error 1:28: expected a literal or `?`, found identifier `b`
+
+=== error: is without null
+DELETE FROM t WHERE a IS TRUE
+---
+error 1:26: expected `NULL`, found keyword `TRUE`
+
+=== error: not without in or like
+DELETE FROM t WHERE a NOT = 1
+---
+error 1:27: expected `IN` or `LIKE` after `NOT`, found `=`
+
+=== error: column compared with column
+DELETE FROM t WHERE a = b
+---
+error 1:25: expected a literal or `?`, found identifier `b`
+
+=== error: literal on the left side
+DELETE FROM t WHERE 1 = a
+---
+error 1:21: expected a column name, found number `1`
+
+=== error: missing operator
+DELETE FROM t WHERE a 1
+---
+error 1:23: expected a comparison operator, `IN`, `LIKE` or `IS`, found number `1`
+
+=== error: between is not supported
+DELETE FROM t WHERE a BETWEEN 1 AND 2
+---
+error 1:23: expected a comparison operator, `IN`, `LIKE` or `IS`, found identifier `BETWEEN`
+
+=== error: bare boolean column
+DELETE FROM t WHERE active
+---
+error 1:27: expected a comparison operator, `IN`, `LIKE` or `IS`, found end of input
+
+=== error: dangling and
+DELETE FROM t WHERE a = 1 AND
+---
+error 1:30: expected a column name, found end of input
+
+=== error: leading and
+DELETE FROM t WHERE AND a = 1
+---
+error 1:21: expected a column name, found keyword `AND` (reserved words must be double-quoted to be used as names)
+
+=== error: unclosed parenthesis
+DELETE FROM t WHERE (a = 1
+---
+error 1:27: expected `)`, found end of input
+
+=== error: unbalanced closing parenthesis
+DELETE FROM t WHERE a = 1)
+---
+error 1:26: expected end of statement, found `)`
+
+=== error: empty parentheses
+DELETE FROM t WHERE ()
+---
+error 1:22: expected a column name, found `)`
+
+=== error: aggregate in where
+DELETE FROM t WHERE COUNT(*) > 1
+---
+error 1:21: aggregate functions are not allowed in `WHERE`
+
+=== error: unknown function
+DELETE FROM t WHERE lower(name) = 'x'
+---
+error 1:21: unknown function `lower`; only COUNT, SUM, AVG, MIN and MAX are supported
+
+=== error: qualified wildcard
+DELETE FROM t WHERE t.* = 1
+---
+error 1:23: qualified wildcard `table.*` is not supported
+
+=== error: double equals
+DELETE FROM t WHERE a == 1
+---
+error 1:24: expected a literal or `?`, found `=`
+
+=== error: two adjacent strings
+DELETE FROM t WHERE a = 'x' 'y'
+---
+error 1:29: expected end of statement, found string literal
+
+=== error: double-quoted text is an identifier
+DELETE FROM t WHERE a = "x"
+---
+error 1:25: expected a literal or `?`, found identifier `x`
+
+=== error: number glued to a keyword
+DELETE FROM t WHERE a=1AND b=2
+---
+error 1:23: invalid numeric literal
+
+=== error: arithmetic on the right side
+DELETE FROM t WHERE a = 1 - 1
+---
+error 1:27: expected end of statement, found `-`
+
+=== error: three-part column name
+DELETE FROM t WHERE db.t.a = 1
+---
+error 1:25: expected a comparison operator, `IN`, `LIKE` or `IS`, found `.`

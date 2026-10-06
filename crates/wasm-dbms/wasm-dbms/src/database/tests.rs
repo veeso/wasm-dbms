@@ -193,6 +193,47 @@ fn test_select_with_limit() {
 }
 
 #[test]
+fn test_select_with_zero_limit_returns_no_rows() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    let rows = db
+        .select::<User>(Query::builder().all().limit(0).build())
+        .unwrap();
+    assert!(rows.is_empty());
+}
+
+#[test]
+fn test_index_select_with_zero_limit_returns_no_rows() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+    insert_user(&db, 1, "alice");
+
+    let rows = db
+        .select::<User>(
+            Query::builder()
+                .all()
+                .filter(Some(Filter::eq("id", Value::from(1u32))))
+                .limit(0)
+                .build(),
+        )
+        .unwrap();
+    assert!(rows.is_empty());
+}
+
+#[test]
+fn test_select_with_maximum_limit_does_not_preallocate_the_limit() {
+    let ctx = setup();
+    let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+    let rows = db
+        .select::<User>(Query::builder().all().limit(usize::MAX).build())
+        .unwrap();
+    assert!(rows.is_empty());
+}
+
+#[test]
 fn test_select_with_offset() {
     let ctx = setup();
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);

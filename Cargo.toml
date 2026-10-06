@@ -8,6 +8,7 @@ members = [
   "crates/wasm-dbms/wasm-dbms-bench",
   "crates/wasm-dbms/wasm-dbms-macros",
   "crates/wasm-dbms/wasm-dbms-memory",
+  "crates/wasm-dbms/wasm-dbms-sql",
 ]
 resolver = "3"
 

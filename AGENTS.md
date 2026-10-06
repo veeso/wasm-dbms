@@ -79,6 +79,7 @@ crates/
 │   ├── wasm-dbms-api/          # Shared types, traits, validators, sanitizers
 │   ├── wasm-dbms-memory/       # Memory abstraction and page management
 │   ├── wasm-dbms/              # Core DBMS engine
+│   ├── wasm-dbms-sql/          # SQL front-end: parser, planner, executor
 │   └── wasm-dbms-macros/       # Encode, Table, CustomDataType, DatabaseSchema
 │
 └── wasi-dbms/                  # WASI-specific crates
@@ -88,7 +89,7 @@ crates/
 ### Dependency Graph
 
 ```text
-wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms
+wasm-dbms-macros <── wasm-dbms-api <── wasm-dbms-memory <── wasm-dbms <── wasm-dbms-sql
                                                                  ^
                                               ic-dbms (separate repository)
 ```
@@ -152,6 +153,7 @@ docs/
 │   ├── crud-operations.md     # Generic CRUD
 │   ├── querying.md            # Filters, ordering, pagination, joins
 │   ├── transactions.md        # ACID transactions
+│   ├── sql.md                 # SQL statements through SqlEngine
 │   ├── relationships.md       # Foreign keys and eager loading
 │   └── custom-data-types.md   # Custom data types
 ├── reference/                 # Generic data types, schema, validation, errors
@@ -210,6 +212,11 @@ the past; treat this as a checklist:
   macro in `ic-dbms-macros`, the `Client` trait and its implementations in
   `ic-dbms-client`, and the PocketIC integration tests. Mention the required
   follow-up in the pull request description.
+- `crates/wasm-dbms/wasm-dbms-sql`: the SQL planner (`src/planner/`) builds
+  `Query`, `Filter`, and `AggregateFunction` values and the engine
+  (`src/engine.rs`) calls `Database` and `DatabaseSchema`. Extend the SQL
+  grammar, its parser fixtures under `tests/fixtures/parser/`, and the planner
+  when a new query capability should be reachable from SQL.
 
 Documentation that must follow the same change:
 
@@ -217,6 +224,10 @@ Documentation that must follow the same change:
   or error variants.
 - `docs/guides/querying.md` and `docs/guides/crud-operations.md` for
   caller-facing behavior changes.
+- `docs/reference/sql.md` and `docs/guides/sql.md` for anything that changes
+  the SQL dialect, its type conversion, or `SqlError`. The grammar, the
+  reserved-word list, and every `sql` code block of these two files are
+  checked by the `wasm-dbms-sql` tests.
 
 When in doubt, search for the old method name across the workspace before
 finishing; every match needs an update or an explicit deletion.

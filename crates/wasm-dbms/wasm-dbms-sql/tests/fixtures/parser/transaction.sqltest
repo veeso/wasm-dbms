@@ -1,0 +1,109 @@
+# Transaction control: BEGIN, COMMIT, ROLLBACK, and statement termination.
+#
+# Format: see src/parser/tests/fixtures.rs.
+
+=== begin
+BEGIN
+---
+(begin)
+
+=== begin in lowercase with a semicolon
+begin;
+---
+(begin)
+
+=== begin transaction
+BEGIN TRANSACTION;
+---
+(begin)
+
+=== commit
+COMMIT
+---
+(commit)
+
+=== commit transaction in mixed case
+Commit Transaction
+---
+(commit)
+
+=== rollback
+ROLLBACK;
+---
+(rollback)
+
+=== rollback transaction
+rollback transaction
+---
+(rollback)
+
+=== begin surrounded by comments
+-- open a transaction
+/* block */ BEGIN /* trailing */ ; -- done
+---
+(begin)
+
+=== error: empty statement
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found end of input
+
+=== error: only a semicolon
+;
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found `;`
+
+=== error: only a comment
+-- nothing here
+---
+error 1:16: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found end of input
+
+=== error: two statements
+BEGIN; COMMIT
+---
+error 1:8: multiple statements are not supported
+
+=== error: two semicolons
+BEGIN;;
+---
+error 1:7: multiple statements are not supported
+
+=== error: second statement on the next line
+BEGIN;
+ROLLBACK;
+---
+error 2:1: multiple statements are not supported
+
+=== error: trailing word after begin
+BEGIN WORK
+---
+error 1:7: expected end of statement, found identifier `WORK`
+
+=== error: start transaction is not supported
+START TRANSACTION
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found identifier `START`
+
+=== error: savepoints are not supported
+SAVEPOINT s1
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found identifier `SAVEPOINT`
+
+=== error: schema changes are not supported
+CREATE TABLE users (id INT)
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found identifier `CREATE`
+
+=== error: drop is not supported
+DROP TABLE users
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found identifier `DROP`
+
+=== error: transaction keyword alone
+TRANSACTION
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found keyword `TRANSACTION`
+
+=== error: with clause is not supported
+WITH recent AS (SELECT 1) SELECT * FROM recent
+---
+error 1:1: expected a statement (SELECT, INSERT, UPDATE, DELETE, BEGIN, COMMIT or ROLLBACK), found identifier `WITH`

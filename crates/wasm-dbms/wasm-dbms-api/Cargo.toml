@@ -34,3 +34,4 @@ xxhash-rust = { workspace = true }
 [features]
 default = []
 candid = ["dep:candid"]
+sql = []
