@@ -390,6 +390,8 @@ impl Encode for Vec<Value> {
             return Err(MemoryError::DecodeError(DecodeError::TooShort));
         }
         let mut values = Vec::new();
+        // `DecodeError` has no allocation variant; a count the allocator cannot satisfy
+        // is reported like an input that is too short to hold that many entries
         values
             .try_reserve_exact(count)
             .map_err(|_| MemoryError::DecodeError(DecodeError::TooShort))?;
@@ -850,6 +852,7 @@ mod tests {
             matches!(result, Err(MemoryError::DecodeError(DecodeError::TooShort))),
             "unexpected decode result: {result:?}"
         );
+        // generous bound: a decoder that trusts the header would request megabytes
         assert!(
             largest < 1_024,
             "decoder allocated {largest} bytes for a {}-byte input",
@@ -872,6 +875,7 @@ mod tests {
             matches!(result, Err(MemoryError::DecodeError(DecodeError::TooShort))),
             "unexpected decode result: {result:?}"
         );
+        // generous bound: a decoder that trusts the header would request megabytes
         assert!(
             largest < 1_024,
             "decoder allocated {largest} bytes for a {}-byte input",

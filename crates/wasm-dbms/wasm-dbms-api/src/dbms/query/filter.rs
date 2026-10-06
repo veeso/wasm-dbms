@@ -145,11 +145,11 @@ impl Filter {
             }
             Filter::Json(field, json_filter) => {
                 let col_value = Self::resolve_joined_column(field, table_groups)?;
-                return Self::matches_json(field, json_filter, col_value);
+                return matches_json(field, json_filter, col_value);
             }
             Filter::Like(field, pattern) => {
                 let col_value = Self::resolve_joined_column(field, table_groups)?;
-                return col_value.map_or(Ok(false), |value| Self::matches_like(pattern, value));
+                return col_value.map_or(Ok(false), |value| matches_like(pattern, value));
             }
             Filter::NotNull(field) => {
                 let col_value = Self::resolve_joined_column(field, table_groups)?;
@@ -294,51 +294,6 @@ impl Filter {
         }
     }
 
-    /// Returns the value of the column named `field`, if present.
-    fn find_column<'a>(field: &str, values: &'a [(ColumnDef, Value)]) -> Option<&'a Value> {
-        values
-            .iter()
-            .find(|(col, _)| col.name == field)
-            .map(|(_, val)| val)
-    }
-
-    /// Matches a column value against a JSON filter.
-    ///
-    /// A [`Value::Null`] column never matches, but the filter path is still validated.
-    fn matches_json(
-        field: &str,
-        json_filter: &JsonFilter,
-        value: Option<&Value>,
-    ) -> QueryResult<bool> {
-        match value {
-            Some(Value::Json(json)) => json_filter.matches(json),
-            Some(Value::Null) => json_filter.validate().map(|()| false),
-            _ => Err(QueryError::InvalidQuery(format!(
-                "Column '{field}' is not a Json type"
-            ))),
-        }
-    }
-
-    /// Matches a column value against a LIKE pattern.
-    ///
-    /// A [`Value::Null`] column never matches, but the pattern is still validated.
-    fn matches_like(pattern: &str, value: &Value) -> QueryResult<bool> {
-        let text = match value {
-            Value::Text(Text(text)) => Some(text),
-            Value::Null => None,
-            _ => {
-                return Err(QueryError::InvalidQuery(
-                    "LIKE operator can only be applied to Text values".to_string(),
-                ));
-            }
-        };
-        let like = like::Like::parse(pattern).map_err(|e| {
-            QueryError::InvalidQuery(format!("Invalid LIKE pattern {pattern}: {e}"))
-        })?;
-
-        Ok(text.is_some_and(|text| like.matches(text)))
-    }
-
     /// Checks if the given values match the filter.
     pub fn matches(&self, values: &[(ColumnDef, Value)]) -> QueryResult<bool> {
         let res = match self {
@@ -364,12 +319,12 @@ impl Filter {
                 .iter()
                 .any(|(col, val)| col.name == *field && list.iter().any(|v| v == val)),
             Filter::Json(field, json_filter) => {
-                let col_value = Self::find_column(field, values);
-                return Self::matches_json(field, json_filter, col_value);
+                let col_value = find_column(field, values);
+                return matches_json(field, json_filter, col_value);
             }
             Filter::Like(field, pattern) => {
-                return Self::find_column(field, values)
-                    .map_or(Ok(false), |value| Self::matches_like(pattern, value));
+                return find_column(field, values)
+                    .map_or(Ok(false), |value| matches_like(pattern, value));
             }
             Filter::NotNull(field) => values
                 .iter()
@@ -384,6 +339,46 @@ impl Filter {
 
         Ok(res)
     }
+}
+
+/// Returns the value of the column named `field`, if present.
+fn find_column<'a>(field: &str, values: &'a [(ColumnDef, Value)]) -> Option<&'a Value> {
+    values
+        .iter()
+        .find(|(col, _)| col.name == field)
+        .map(|(_, val)| val)
+}
+
+/// Matches a column value against a JSON filter.
+///
+/// A [`Value::Null`] column never matches, but the filter path is still validated.
+fn matches_json(field: &str, json_filter: &JsonFilter, value: Option<&Value>) -> QueryResult<bool> {
+    match value {
+        Some(Value::Json(json)) => json_filter.matches(json),
+        Some(Value::Null) => json_filter.validate().map(|()| false),
+        _ => Err(QueryError::InvalidQuery(format!(
+            "Column '{field}' is not a Json type"
+        ))),
+    }
+}
+
+/// Matches a column value against a LIKE pattern.
+///
+/// A [`Value::Null`] column never matches, but the pattern is still validated.
+fn matches_like(pattern: &str, value: &Value) -> QueryResult<bool> {
+    let text = match value {
+        Value::Text(Text(text)) => Some(text),
+        Value::Null => None,
+        _ => {
+            return Err(QueryError::InvalidQuery(
+                "LIKE operator can only be applied to Text values".to_string(),
+            ));
+        }
+    };
+    let like = like::Like::parse(pattern)
+        .map_err(|e| QueryError::InvalidQuery(format!("Invalid LIKE pattern {pattern}: {e}")))?;
+
+    Ok(text.is_some_and(|text| like.matches(text)))
 }
 
 #[cfg(test)]
