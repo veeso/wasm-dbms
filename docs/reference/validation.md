@@ -47,8 +47,18 @@ pub struct User {
     // Tuple struct validator (positional parameter)
     #[validate(MaxStrlenValidator(100))]
     pub name: Text,
+
+    // Several validators, run top to bottom
+    #[validate(MinStrlenValidator(3))]
+    #[validate(MaxStrlenValidator(20))]
+    pub username: Text,
 }
 ```
+
+When a field has several `#[validate(...)]` attributes, every validator runs in declaration
+order (top to bottom) and the value is rejected with the error of the first validator that
+fails. The generated table schema combines them into a `ValidatorChain`, which you can also
+build yourself when implementing `TableSchema` by hand.
 
 ---
 

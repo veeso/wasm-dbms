@@ -60,10 +60,10 @@ pub struct Field {
     /// For custom types: the inner type path (with Nullable stripped).
     /// Used in codegen for CustomDataType::TYPE_TAG and Encode::decode lookups.
     pub custom_type_path: Option<syn::Path>,
-    /// Sanitize struct to use for this field
-    pub sanitize: Option<Sanitizer>,
-    /// Validate struct to use for this field
-    pub validate: Option<Validator>,
+    /// Sanitizers declared for this field, in declaration order
+    pub sanitize: Vec<Sanitizer>,
+    /// Validators declared for this field, in declaration order
+    pub validate: Vec<Validator>,
     /// Value type of the field; e.g. `Value::Int32`. `None` for custom types.
     pub value_type: Option<syn::Path>,
     /// Default value literal, if `#[default = ...]` is set on the field.
@@ -83,8 +83,8 @@ pub struct Validator {
     pub args: Vec<syn::Expr>,
 }
 
-/// Map of field identifiers to their validators
-type Validates = HashMap<Ident, Validator>;
+/// Map of field identifiers to their validators, in declaration order
+type Validates = HashMap<Ident, Vec<Validator>>;
 
 /// Sanitizer metadata
 #[derive(Clone)]
@@ -103,8 +103,8 @@ pub enum Sanitizer {
     },
 }
 
-/// Map of field identifiers to their sanitizers
-type Sanitizers = HashMap<Ident, Sanitizer>;
+/// Map of field identifiers to their sanitizers, in declaration order
+type Sanitizers = HashMap<Ident, Vec<Sanitizer>>;
 
 /// Represents a resolved index definition, built from `#[index]` field attributes.
 ///
@@ -479,6 +479,7 @@ fn collect_foreign_keys(data: &DataStruct) -> syn::Result<Vec<ForeignKey>> {
     Ok(foreign_keys)
 }
 
+/// Collects the `#[validate(...)]` attributes of every field, keeping their declaration order.
 fn collect_validates(data: &DataStruct) -> syn::Result<Validates> {
     let mut validates = HashMap::new();
 
@@ -515,7 +516,10 @@ fn collect_validates(data: &DataStruct) -> syn::Result<Validates> {
                     syn::Error::new_spanned(field, "validate can only be used on named fields")
                 })?;
 
-                validates.insert(ident, validator);
+                validates
+                    .entry(ident)
+                    .or_insert_with(Vec::new)
+                    .push(validator);
             }
         }
     }
@@ -523,6 +527,7 @@ fn collect_validates(data: &DataStruct) -> syn::Result<Validates> {
     Ok(validates)
 }
 
+/// Collects the `#[sanitizer(...)]` attributes of every field, keeping their declaration order.
 fn collect_sanitizes(data: &DataStruct) -> syn::Result<Sanitizers> {
     let mut sanitizers = HashMap::new();
 
@@ -535,7 +540,10 @@ fn collect_sanitizes(data: &DataStruct) -> syn::Result<Sanitizers> {
                     syn::Error::new_spanned(field, "validate can only be used on named fields")
                 })?;
 
-                sanitizers.insert(ident, sanitizer);
+                sanitizers
+                    .entry(ident)
+                    .or_insert_with(Vec::new)
+                    .push(sanitizer);
             }
         }
     }
@@ -646,8 +654,8 @@ fn get_fields(
 
         let is_fk = foreign_keys.iter().any(|fk| fk.field == name);
 
-        let sanitize = sanitizes.get(&name).cloned();
-        let validate = validates.get(&name).cloned();
+        let sanitize = sanitizes.get(&name).cloned().unwrap_or_default();
+        let validate = validates.get(&name).cloned().unwrap_or_default();
 
         // Step 1: inspect the field type; if nullable the data type is the inner type
         let FieldType {
