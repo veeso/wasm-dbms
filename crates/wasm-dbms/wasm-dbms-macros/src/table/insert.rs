@@ -7,10 +7,11 @@ use crate::table::metadata::TableMetadata;
 pub fn generate_insert_request(
     struct_name: &Ident,
     vis: &syn::Visibility,
+    generics: &syn::Generics,
     metadata: &TableMetadata,
 ) -> TokenStream2 {
-    let insert_request_struct = generate_insert_request_struct(vis, metadata);
-    let insert_record_impl = impl_insert_record(struct_name, metadata);
+    let insert_request_struct = generate_insert_request_struct(vis, generics, metadata);
+    let insert_record_impl = impl_insert_record(struct_name, generics, metadata);
 
     quote::quote! {
         #insert_request_struct
@@ -38,7 +39,11 @@ pub fn generate_insert_request(
 ///     pub user_id: Uint32,
 /// }
 /// ```
-fn generate_insert_request_struct(vis: &syn::Visibility, metadata: &TableMetadata) -> TokenStream2 {
+fn generate_insert_request_struct(
+    vis: &syn::Visibility,
+    generics: &syn::Generics,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
     let mut fields = vec![];
 
     for field in &metadata.fields {
@@ -56,6 +61,7 @@ fn generate_insert_request_struct(vis: &syn::Visibility, metadata: &TableMetadat
     }
 
     let insert_request_ident = &metadata.insert;
+    let where_clause = &generics.where_clause;
 
     let derives = if metadata.candid {
         quote::quote! {
@@ -69,14 +75,19 @@ fn generate_insert_request_struct(vis: &syn::Visibility, metadata: &TableMetadat
 
     quote::quote! {
         #derives
-        #vis struct #insert_request_ident {
+        #vis struct #insert_request_ident #generics #where_clause {
             #(#fields)*
         }
     }
 }
 
-fn impl_insert_record(struct_name: &Ident, metadata: &TableMetadata) -> TokenStream2 {
+fn impl_insert_record(
+    struct_name: &Ident,
+    generics: &syn::Generics,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
     let insert_request_ident = &metadata.insert;
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let record_ident = &metadata.record;
 
     let from_values_impl = impl_from_values(metadata);
@@ -84,9 +95,9 @@ fn impl_insert_record(struct_name: &Ident, metadata: &TableMetadata) -> TokenStr
     let into_record_impl = impl_into_record(metadata);
 
     quote::quote! {
-        impl ::wasm_dbms_api::prelude::InsertRecord for #insert_request_ident {
-            type Record = #record_ident;
-            type Schema = #struct_name;
+        impl #impl_generics ::wasm_dbms_api::prelude::InsertRecord for #insert_request_ident #ty_generics #where_clause {
+            type Record = #record_ident #ty_generics;
+            type Schema = #struct_name #ty_generics;
 
             #from_values_impl
             #into_values_impl

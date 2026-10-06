@@ -4,10 +4,15 @@ use syn::Ident;
 use crate::table::metadata::{Field, Index, Sanitizer, TableMetadata};
 
 /// Generate the table schema implementation for `struct_name` using the provided `data` and `metadata`.
+///
+/// `generics` are the generics of the table struct; they are applied to the struct and to the
+/// generated record, insert and update types.
 pub fn generate_table_schema(
     struct_name: &Ident,
+    generics: &syn::Generics,
     metadata: &TableMetadata,
 ) -> syn::Result<TokenStream2> {
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let record_ident = metadata.record.clone();
     let insert_ident = metadata.insert.clone();
     let update_ident = metadata.update.clone();
@@ -20,15 +25,15 @@ pub fn generate_table_schema(
     let values = to_values(&metadata.fields);
     let sanitizers = sanitizers(&metadata.fields);
     let validators = validators(&metadata.fields);
-    let migrate_impl = migrate_impl(struct_name, metadata);
+    let migrate_impl = migrate_impl(struct_name, generics, metadata);
 
     Ok(quote::quote! {
         #migrate_impl
 
-        impl ::wasm_dbms_api::prelude::TableSchema for #struct_name {
-            type Record = #record_ident;
-            type Insert = #insert_ident;
-            type Update = #update_ident;
+        impl #impl_generics ::wasm_dbms_api::prelude::TableSchema for #struct_name #ty_generics #where_clause {
+            type Record = #record_ident #ty_generics;
+            type Insert = #insert_ident #ty_generics;
+            type Update = #update_ident #ty_generics;
             type ForeignFetcher = #foreign_fetcher_ident;
 
             fn table_name() -> &'static str {
@@ -111,11 +116,10 @@ fn column_def(metadata: &TableMetadata) -> syn::Result<TokenStream2> {
         })
     }
 
+    // An inline `const` block (rather than a `const` item) can refer to the generic parameters of
+    // the surrounding impl, e.g. `<T as CustomDataType>::TYPE_TAG`.
     Ok(quote::quote! {
-        {
-            const COLUMNS: &[::wasm_dbms_api::prelude::ColumnDef] = &[#(#columns),*];
-            COLUMNS
-        }
+        const { &[#(#columns),*] }
     })
 }
 
@@ -177,12 +181,17 @@ fn renamed_from_expr(field: &Field) -> TokenStream2 {
 /// Emit `impl Migrate for #struct_name {}` unless the struct carries
 /// `#[migrate]`, in which case the user is expected to provide their own
 /// implementation.
-fn migrate_impl(struct_name: &Ident, metadata: &TableMetadata) -> TokenStream2 {
+fn migrate_impl(
+    struct_name: &Ident,
+    generics: &syn::Generics,
+    metadata: &TableMetadata,
+) -> TokenStream2 {
     if metadata.user_migrate_impl {
         quote::quote! {}
     } else {
+        let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
         quote::quote! {
-            impl ::wasm_dbms_api::prelude::Migrate for #struct_name {}
+            impl #impl_generics ::wasm_dbms_api::prelude::Migrate for #struct_name #ty_generics #where_clause {}
         }
     }
 }
