@@ -87,6 +87,13 @@ mod utils;
 ///     }
 /// }
 /// ```
+/// # Zero-size structs
+///
+/// A struct without fields (`struct Empty {}` or `struct Empty;`) encodes to zero bytes:
+/// `SIZE` is `DataSize::Fixed(0)` and `ALIGNMENT` is `1`. A fixed-size struct is otherwise
+/// aligned to its size; whenever that size is `0` (e.g. only zero-size fields) the alignment
+/// is `1`, so storage never divides by a zero alignment.
+///
 /// # Requirements
 ///
 /// - Each field type must implement `Encode`.
