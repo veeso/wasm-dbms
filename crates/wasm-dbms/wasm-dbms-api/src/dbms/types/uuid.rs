@@ -104,13 +104,15 @@ impl Encode for Uuid {
     where
         Self: Sized,
     {
-        if data.len() != UUID_SIZE {
+        // Only the leading bytes belong to this value: a record decoder passes the rest of the
+        // record, so the input may continue with the following columns.
+        if data.len() < UUID_SIZE {
             return Err(crate::memory::MemoryError::DecodeError(
                 crate::memory::DecodeError::TooShort,
             ));
         }
 
-        uuid::Uuid::from_slice(&data)
+        uuid::Uuid::from_slice(&data[..UUID_SIZE])
             .map(Uuid)
             .map_err(MemoryError::from)
     }
@@ -137,6 +139,29 @@ mod tests {
         let encoded = original_uuid.encode();
         let decoded = Uuid::decode(encoded).unwrap();
         assert_eq!(original_uuid, decoded)
+    }
+
+    #[test]
+    fn test_uuid_decode_ignores_trailing_bytes() {
+        let original_uuid = Uuid(uuid::Uuid::new_v7(Timestamp::from_unix(
+            NoContext, 1497624119, 1234,
+        )));
+        let mut bytes = original_uuid.encode().into_owned();
+        bytes.extend_from_slice(&[0xff; 5]);
+        let decoded = Uuid::decode(std::borrow::Cow::Owned(bytes)).unwrap();
+        assert_eq!(original_uuid, decoded);
+    }
+
+    #[test]
+    fn test_uuid_decode_rejects_short_input() {
+        let bytes = vec![0u8; UUID_SIZE - 1];
+        let result = Uuid::decode(std::borrow::Cow::Owned(bytes));
+        assert!(matches!(
+            result,
+            Err(MemoryError::DecodeError(
+                crate::memory::DecodeError::TooShort
+            ))
+        ));
     }
 
     #[test]

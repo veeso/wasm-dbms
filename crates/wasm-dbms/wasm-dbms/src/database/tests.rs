@@ -4538,3 +4538,131 @@ fn repeated_validators_and_sanitizers_all_run_in_source_order() {
         Some(Text("alice".into()))
     );
 }
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "priced_items"]
+pub struct PricedItem {
+    #[primary_key]
+    pub id: Uint32,
+    pub price: wasm_dbms_api::prelude::Decimal,
+    pub quantity: Uint32,
+}
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "access_tokens"]
+pub struct AccessToken {
+    #[primary_key]
+    pub id: Uint32,
+    pub token: wasm_dbms_api::prelude::Uuid,
+    pub uses: Uint32,
+}
+
+#[derive(Debug, Table, Clone, PartialEq, Eq)]
+#[table = "coupons"]
+pub struct Coupon {
+    #[primary_key]
+    pub id: Uint32,
+    pub discount: wasm_dbms_api::prelude::Decimal,
+    pub code: wasm_dbms_api::prelude::Uuid,
+    pub fee: wasm_dbms_api::prelude::Decimal,
+    pub owner: wasm_dbms_api::prelude::Uuid,
+    pub label: Text,
+}
+
+#[derive(DatabaseSchema)]
+#[tables(
+    PricedItem = "priced_items",
+    AccessToken = "access_tokens",
+    Coupon = "coupons"
+)]
+pub struct FixedWidthColumnSchema;
+
+fn fixed_width_uuid(byte: u8) -> wasm_dbms_api::prelude::Uuid {
+    use wasm_dbms_api::prelude::Encode as _;
+
+    wasm_dbms_api::prelude::Uuid::decode(std::borrow::Cow::Owned(vec![byte; 16]))
+        .expect("16 bytes should decode as a UUID")
+}
+
+#[test]
+fn decimal_column_can_be_followed_by_another_column() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    FixedWidthColumnSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, FixedWidthColumnSchema);
+    let price = Value::Decimal(wasm_dbms_api::prelude::Decimal("10.50".parse().unwrap()));
+    let insert = PricedItemInsertRequest::from_values(&[
+        (PricedItem::columns()[0], Value::Uint32(Uint32(1))),
+        (PricedItem::columns()[1], price.clone()),
+        (PricedItem::columns()[2], Value::Uint32(Uint32(3))),
+    ])
+    .unwrap();
+    db.insert::<PricedItem>(insert).unwrap();
+
+    let rows = db
+        .select_raw("priced_items", Query::builder().all().build())
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][1].1, price);
+    assert_eq!(rows[0][2].1, Value::Uint32(Uint32(3)));
+}
+
+#[test]
+fn uuid_column_can_be_followed_by_another_column() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    FixedWidthColumnSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, FixedWidthColumnSchema);
+    let token = Value::Uuid(fixed_width_uuid(0xab));
+    let insert = AccessTokenInsertRequest::from_values(&[
+        (AccessToken::columns()[0], Value::Uint32(Uint32(1))),
+        (AccessToken::columns()[1], token.clone()),
+        (AccessToken::columns()[2], Value::Uint32(Uint32(7))),
+    ])
+    .unwrap();
+    db.insert::<AccessToken>(insert).unwrap();
+
+    let rows = db
+        .select_raw("access_tokens", Query::builder().all().build())
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][1].1, token);
+    assert_eq!(rows[0][2].1, Value::Uint32(Uint32(7)));
+}
+
+#[test]
+fn several_decimal_and_uuid_columns_round_trip_in_one_table() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    FixedWidthColumnSchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, FixedWidthColumnSchema);
+    let discount = Value::Decimal(wasm_dbms_api::prelude::Decimal("0.15".parse().unwrap()));
+    let code = Value::Uuid(fixed_width_uuid(0x11));
+    let fee = Value::Decimal(wasm_dbms_api::prelude::Decimal("-2.75".parse().unwrap()));
+    let owner = Value::Uuid(fixed_width_uuid(0x22));
+    let label = Value::Text(Text("spring".to_string()));
+    let insert = CouponInsertRequest::from_values(&[
+        (Coupon::columns()[0], Value::Uint32(Uint32(1))),
+        (Coupon::columns()[1], discount.clone()),
+        (Coupon::columns()[2], code.clone()),
+        (Coupon::columns()[3], fee.clone()),
+        (Coupon::columns()[4], owner.clone()),
+        (Coupon::columns()[5], label.clone()),
+    ])
+    .unwrap();
+    db.insert::<Coupon>(insert).unwrap();
+
+    let rows = db
+        .select_raw("coupons", Query::builder().all().build())
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let values: Vec<&Value> = rows[0].iter().map(|(_, value)| value).collect();
+    assert_eq!(
+        values,
+        vec![
+            &Value::Uint32(Uint32(1)),
+            &discount,
+            &code,
+            &fee,
+            &owner,
+            &label
+        ]
+    );
+}

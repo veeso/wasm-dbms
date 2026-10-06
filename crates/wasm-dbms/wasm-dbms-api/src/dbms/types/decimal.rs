@@ -76,7 +76,9 @@ impl Encode for Decimal {
     where
         Self: Sized,
     {
-        if data.len() != RUST_DECIMAL_ENCODE_SIZE as usize {
+        // Only the leading bytes belong to this value: a record decoder passes the rest of the
+        // record, so the input may continue with the following columns.
+        if data.len() < RUST_DECIMAL_ENCODE_SIZE as usize {
             return Err(crate::memory::MemoryError::DecodeError(
                 DecodeError::TooShort,
             ));
@@ -109,6 +111,27 @@ mod tests {
         let encoded = original_decimal.encode();
         let decoded = Decimal::decode(encoded).expect("Decoding failed");
         assert_eq!(original_decimal, decoded);
+    }
+
+    #[test]
+    fn test_decimal_decode_ignores_trailing_bytes() {
+        let original_decimal = Decimal(RustDecimal::new(-98765, 4)); // Represents -9.8765
+        let mut bytes = original_decimal.encode().into_owned();
+        bytes.extend_from_slice(&[0xff; 7]);
+        let decoded = Decimal::decode(std::borrow::Cow::Owned(bytes)).expect("Decoding failed");
+        assert_eq!(original_decimal, decoded);
+    }
+
+    #[test]
+    fn test_decimal_decode_rejects_short_input() {
+        let bytes = vec![0u8; RUST_DECIMAL_ENCODE_SIZE as usize - 1];
+        let result = Decimal::decode(std::borrow::Cow::Owned(bytes));
+        assert!(matches!(
+            result,
+            Err(crate::memory::MemoryError::DecodeError(
+                DecodeError::TooShort
+            ))
+        ));
     }
 
     #[cfg(feature = "candid")]
