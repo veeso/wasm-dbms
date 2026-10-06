@@ -15,6 +15,7 @@
   - [Update](#update)
     - [Basic Update](#basic-update)
     - [Partial Updates](#partial-updates)
+    - [Type Checking](#type-checking)
     - [Update with Filter](#update-with-filter)
     - [Update Return Value](#update-return-value)
   - [Delete](#delete)
@@ -216,6 +217,18 @@ let update = UserUpdateRequest::builder()
     .filter(Filter::eq("id", Value::Uint32(1.into())))
     .build();
 
+database.update::<User>(update)?;
+```
+
+### Type Checking
+
+Every value of an update patch must match the type of its column; `Null` is accepted only by nullable columns. Building a patch with `UpdateRecord::from_values`, or sending one through the dynamic schema update, returns a `QueryError::InvalidQuery` for a mismatched value instead of ignoring it. See [Errors](../reference/errors.md).
+
+```rust
+let update = UserUpdateRequest::from_values(
+    &[(email_col, Value::Text("alice@example.com".into()))],
+    Some(Filter::eq("id", Value::Uint32(1.into()))),
+)?;
 database.update::<User>(update)?;
 ```
 

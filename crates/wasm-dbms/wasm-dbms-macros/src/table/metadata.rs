@@ -537,7 +537,7 @@ fn collect_sanitizes(data: &DataStruct) -> syn::Result<Sanitizers> {
                 let sanitizer = parse_sanitizer(attr)?;
 
                 let ident = field.ident.clone().ok_or_else(|| {
-                    syn::Error::new_spanned(field, "validate can only be used on named fields")
+                    syn::Error::new_spanned(field, "sanitizer can only be used on named fields")
                 })?;
 
                 sanitizers

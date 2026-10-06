@@ -116,7 +116,7 @@ fn impl_update_record(
 /// ```
 ///
 /// ```rust,ignore
-/// fn from_values(values: &[(ColumnDef, Value)], where_clause: Option<Filter>) -> DbmsResult<Self> {
+/// fn from_values(values: &[(ColumnDef, Value)], filter: Option<Filter>) -> DbmsResult<Self> {
 ///    let mut id: Option<Uint32> = None;
 ///    let mut title: Option<Text> = None;
 ///    let mut content: Option<Text> = None;
@@ -141,7 +141,7 @@ fn impl_update_record(
 ///        title,
 ///        content,
 ///        user_id,
-///        where_clause,
+///        where_clause: filter,
 ///    })
 ///}
 /// ```
