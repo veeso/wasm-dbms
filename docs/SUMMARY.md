@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](index.md)
+[Why wasm-dbms?](why-wasm-dbms.md)
 
 # Guides
 
