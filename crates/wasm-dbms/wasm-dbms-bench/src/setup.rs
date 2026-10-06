@@ -228,4 +228,25 @@ mod tests {
             .expect("count orphan posts");
         assert_eq!(orphans, 0);
     }
+
+    #[test]
+    fn test_wasm_dbms_setup_with_zero_users_generates_no_posts() {
+        let ctx = setup_wasm_dbms_with_users_and_posts(0, 3);
+        let db = WasmDbmsDatabase::oneshot(&ctx, BenchDatabaseSchema);
+
+        let users = db.select::<User>(wasm_dbms_api::prelude::Query::builder().build());
+        let posts = db.select::<Post>(wasm_dbms_api::prelude::Query::builder().build());
+        assert_eq!(users.expect("select users").len(), 0);
+        assert_eq!(posts.expect("select posts").len(), 0);
+    }
+
+    #[test]
+    fn test_duckdb_setup_with_zero_users_generates_no_posts() {
+        let conn = setup_duckdb_with_users_and_posts(0, 3);
+
+        let posts: u32 = conn
+            .query_row("SELECT COUNT(*) FROM posts", [], |row| row.get(0))
+            .expect("count posts");
+        assert_eq!(posts, 0);
+    }
 }

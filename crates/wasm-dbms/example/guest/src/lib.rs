@@ -1033,4 +1033,24 @@ mod tests {
             assert!(!std::ptr::eq(resolved, requested.as_str()));
         }
     }
+
+    #[test]
+    fn test_table_lists_match_the_schema() {
+        let mut registered: Vec<String> = registered_table_names()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let mut compiled: Vec<String> =
+            <ExampleDatabaseSchema as ::wasm_dbms::prelude::DatabaseSchema<FileMemoryProvider>>::compiled_snapshots()
+                .into_iter()
+                .map(|snapshot| snapshot.name)
+                .collect();
+        registered.sort();
+        compiled.sort();
+        assert_eq!(registered, compiled);
+
+        for name in registered_table_names() {
+            assert!(table_columns(name).is_ok(), "{name} has no column lookup");
+        }
+    }
 }
