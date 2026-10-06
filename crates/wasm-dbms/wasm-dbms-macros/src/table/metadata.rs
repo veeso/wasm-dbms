@@ -282,27 +282,24 @@ fn get_table_name(attrs: &[syn::Attribute]) -> syn::Result<Ident> {
 
 /// Collect indexes from field-level `#[index]` / `#[index(group = "...")]` attributes.
 ///
-/// The primary key always produces an implicit single-column index (listed first).
+/// The primary key always produces an implicit single-column index (listed first), followed by
+/// the implicit single-column indexes of `#[unique]` fields.
 /// Bare `#[index]` fields each produce a single-column index.
 /// Fields sharing the same `group` name are merged into one composite index,
-/// with columns ordered by field declaration order.
+/// with columns ordered by field declaration order; the primary key can be a member.
+/// Indexes with identical column lists are emitted once, keeping the first occurrence.
 fn collect_indexes(
     data: &DataStruct,
     primary_key: &Ident,
     unique: &[Ident],
 ) -> syn::Result<Vec<Index>> {
-    // PK is always an index.
-    let mut indexes = vec![Index {
-        columns: vec![primary_key.clone()],
-    }];
-    // Unique fields also always have an index, but we skip them if they are the primary key since it's redundant.
-    for unique in unique {
-        if unique != primary_key {
-            indexes.push(Index {
-                columns: vec![(*unique).clone()],
-            });
-        }
-    }
+    // PK and unique fields always have an implicit index.
+    let mut indexes: Vec<Index> = std::iter::once(primary_key)
+        .chain(unique)
+        .map(|column| Index {
+            columns: vec![column.clone()],
+        })
+        .collect();
 
     // Collect per-field annotations: (field_name, FieldIndex).
     let mut grouped: HashMap<String, Vec<Ident>> = HashMap::new();
@@ -314,15 +311,7 @@ fn collect_indexes(
                     syn::Error::new_spanned(field, "`#[index]` can only be used on named fields")
                 })?;
 
-                // Skip redundant `#[index]` on the primary key — it already has an implicit index.
-                // skip also redundant `#[index]` on unique fields since they also have implicit indexes.
-                if &field_name == primary_key && !unique.contains(&field_name) {
-                    continue;
-                }
-
-                let field_index = parse_index_attr(attr)?;
-
-                match field_index {
+                match parse_index_attr(attr)? {
                     FieldIndex::Standalone => {
                         indexes.push(Index {
                             columns: vec![field_name],
@@ -343,6 +332,10 @@ fn collect_indexes(
         let columns = grouped.remove(&name).expect("key must exist");
         indexes.push(Index { columns });
     }
+
+    // Drop indexes repeating an earlier column list, e.g. `#[index]` on a unique field.
+    let mut seen = std::collections::HashSet::new();
+    indexes.retain(|index| seen.insert(index.columns.clone()));
 
     Ok(indexes)
 }
@@ -1039,6 +1032,61 @@ mod tests {
             err.to_string(),
             "`where_clause` is a reserved column name: the generated update request uses it for \
              its filter"
+        );
+    }
+
+    fn index_column_names(metadata: &TableMetadata) -> Vec<Vec<String>> {
+        metadata
+            .indexes
+            .iter()
+            .map(|index| index.columns.iter().map(ToString::to_string).collect())
+            .collect()
+    }
+
+    #[test]
+    fn index_metadata_preserves_composites_without_duplicates() {
+        let metadata = metadata_for(syn::parse_quote! {
+            #[table = "demo"]
+            struct Demo {
+                #[primary_key]
+                #[index(group = "pair")]
+                id: Uint32,
+                #[unique]
+                #[index]
+                #[index(group = "pair")]
+                age: Uint32,
+            }
+        })
+        .unwrap();
+        let indexes = index_column_names(&metadata);
+        assert_eq!(indexes, vec![vec!["id"], vec!["age"], vec!["id", "age"]]);
+    }
+
+    #[test]
+    fn index_metadata_drops_redundant_standalone_indexes() {
+        let metadata = metadata_for(syn::parse_quote! {
+            #[table = "demo"]
+            struct Demo {
+                #[primary_key]
+                #[index]
+                id: Uint32,
+                #[index]
+                #[index]
+                name: Text,
+                #[index(group = "a")]
+                x: Uint32,
+                #[index(group = "b")]
+                x2: Uint32,
+                #[index(group = "c")]
+                #[index]
+                y: Uint32,
+            }
+        })
+        .unwrap();
+        let indexes = index_column_names(&metadata);
+        assert_eq!(
+            indexes,
+            vec![vec!["id"], vec!["name"], vec!["y"], vec!["x"], vec!["x2"],]
         );
     }
 
