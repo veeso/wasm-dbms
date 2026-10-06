@@ -4382,6 +4382,49 @@ fn foreign_key_uses_the_declared_referenced_column() {
 }
 
 #[test]
+fn updating_a_referenced_non_primary_column_rewrites_the_references() {
+    let ctx = DbmsContext::new(HeapMemoryProvider::default());
+    KeySchema::register_tables(&ctx).unwrap();
+    let db = WasmDbmsDatabase::oneshot(&ctx, KeySchema);
+    db.insert::<KeyUser>(KeyUserInsertRequest {
+        id: 1.into(),
+        code: 10.into(),
+        nickname: Nullable::Null,
+    })
+    .unwrap();
+    db.insert::<KeyPost>(KeyPostInsertRequest {
+        id: 1.into(),
+        owner: 10.into(),
+    })
+    .unwrap();
+
+    let patch = KeyUserUpdateRequest {
+        code: Some(Uint32(99)),
+        where_clause: Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        ..Default::default()
+    };
+    // the user and the post referencing its code
+    assert_eq!(db.update::<KeyUser>(patch).unwrap(), 2);
+
+    let posts = db
+        .select::<KeyPost>(Query::builder().all().with("key_users").build())
+        .expect("references must stay valid");
+    let owner = posts[0]
+        .owner
+        .as_ref()
+        .expect("owner should be eager loaded");
+    assert_eq!(owner.code, Some(Uint32(99)));
+
+    // an update leaving the referenced column unchanged does not touch the references
+    let patch = KeyUserUpdateRequest {
+        nickname: Some(Nullable::Value("nick".into())),
+        where_clause: Some(Filter::eq("id", Value::Uint32(Uint32(1)))),
+        ..Default::default()
+    };
+    assert_eq!(db.update::<KeyUser>(patch).unwrap(), 1);
+}
+
+#[test]
 fn foreign_key_on_a_non_primary_column_guards_deletes_and_primary_key_updates() {
     let ctx = DbmsContext::new(HeapMemoryProvider::default());
     KeySchema::register_tables(&ctx).unwrap();

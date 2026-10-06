@@ -74,6 +74,10 @@ Existence checks, eager loading and delete behaviors all match foreign key value
 the declared `column`. A referenced column other than the primary key should be `#[unique]`,
 so that each value identifies a single record.
 
+When an update changes the referenced column of a record, whether it is the primary key or
+another column, the new value is written to every referencing row, so references stay valid.
+An update that leaves the referenced column unchanged does not touch the referencing rows.
+
 ### Nullable Foreign Keys
 
 Declare an optional relation by wrapping the foreign key type in `Nullable`:

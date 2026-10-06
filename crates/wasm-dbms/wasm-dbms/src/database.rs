@@ -9,11 +9,10 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use wasm_dbms_api::prelude::{
-    AggregateFunction, AggregatedRow, ColumnDef, DataTypeKind, Database, DbmsError, DbmsResult,
-    DeleteBehavior, Filter, ForeignFetcher, ForeignKeyDef, InsertRecord, JoinColumnDef,
-    MigrationError, MigrationOp, MigrationPolicy, OrderDirection, Query, QueryError, TableColumns,
-    TableError, TableRecord, TableSchema, TransactionError, TransactionId, UpdateRecord, Value,
-    ValuesSource,
+    AggregateFunction, AggregatedRow, ColumnDef, Database, DbmsError, DbmsResult, DeleteBehavior,
+    Filter, ForeignFetcher, ForeignKeyDef, InsertRecord, JoinColumnDef, MigrationError,
+    MigrationOp, MigrationPolicy, OrderDirection, Query, QueryError, TableColumns, TableError,
+    TableRecord, TableSchema, TransactionError, TransactionId, UpdateRecord, Value, ValuesSource,
 };
 use wasm_dbms_memory::RecordAddress;
 use wasm_dbms_memory::prelude::{MemoryAccess, MemoryProvider, NextRecord, TableRegistry};
@@ -256,7 +255,7 @@ where
         let mut referencing = Vec::new();
         for (table, columns) in self.schema.referenced_tables(T::table_name()) {
             for column in columns {
-                let referenced_column = self.referenced_column::<T>(table, column);
+                let referenced_column = self.referenced_column(table, column)?;
                 let value = record_values
                     .iter()
                     .find(|(col_def, _)| col_def.name == referenced_column)
@@ -272,17 +271,18 @@ where
 
     /// Returns the column of `T` referenced by the foreign key `column` of `table`.
     ///
-    /// Falls back to the primary key of `T` when the schema does not expose column metadata.
-    fn referenced_column<T>(&self, table: &str, column: &str) -> &'static str
-    where
-        T: TableSchema,
-    {
+    /// # Errors
+    ///
+    /// Returns an error if the schema does not know `table`, or if `column` is not a foreign key
+    /// of `table`.
+    fn referenced_column(&self, table: &str, column: &str) -> DbmsResult<&'static str> {
         self.schema
-            .table_columns(table)
-            .ok()
-            .and_then(|columns| columns.iter().find(|col_def| col_def.name == column))
+            .table_columns(table)?
+            .iter()
+            .find(|col_def| col_def.name == column)
             .and_then(|col_def| col_def.foreign_key.as_ref())
-            .map_or(T::primary_key(), |fk| fk.foreign_column)
+            .map(|fk| fk.foreign_column)
+            .ok_or_else(|| DbmsError::Query(QueryError::UnknownColumn(column.to_string())))
     }
 
     /// Retrieves the current overlay from the active transaction.
@@ -804,57 +804,62 @@ where
         self.schema.select_join(self, table, query)
     }
 
-    /// Updates primary key references in tables referencing the updated table.
+    /// Rewrites the foreign key values of tables referencing a record of `T` whose referenced
+    /// column changed.
     ///
-    /// Only foreign keys that reference the primary key are rewritten; foreign keys referencing
-    /// another column of `T` keep their value.
-    fn update_pk_referencing_updated_table<T>(
+    /// Every foreign key is matched against the column it declares: the primary key or any other
+    /// column of `T`. Foreign keys whose referenced column keeps its value are left untouched.
+    fn update_references_to_updated_record<T>(
         &self,
-        old_pk: Value,
-        new_pk: Value,
-        data_type: DataTypeKind,
-        pk_name: &'static str,
+        old_values: &[(ColumnDef, Value)],
+        new_values: &[(ColumnDef, Value)],
     ) -> DbmsResult<u64>
     where
         T: TableSchema,
     {
         let mut count = 0;
-        for (ref_table, ref_col) in self
-            .schema
-            .referenced_tables(T::table_name())
-            .into_iter()
-            .flat_map(|(ref_table, ref_cols)| {
-                ref_cols
-                    .into_iter()
-                    .map(move |ref_col| (ref_table, ref_col))
-            })
-            .filter(|(ref_table, ref_col)| {
-                self.referenced_column::<T>(ref_table, ref_col) == pk_name
-            })
-        {
-            let ref_patch_value = (
-                ColumnDef {
-                    name: ref_col,
-                    data_type,
-                    auto_increment: false,
-                    nullable: false,
-                    primary_key: false,
-                    unique: false,
-                    foreign_key: Some(ForeignKeyDef {
-                        foreign_table: T::table_name(),
-                        foreign_column: pk_name,
-                        local_column: ref_col,
-                    }),
-                    default: None,
-                    renamed_from: &[],
-                },
-                new_pk.clone(),
-            );
-            let filter = Filter::eq(ref_col, old_pk.clone());
+        for (ref_table, ref_columns) in self.schema.referenced_tables(T::table_name()) {
+            for ref_col in ref_columns {
+                let referenced_column = self.referenced_column(ref_table, ref_col)?;
+                let find = |values: &[(ColumnDef, Value)]| {
+                    values
+                        .iter()
+                        .find(|(col_def, _)| col_def.name == referenced_column)
+                        .map(|(col_def, value)| (*col_def, value.clone()))
+                };
+                let (Some((col_def, old_value)), Some((_, new_value))) =
+                    (find(old_values), find(new_values))
+                else {
+                    continue;
+                };
+                if old_value == new_value {
+                    continue;
+                }
 
-            count += self
-                .schema
-                .update(self, ref_table, &[ref_patch_value], Some(filter))?;
+                let ref_patch_value = (
+                    ColumnDef {
+                        name: ref_col,
+                        data_type: col_def.data_type,
+                        auto_increment: false,
+                        nullable: false,
+                        primary_key: false,
+                        unique: false,
+                        foreign_key: Some(ForeignKeyDef {
+                            foreign_table: T::table_name(),
+                            foreign_column: referenced_column,
+                            local_column: ref_col,
+                        }),
+                        default: None,
+                        renamed_from: &[],
+                    },
+                    new_value,
+                );
+                let filter = Filter::eq(ref_col, old_value);
+
+                count += self
+                    .schema
+                    .update(self, ref_table, &[ref_patch_value], Some(filter))?;
+            }
         }
 
         Ok(count)
@@ -1199,14 +1204,6 @@ where
 
         let patch = patch.update_values();
 
-        let pk_in_patch = patch.iter().find_map(|(col_def, value)| {
-            if col_def.primary_key {
-                Some((col_def, value))
-            } else {
-                None
-            }
-        });
-
         self.atomic(|db| {
             let mut count = 0;
 
@@ -1266,14 +1263,10 @@ where
                 }
                 count += 1;
 
-                if let Some((pk_column, new_pk_value)) = pk_in_patch {
-                    count += db.update_pk_referencing_updated_table::<T>(
-                        current_pk_value,
-                        new_pk_value.clone(),
-                        pk_column.data_type,
-                        pk_column.name,
-                    )?;
-                }
+                count += db.update_references_to_updated_record::<T>(
+                    &old_values_for_index,
+                    &record_values,
+                )?;
             }
 
             Ok(count)
