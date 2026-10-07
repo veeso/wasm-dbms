@@ -3,6 +3,7 @@
 
 //! Page-backed B+ tree used by the index ledger.
 
+mod node_view;
 mod walker;
 
 use std::borrow::Cow;
@@ -11,6 +12,7 @@ use std::marker::PhantomData;
 use wasm_dbms_api::memory::{DecodeError, Encode, MemoryError, MemoryResult};
 use wasm_dbms_api::prelude::Page;
 
+use self::node_view::NodeView;
 pub use self::walker::IndexTreeWalker;
 use crate::{MemoryAccess, RecordAddress};
 
@@ -412,13 +414,6 @@ where
         }
     }
 
-    fn last_key(&self) -> Option<&K> {
-        match &self.body {
-            NodeBody::Internal(internal) => internal.entries.last().map(|entry| &entry.key),
-            NodeBody::Leaf(leaf) => leaf.entries.last().map(|entry| &entry.key),
-        }
-    }
-
     fn leaf_entry_size_from_len(key_len: usize, page_size: usize) -> MemoryResult<usize> {
         if key_len > u16::MAX as usize {
             return Err(MemoryError::KeyTooLarge {
@@ -554,34 +549,33 @@ where
     }
 
     /// Looks up all pointers matching `key`.
+    ///
+    /// Nodes are read as [`NodeView`]s, so only the keys visited by binary
+    /// search and the matching entries are decoded.
     pub fn search(&self, key: &K, mm: &mut impl MemoryAccess) -> MemoryResult<Vec<RecordAddress>> {
-        let mut leaf = self.find_search_start_leaf(key, mm)?;
+        let mut buf = vec![0u8; mm.page_size() as usize];
+        self.find_search_start_page(key, &mut buf, mm)?;
         let mut results = Vec::new();
 
         loop {
-            let next_page = match &leaf.body {
-                NodeBody::Leaf(leaf_body) => {
-                    for entry in &leaf_body.entries {
-                        if entry.key < *key {
-                            continue;
-                        }
-                        if entry.key > *key {
-                            return Ok(results);
-                        }
-                        results.push(entry.pointer);
-                    }
-                    leaf_body.next_leaf
+            let next_page = {
+                let view = NodeView::parse(&buf)?;
+                if !view.is_leaf() {
+                    return Ok(results);
                 }
-                NodeBody::Internal(_) => return Ok(results),
+                let start = view.partition_point(|entry: &K| entry < key)?;
+                for index in start..view.len() {
+                    if view.key::<K>(index)? != *key {
+                        return Ok(results);
+                    }
+                    results.push(view.pointer(index)?);
+                }
+                view.next_leaf()
             };
 
             match next_page {
                 Some(page) => {
-                    let next_leaf = BTreeNode::<K>::read(page, mm)?;
-                    if next_leaf.first_key().is_some_and(|next_key| next_key > key) {
-                        return Ok(results);
-                    }
-                    leaf = next_leaf;
+                    mm.read_at_raw(page, 0, &mut buf)?;
                 }
                 None => return Ok(results),
             }
@@ -696,45 +690,80 @@ where
         key: &K,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<BTreeNode<K>> {
-        let mut leaf = BTreeNode::<K>::read(self.find_leaf_page(key, mm)?, mm)?;
+        let mut buf = vec![0u8; mm.page_size() as usize];
+        let page = self.find_search_start_page(key, &mut buf, mm)?;
+        BTreeNode::deserialize(page, &buf)
+    }
+
+    /// Finds the leftmost leaf that may hold `key` and leaves its bytes in `buf`.
+    ///
+    /// Duplicates of `key` may continue into earlier leaves, and emptied
+    /// leaves stay in the sibling chain, so the previous leaves are checked
+    /// whenever the routed leaf does not start strictly below `key`.
+    fn find_search_start_page(
+        &self,
+        key: &K,
+        buf: &mut [u8],
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<Page> {
+        let mut page = self.find_leaf_page_into(key, buf, mm)?;
+
         loop {
-            let prev_page = match &leaf.body {
-                NodeBody::Leaf(leaf_body) => leaf_body.prev_leaf,
-                NodeBody::Internal(_) => None,
+            let prev_page = {
+                let view = NodeView::parse(buf)?;
+                if view.len() > 0 && view.key::<K>(0)? < *key {
+                    return Ok(page);
+                }
+                view.prev_leaf()
             };
 
-            // Empty leaves stay in the sibling chain, so skip past them while
-            // looking for an earlier leaf that may still hold `key`.
+            // Skip emptied leaves while looking for an earlier leaf that may
+            // still hold `key`.
             let mut candidate = prev_page;
-            loop {
-                let Some(page) = candidate else {
-                    return Ok(leaf);
+            let found = loop {
+                let Some(prev) = candidate else {
+                    break None;
                 };
-                let prev_leaf = BTreeNode::<K>::read(page, mm)?;
-                match prev_leaf.last_key() {
-                    Some(prev_last) if prev_last >= key => {
-                        leaf = prev_leaf;
-                        break;
+                mm.read_at_raw(prev, 0, buf)?;
+                let view = NodeView::parse(buf)?;
+                match view.len().checked_sub(1) {
+                    Some(last) if view.key::<K>(last)? >= *key => break Some(prev),
+                    Some(_) => break None,
+                    None => candidate = view.prev_leaf(),
+                }
+            };
+
+            match found {
+                Some(prev) => page = prev,
+                None => {
+                    if prev_page.is_some() {
+                        mm.read_at_raw(page, 0, buf)?;
                     }
-                    Some(_) => return Ok(leaf),
-                    None => {
-                        candidate = match &prev_leaf.body {
-                            NodeBody::Leaf(prev_body) => prev_body.prev_leaf,
-                            NodeBody::Internal(_) => None,
-                        };
-                    }
+                    return Ok(page);
                 }
             }
         }
     }
 
+    #[cfg(test)]
     fn find_leaf_page(&self, key: &K, mm: &mut impl MemoryAccess) -> MemoryResult<Page> {
+        let mut buf = vec![0u8; mm.page_size() as usize];
+        self.find_leaf_page_into(key, &mut buf, mm)
+    }
+
+    /// Descends from the root to the leaf `key` routes to, leaving its bytes in `buf`.
+    fn find_leaf_page_into(
+        &self,
+        key: &K,
+        buf: &mut [u8],
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<Page> {
         let mut page = self.root_page;
         loop {
-            let node = BTreeNode::<K>::read(page, mm)?;
-            match node.body {
-                NodeBody::Internal(internal) => page = Self::find_child(&internal, key),
-                NodeBody::Leaf(_) => return Ok(page),
+            mm.read_at_raw(page, 0, buf)?;
+            match NodeView::parse(buf)?.child_for(key)? {
+                Some(child) => page = child,
+                None => return Ok(page),
             }
         }
     }
@@ -1751,5 +1780,38 @@ mod tests {
             scanned += 1;
         }
         assert_eq!(scanned, 12_000 - removed);
+    }
+
+    #[test]
+    fn test_search_matches_brute_force_on_multi_level_tree_with_duplicates() {
+        let mut mm = make_mm();
+        let mut tree = IndexTree::<Uint32>::init(&mut mm).expect("tree init failed");
+
+        // Even keys only, so odd keys are gaps; every seventh key is stored
+        // twice. Keys are inserted out of order to exercise splits everywhere.
+        let mut expected: std::collections::BTreeMap<u32, Vec<RecordAddress>> =
+            std::collections::BTreeMap::new();
+        for step in 0..15_000u32 {
+            let key = ((step * 7_919) % 15_000) * 2;
+            let copies = if key % 7 == 0 { 2 } else { 1 };
+            for copy in 0..copies {
+                let pointer = RecordAddress {
+                    page: key,
+                    offset: copy,
+                };
+                tree.insert(Uint32(key), pointer, &mut mm)
+                    .expect("insert failed");
+                expected.entry(key).or_default().push(pointer);
+            }
+        }
+        let root = BTreeNode::<Uint32>::read(tree.root_page(), &mut mm).expect("root read failed");
+        assert!(matches!(root.body, NodeBody::Internal(_)));
+
+        for key in (0..30_003u32).step_by(3) {
+            let mut hits = tree.search(&Uint32(key), &mut mm).expect("search failed");
+            hits.sort();
+            let want = expected.get(&key).cloned().unwrap_or_default();
+            assert_eq!(hits, want, "search mismatch for key {key}");
+        }
     }
 }
