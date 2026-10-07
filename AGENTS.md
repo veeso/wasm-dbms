@@ -119,7 +119,8 @@ heap-backed provider; production uses stable memory.
 ### Transaction Model
 
 - ACID transactions use an overlay pattern for commit and rollback.
-- Transactions are owned by the caller.
+- Transactions are identified by their ID only. Ownership, when needed, is
+  enforced by the embedding layer.
 - CRUD operations accept an optional transaction ID.
 
 ### Key Patterns
@@ -223,7 +224,7 @@ Documentation that must follow the same change:
 - `docs/reference/query.md` and `docs/reference/errors.md` for builder methods
   or error variants.
 - `docs/guides/querying.md` and `docs/guides/crud-operations.md` for
-  caller-facing behavior changes.
+  user-facing behavior changes.
 - `docs/reference/sql.md` and `docs/guides/sql.md` for anything that changes
   the SQL dialect, its type conversion, or `SqlError`. The grammar, the
   reserved-word list, and every `sql` code block of these two files are

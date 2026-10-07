@@ -45,18 +45,17 @@ let ctx = DbmsContext::new(HeapMemoryProvider::default());
 MySchema::register_tables(&ctx)?;
 
 let engine = SqlEngine::new(MySchema);
-let caller = b"alice";
 
 engine.execute(
     &ctx,
-    caller,
+    None,
     "INSERT INTO users (id, name) VALUES (?, ?)",
     &[Value::from(1u32), Value::from("Alice")],
 )?;
 
 let result = engine.execute(
     &ctx,
-    caller,
+    None,
     "SELECT name FROM users WHERE id = 1",
     &[],
 )?;

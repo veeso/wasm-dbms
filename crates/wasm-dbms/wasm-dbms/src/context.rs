@@ -134,16 +134,22 @@ where
             .is_some()
     }
 
-    /// Begins a new transaction for the given owner identity.
-    pub fn begin_transaction(&self, owner: Vec<u8>) -> TransactionId {
-        let mut ts = self.transaction_session.borrow_mut();
-        ts.begin_transaction(owner)
+    /// Begins a new transaction and returns its ID.
+    ///
+    /// The engine does not record who opened the transaction: any code that
+    /// holds the ID can use, commit, or roll it back. An embedder that serves
+    /// several identities keeps its own ledger from ID to identity and checks
+    /// it before every transactional call.
+    pub fn begin_transaction(&self) -> TransactionId {
+        self.transaction_session.borrow_mut().begin_transaction()
     }
 
-    /// Returns whether the given transaction is owned by the given identity.
-    pub fn has_transaction(&self, tx_id: &TransactionId, caller: &[u8]) -> bool {
-        let ts = self.transaction_session.borrow();
-        ts.has_transaction(tx_id, caller)
+    /// Returns whether `tx_id` names a transaction that is still open.
+    ///
+    /// Embedders use it to drop ledger entries whose transaction was closed
+    /// through a path they did not see.
+    pub fn has_transaction(&self, tx_id: &TransactionId) -> bool {
+        self.transaction_session.borrow().has_transaction(tx_id)
     }
 
     /// Returns the cached drift flag for `compiled_hash`, if present.
@@ -201,10 +207,16 @@ mod tests {
     #[test]
     fn test_should_begin_transaction() {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        let owner = vec![1, 2, 3];
-        let tx_id = ctx.begin_transaction(owner.clone());
-        assert!(ctx.has_transaction(&tx_id, &owner));
-        assert!(!ctx.has_transaction(&tx_id, &[4, 5, 6]));
+        let tx_id = ctx.begin_transaction();
+        assert!(ctx.has_transaction(&tx_id));
+        assert!(!ctx.has_transaction(&(tx_id + 1)));
+    }
+
+    #[test]
+    fn test_transaction_ids_restart_with_the_context() {
+        let first = DbmsContext::new(HeapMemoryProvider::default());
+        let second = DbmsContext::new(HeapMemoryProvider::default());
+        assert_eq!(first.begin_transaction(), second.begin_transaction());
     }
 
     #[test]

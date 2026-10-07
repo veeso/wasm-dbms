@@ -18,7 +18,7 @@
 //! - `SELECT` with `JOIN`, `WHERE`, `DISTINCT`, aggregate functions,
 //!   `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, and `OFFSET`
 //! - `INSERT`, `UPDATE`, and `DELETE`; the last two require a `WHERE` clause
-//! - `BEGIN`, `COMMIT`, and `ROLLBACK`, with one transaction per caller
+//! - `BEGIN`, `COMMIT`, and `ROLLBACK`, addressed by the transaction id passed to `execute`
 //! - positional `?` parameters
 //!
 //! The full dialect is described in the
@@ -45,14 +45,14 @@
 //!
 //! engine.execute(
 //!     &ctx,
-//!     b"alice",
+//!     None,
 //!     "INSERT INTO users (id, name) VALUES (?, ?)",
 //!     &[Value::from(1u32), Value::from("Alice")],
 //! )?;
 //!
 //! let result = engine.execute(
 //!     &ctx,
-//!     b"alice",
+//!     None,
 //!     "SELECT name FROM users WHERE id = 1",
 //!     &[],
 //! )?;
@@ -68,7 +68,7 @@
 //! | `lexer`   | Splits SQL text into tokens with their line and column            |
 //! | `parser`  | Builds the [`ast`] from the tokens                                |
 //! | `planner` | Resolves names, converts values, and builds `Query` and `Filter`  |
-//! | `engine`  | Runs the plan on the database and tracks transactions             |
+//! | `engine`  | Runs the plan on the database, outside or inside a transaction    |
 //!
 //! The result and error types, `SqlResult` and `SqlError`, are defined in
 //! `wasm-dbms-api` behind its `sql` feature, which this crate enables.

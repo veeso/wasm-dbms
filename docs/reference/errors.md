@@ -38,6 +38,7 @@
     - [MissingWhereClause](#missingwhereclause)
     - [ParameterCountMismatch](#parametercountmismatch)
     - [TransactionAlreadyActive](#transactionalreadyactive)
+    - [NoActiveTransaction](#noactivetransaction)
     - [Unsupported](#unsupported)
     - [Runtime](#runtime)
   - [Error Handling Examples](#error-handling-examples)
@@ -686,6 +687,7 @@ pub enum SqlError {
         got: usize,
     },
     TransactionAlreadyActive,
+    NoActiveTransaction,
     Unsupported(String),
     Runtime(DbmsError),
 }
@@ -703,7 +705,7 @@ The SQL dialect is described in the [SQL Reference](./sql.md).
 says what was expected.
 
 ```rust
-match engine.execute(&ctx, caller, "SELECT name FORM users", &[]) {
+match engine.execute(&ctx, None, "SELECT name FORM users", &[]) {
     Err(SqlError::Parse { line, col, msg }) => {
         // line 1, column 13: expected `FROM`, found identifier `FORM`
         println!("syntax error at {line}:{col}: {msg}");
@@ -733,7 +735,7 @@ alias.
 **Cause:** The table has no column with that name.
 
 ```rust
-match engine.execute(&ctx, caller, "SELECT nickname FROM users", &[]) {
+match engine.execute(&ctx, None, "SELECT nickname FROM users", &[]) {
     Err(SqlError::UnknownColumn { table, column }) => {
         println!("table {table} has no column {column}");
     }
@@ -760,7 +762,7 @@ reports column `posts.user_id`, expected `Text`, got `Uint32`.
 
 ```rust
 // `age` is a Uint8 column
-match engine.execute(&ctx, caller, "SELECT * FROM users WHERE age = 'old'", &[]) {
+match engine.execute(&ctx, None, "SELECT * FROM users WHERE age = 'old'", &[]) {
     Err(SqlError::TypeMismatch { column, expected, got }) => {
         // column "age", expected Uint8, got "String"
     }
@@ -797,10 +799,17 @@ true for all of them.
 
 ### TransactionAlreadyActive
 
-**Cause:** `BEGIN` was sent by a caller that already has a SQL transaction
-open.
+**Cause:** `BEGIN` was sent together with a transaction id. A transaction
+cannot be opened inside another one.
 
-**Solution:** Send `COMMIT` or `ROLLBACK` first.
+**Solution:** Send `BEGIN` without an id. If the earlier transaction is
+finished, send `COMMIT` or `ROLLBACK` with its id first.
+
+### NoActiveTransaction
+
+**Cause:** `COMMIT` or `ROLLBACK` was sent without a transaction id.
+
+**Solution:** Pass the id returned by `BEGIN`.
 
 ### Unsupported
 
@@ -820,7 +829,7 @@ together. The message names the combination.
 `DbmsError` is one of the errors described in the sections above.
 
 ```rust
-match engine.execute(&ctx, caller, "INSERT INTO users (id, name) VALUES (1, 'A')", &[]) {
+match engine.execute(&ctx, None, "INSERT INTO users (id, name) VALUES (1, 'A')", &[]) {
     Err(SqlError::Runtime(DbmsError::Query(QueryError::PrimaryKeyConflict))) => {
         println!("a user with this id already exists");
     }
@@ -829,8 +838,9 @@ match engine.execute(&ctx, caller, "INSERT INTO users (id, name) VALUES (1, 'A')
 }
 ```
 
-`COMMIT` and `ROLLBACK` sent without an open transaction fail with
-`Runtime(DbmsError::Transaction(TransactionError::NoActiveTransaction))`.
+`COMMIT` sent with the id of a transaction that is already closed fails with
+`Runtime(DbmsError::Query(QueryError::TransactionNotFound))`, and so does any
+statement sent with an id the database does not know.
 
 ---
 
@@ -884,4 +894,4 @@ fn handle_db_error(error: DbmsError) -> String {
 }
 ```
 
-> For IC client-specific error handling (double result pattern with `CallError`), see the [IC Errors Reference](https://ic.wasm-dbms.cc/reference/errors.html).
+> For IC client-specific error handling (double-result pattern), see the [IC Errors Reference](https://ic.wasm-dbms.cc/reference/errors.html).

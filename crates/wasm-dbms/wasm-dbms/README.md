@@ -115,7 +115,7 @@ use wasm_dbms::prelude::*;
 use wasm_dbms_api::prelude::*;
 
 // Begin a transaction
-let tx_id = ctx.begin_transaction(caller_id);
+let tx_id = ctx.begin_transaction();
 let mut database = WasmDbmsDatabase::from_transaction(&ctx, MySchema, tx_id);
 
 database.insert::<User>(user)?;

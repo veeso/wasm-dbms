@@ -2,16 +2,13 @@ use wasm_dbms::prelude::{DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::{
     AggregatedRow, Blob, CandidDataTypeKind, Database as _, Date, DateTime, DbmsError, Decimal,
     Encode as _, JoinColumnDef, Json, MigrationError, Query, QueryError, SqlError, SqlResult,
-    TableSchema as _, TransactionError, Uuid, Value,
+    TableSchema as _, TransactionId, Uuid, Value,
 };
 use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
 use super::{SqlEngine, aggregate_row, join_row, table_row};
 use crate::planner::{AggregateOutput, AggregateSource, OutputColumn};
 use crate::test_schema::{TestSchema, User};
-
-const ALICE: &[u8] = b"alice";
-const BOB: &[u8] = b"bob";
 
 /// A fresh database with its SQL engine.
 struct TestDb {
@@ -52,25 +49,52 @@ impl TestDb {
         db
     }
 
-    fn execute(&self, caller: &[u8], sql: &str, params: &[Value]) -> Result<SqlResult, SqlError> {
-        self.engine.execute(&self.ctx, caller, sql, params)
+    fn execute(
+        &self,
+        tx: Option<TransactionId>,
+        sql: &str,
+        params: &[Value],
+    ) -> Result<SqlResult, SqlError> {
+        self.engine.execute(&self.ctx, tx, sql, params)
     }
 
-    /// Runs a statement without parameters as Alice; it must succeed.
+    /// Runs a statement without parameters outside any transaction; it must succeed.
     fn run(&self, sql: &str) -> SqlResult {
-        self.execute(ALICE, sql, &[])
+        self.run_in(None, sql)
+    }
+
+    /// Runs a statement without parameters in `tx`; it must succeed.
+    fn run_in(&self, tx: Option<TransactionId>, sql: &str) -> SqlResult {
+        self.execute(tx, sql, &[])
             .unwrap_or_else(|error| panic!("`{sql}` failed: {error}"))
     }
 
-    /// Runs a statement without parameters as Alice; it must fail.
+    /// Runs a statement without parameters outside any transaction; it must fail.
     fn fail(&self, sql: &str) -> SqlError {
-        self.execute(ALICE, sql, &[])
-            .expect_err("statement must fail")
+        self.fail_in(None, sql)
     }
 
-    /// Runs a `SELECT` and returns `(column name, value)` pairs per row.
-    fn query_as(&self, caller: &[u8], sql: &str, params: &[Value]) -> Vec<Vec<(String, Value)>> {
-        match self.execute(caller, sql, params) {
+    /// Runs a statement without parameters in `tx`; it must fail.
+    fn fail_in(&self, tx: Option<TransactionId>, sql: &str) -> SqlError {
+        self.execute(tx, sql, &[]).expect_err("statement must fail")
+    }
+
+    /// Opens a transaction with `BEGIN` and returns its id.
+    fn begin(&self) -> TransactionId {
+        match self.run("BEGIN") {
+            SqlResult::TxBegin(tx) => tx,
+            other => panic!("BEGIN did not return a transaction id: {other:?}"),
+        }
+    }
+
+    /// Runs a `SELECT` in `tx` and returns `(column name, value)` pairs per row.
+    fn query_as(
+        &self,
+        tx: Option<TransactionId>,
+        sql: &str,
+        params: &[Value],
+    ) -> Vec<Vec<(String, Value)>> {
+        match self.execute(tx, sql, params) {
             Ok(SqlResult::Rows(rows)) => rows
                 .into_iter()
                 .map(|row| {
@@ -84,12 +108,17 @@ impl TestDb {
     }
 
     fn query(&self, sql: &str) -> Vec<Vec<(String, Value)>> {
-        self.query_as(ALICE, sql, &[])
+        self.query_as(None, sql, &[])
     }
 
-    /// Runs a `SELECT` and returns only the values of each row.
+    /// Runs a `SELECT` outside any transaction and returns only the values of each row.
     fn values(&self, sql: &str) -> Vec<Vec<Value>> {
-        self.query(sql)
+        self.values_in(None, sql)
+    }
+
+    /// Runs a `SELECT` in `tx` and returns only the values of each row.
+    fn values_in(&self, tx: Option<TransactionId>, sql: &str) -> Vec<Vec<Value>> {
+        self.query_as(tx, sql, &[])
             .into_iter()
             .map(|row| row.into_iter().map(|(_, value)| value).collect())
             .collect()
@@ -203,7 +232,7 @@ fn test_select_zero_limit_without_order_returns_no_rows() {
         Vec::<Vec<Value>>::new()
     );
     assert_eq!(
-        db.query_as(ALICE, "SELECT id FROM users LIMIT ?", &[Value::from(0u8)]),
+        db.query_as(None, "SELECT id FROM users LIMIT ?", &[Value::from(0u8)]),
         Vec::<Vec<(String, Value)>>::new()
     );
 }
@@ -275,7 +304,7 @@ fn test_select_with_parameters() {
     let db = TestDb::seeded();
     assert_eq!(
         db.query_as(
-            ALICE,
+            None,
             "SELECT name FROM users WHERE age > ? AND name != ? ORDER BY name LIMIT ? OFFSET ?",
             &[
                 Value::from(20i64),
@@ -444,7 +473,7 @@ fn test_join_with_limit_and_parameters() {
     let db = TestDb::seeded();
     assert_eq!(
         db.query_as(
-            ALICE,
+            None,
             "SELECT posts.title FROM users JOIN posts ON users.id = posts.user_id WHERE \
              users.name = ? ORDER BY posts.title DESC LIMIT ?",
             &[text("Alice"), Value::from(1u32)],
@@ -551,7 +580,7 @@ fn test_aggregate_with_parameters() {
     let db = TestDb::seeded();
     assert_eq!(
         db.query_as(
-            ALICE,
+            None,
             "SELECT category FROM sales WHERE region = ? GROUP BY category HAVING COUNT(*) > ? \
              ORDER BY category LIMIT ?",
             &[text("eu"), Value::from(1u32), Value::from(10u32)],
@@ -589,7 +618,7 @@ fn test_insert_is_visible_through_the_programmatic_api() {
     let db = TestDb::new();
     assert_eq!(
         db.execute(
-            ALICE,
+            None,
             "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
             &[Value::from(7u32), text("Dan"), Value::from(50u8)],
         )
@@ -708,7 +737,7 @@ fn test_typed_values_from_parameters_and_in_filters() {
     let payload = Value::Blob(Blob(vec![1, 2, 3]));
     let meta = Value::Json("[1, 2]".parse::<Json>().unwrap());
     db.execute(
-        ALICE,
+        None,
         "INSERT INTO events (day, at, token, payload, meta, delta) VALUES (?, ?, ?, ?, ?, ?)",
         &[
             day.clone(),
@@ -726,7 +755,7 @@ fn test_typed_values_from_parameters_and_in_filters() {
     );
 
     let ids = |sql: &str, params: &[Value]| -> Vec<Value> {
-        db.query_as(ALICE, sql, params)
+        db.query_as(None, sql, params)
             .into_iter()
             .flatten()
             .map(|(_, value)| value)
@@ -840,7 +869,7 @@ fn test_update_with_where() {
     // several rows, with a parameter
     assert_eq!(
         db.execute(
-            ALICE,
+            None,
             "UPDATE users SET age = ? WHERE age >= 30",
             &[Value::from(99u8)]
         )
@@ -903,7 +932,7 @@ fn test_delete_with_where() {
         SqlResult::RowsAffected(0)
     );
     assert_eq!(
-        db.execute(ALICE, "DELETE FROM users WHERE name = ?", &[text("Carol")])
+        db.execute(None, "DELETE FROM users WHERE name = ?", &[text("Carol")])
             .unwrap(),
         SqlResult::RowsAffected(1)
     );
@@ -962,62 +991,79 @@ fn test_delete_cascade_removes_referencing_rows() {
 // -- transactions -----------------------------------------------------------
 
 #[test]
+fn test_begin_returns_an_open_transaction_id() {
+    let db = TestDb::new();
+    let tx = db.begin();
+    assert!(db.ctx.has_transaction(&tx));
+
+    // the id is the engine's own: the typed API closes it
+    let mut typed = WasmDbmsDatabase::from_transaction(&db.ctx, TestSchema, tx);
+    typed.rollback().unwrap();
+    assert!(!db.ctx.has_transaction(&tx));
+}
+
+#[test]
 fn test_begin_commit_cycle() {
     let db = TestDb::seeded();
-    assert!(!db.engine.in_transaction(&db.ctx, ALICE));
-    assert_eq!(db.run("BEGIN"), SqlResult::TxBegin);
-    assert!(db.engine.in_transaction(&db.ctx, ALICE));
-    assert!(!db.engine.in_transaction(&db.ctx, BOB));
+    let tx = db.begin();
 
-    db.run("INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)");
-    db.run("UPDATE users SET age = 31 WHERE id = 1");
-    db.run("DELETE FROM comments WHERE id = 100");
+    db.run_in(
+        Some(tx),
+        "INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)",
+    );
+    db.run_in(Some(tx), "UPDATE users SET age = 31 WHERE id = 1");
+    db.run_in(Some(tx), "DELETE FROM comments WHERE id = 100");
 
     // the transaction reads its own writes
     assert_eq!(
-        db.values("SELECT name FROM users WHERE id = 4"),
+        db.values_in(Some(tx), "SELECT name FROM users WHERE id = 4"),
         vec![vec![text("Dan")]]
     );
     assert_eq!(
-        db.values("SELECT age FROM users WHERE name = 'Alice'"),
+        db.values_in(Some(tx), "SELECT age FROM users WHERE name = 'Alice'"),
         vec![vec![Value::from(31u8)]]
     );
-    assert_eq!(db.values("SELECT id FROM comments").len(), 1);
+    assert_eq!(db.values_in(Some(tx), "SELECT id FROM comments").len(), 1);
     assert_eq!(
-        db.values("SELECT COUNT(*) FROM users"),
+        db.values_in(Some(tx), "SELECT COUNT(*) FROM users"),
         vec![vec![Value::from(4u64)]]
     );
 
-    // other callers and the programmatic API do not see them yet
+    // statements without the id and the programmatic API do not see them yet
     assert_eq!(
-        db.query_as(BOB, "SELECT name FROM users WHERE id = 4", &[]),
-        Vec::<Vec<(String, Value)>>::new()
+        db.values("SELECT name FROM users WHERE id = 4"),
+        Vec::<Vec<Value>>::new()
     );
     assert_eq!(db.count("users"), 3);
     assert_eq!(db.count("comments"), 2);
 
-    assert_eq!(db.run("COMMIT"), SqlResult::TxCommit);
-    assert!(!db.engine.in_transaction(&db.ctx, ALICE));
+    assert_eq!(db.run_in(Some(tx), "COMMIT"), SqlResult::TxCommit);
+    assert!(!db.ctx.has_transaction(&tx));
     assert_eq!(db.count("users"), 4);
     assert_eq!(db.count("comments"), 1);
     assert_eq!(
-        db.query_as(BOB, "SELECT age FROM users WHERE id = 1", &[]),
-        vec![vec![named("age", Value::from(31u8))]]
+        db.values("SELECT age FROM users WHERE id = 1"),
+        vec![vec![Value::from(31u8)]]
     );
 }
 
 #[test]
 fn test_begin_rollback_cycle() {
     let db = TestDb::seeded();
-    assert_eq!(db.run("BEGIN TRANSACTION"), SqlResult::TxBegin);
-    db.run("INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)");
-    db.run("DELETE FROM users WHERE id = 3");
+    let SqlResult::TxBegin(tx) = db.run("BEGIN TRANSACTION") else {
+        panic!("BEGIN TRANSACTION did not return a transaction id");
+    };
+    db.run_in(
+        Some(tx),
+        "INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)",
+    );
+    db.run_in(Some(tx), "DELETE FROM users WHERE id = 3");
     assert_eq!(
-        db.values("SELECT COUNT(*) FROM users"),
+        db.values_in(Some(tx), "SELECT COUNT(*) FROM users"),
         vec![vec![Value::from(3u64)]]
     );
-    assert_eq!(db.run("ROLLBACK"), SqlResult::TxRollback);
-    assert!(!db.engine.in_transaction(&db.ctx, ALICE));
+    assert_eq!(db.run_in(Some(tx), "ROLLBACK"), SqlResult::TxRollback);
+    assert!(!db.ctx.has_transaction(&tx));
     assert_eq!(
         db.values("SELECT id FROM users ORDER BY id"),
         vec![
@@ -1026,208 +1072,197 @@ fn test_begin_rollback_cycle() {
             vec![Value::from(3u32)]
         ]
     );
-    // a new transaction can start afterwards
-    assert_eq!(db.run("BEGIN"), SqlResult::TxBegin);
-    assert_eq!(db.run("COMMIT TRANSACTION"), SqlResult::TxCommit);
+    // a new transaction can start afterwards and gets a fresh id
+    let next = db.begin();
+    assert_ne!(next, tx);
+    assert_eq!(
+        db.run_in(Some(next), "COMMIT TRANSACTION"),
+        SqlResult::TxCommit
+    );
 }
 
 #[test]
-fn test_nested_begin_is_rejected_and_keeps_the_transaction() {
+fn test_begin_inside_a_transaction_is_rejected_and_keeps_it() {
     let db = TestDb::seeded();
-    db.run("BEGIN");
-    db.run("INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)");
+    let tx = db.begin();
+    db.run_in(
+        Some(tx),
+        "INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)",
+    );
     assert!(matches!(
-        db.fail("BEGIN"),
+        db.fail_in(Some(tx), "BEGIN"),
         SqlError::TransactionAlreadyActive
     ));
-    assert!(db.engine.in_transaction(&db.ctx, ALICE));
-    db.run("COMMIT");
+    assert!(db.ctx.has_transaction(&tx));
+    db.run_in(Some(tx), "COMMIT");
     assert_eq!(db.count("users"), 4);
 }
 
 #[test]
-fn test_commit_and_rollback_without_begin() {
+fn test_commit_and_rollback_without_a_transaction_id() {
     let db = TestDb::new();
     for sql in ["COMMIT", "ROLLBACK"] {
-        assert!(matches!(
-            db.fail(sql),
-            SqlError::Runtime(DbmsError::Transaction(
-                TransactionError::NoActiveTransaction
-            ))
-        ));
+        assert!(
+            matches!(db.fail(sql), SqlError::NoActiveTransaction),
+            "{sql}"
+        );
     }
 }
 
 #[test]
-fn test_each_caller_has_its_own_transaction() {
+fn test_commit_of_a_closed_transaction_is_not_found() {
     let db = TestDb::seeded();
-    db.execute(ALICE, "BEGIN", &[]).unwrap();
-    db.execute(BOB, "BEGIN", &[]).unwrap();
-    db.execute(
-        ALICE,
-        "INSERT INTO users (id, name, age) VALUES (4, 'A', 1)",
-        &[],
-    )
-    .unwrap();
-    db.execute(
-        BOB,
-        "INSERT INTO users (id, name, age) VALUES (5, 'B', 2)",
-        &[],
-    )
-    .unwrap();
+    let tx = db.begin();
+    db.run_in(Some(tx), "ROLLBACK");
 
-    let ids = |caller: &[u8]| -> Vec<Value> {
-        db.query_as(caller, "SELECT id FROM users WHERE id > 3 ORDER BY id", &[])
+    assert!(matches!(
+        db.fail_in(Some(tx), "COMMIT"),
+        SqlError::Runtime(DbmsError::Query(QueryError::TransactionNotFound))
+    ));
+    // a data statement on the closed id fails the same way and writes nothing
+    assert!(matches!(
+        db.fail_in(
+            Some(tx),
+            "INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)"
+        ),
+        SqlError::Runtime(DbmsError::Query(QueryError::TransactionNotFound))
+    ));
+    assert_eq!(db.count("users"), 3);
+}
+
+#[test]
+fn test_open_transactions_are_isolated_from_each_other() {
+    let db = TestDb::seeded();
+    let first = db.begin();
+    let second = db.begin();
+    assert_ne!(first, second);
+    db.run_in(
+        Some(first),
+        "INSERT INTO users (id, name, age) VALUES (4, 'A', 1)",
+    );
+    db.run_in(
+        Some(second),
+        "INSERT INTO users (id, name, age) VALUES (5, 'B', 2)",
+    );
+
+    let ids = |tx: Option<TransactionId>| -> Vec<Value> {
+        db.query_as(tx, "SELECT id FROM users WHERE id > 3 ORDER BY id", &[])
             .into_iter()
             .flatten()
             .map(|(_, value)| value)
             .collect()
     };
-    assert_eq!(ids(ALICE), vec![Value::from(4u32)]);
-    assert_eq!(ids(BOB), vec![Value::from(5u32)]);
+    assert_eq!(ids(Some(first)), vec![Value::from(4u32)]);
+    assert_eq!(ids(Some(second)), vec![Value::from(5u32)]);
+    assert_eq!(ids(None), Vec::<Value>::new());
 
-    db.execute(BOB, "ROLLBACK", &[]).unwrap();
-    assert!(db.engine.in_transaction(&db.ctx, ALICE));
-    assert!(!db.engine.in_transaction(&db.ctx, BOB));
-    db.execute(ALICE, "COMMIT", &[]).unwrap();
-    assert_eq!(ids(BOB), vec![Value::from(4u32)]);
+    db.run_in(Some(second), "ROLLBACK");
+    assert!(db.ctx.has_transaction(&first));
+    assert!(!db.ctx.has_transaction(&second));
+    db.run_in(Some(first), "COMMIT");
+    assert_eq!(ids(None), vec![Value::from(4u32)]);
 }
 
 #[test]
-fn test_transactions_are_scoped_to_the_context() {
+fn test_sql_and_typed_api_share_transaction_ids() {
+    let db = TestDb::seeded();
+    let tx = db.ctx.begin_transaction();
+    db.run_in(
+        Some(tx),
+        "INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)",
+    );
+
+    let mut typed = WasmDbmsDatabase::from_transaction(&db.ctx, TestSchema, tx);
+    let rows = typed
+        .select_raw("users", Query::builder().all().build())
+        .expect("select failed");
+    assert_eq!(rows.len(), 4);
+    typed.commit().unwrap();
+    assert_eq!(db.count("users"), 4);
+}
+
+#[test]
+fn test_engine_serves_several_contexts() {
     let first = TestDb::new();
     let second = TestDb::new();
 
+    let tx = match first
+        .engine
+        .execute(&second.ctx, None, "BEGIN", &[])
+        .unwrap()
+    {
+        SqlResult::TxBegin(tx) => tx,
+        other => panic!("BEGIN did not return a transaction id: {other:?}"),
+    };
     first
         .engine
-        .execute(&first.ctx, ALICE, "BEGIN", &[])
+        .execute(
+            &second.ctx,
+            Some(tx),
+            "INSERT INTO users (id, name, age) VALUES (1, 'Alice', 30)",
+            &[],
+        )
         .unwrap();
-    let second_transaction = second.ctx.begin_transaction(ALICE.to_vec());
+    first
+        .engine
+        .execute(&second.ctx, Some(tx), "COMMIT", &[])
+        .unwrap();
 
-    assert_eq!(
-        first
-            .engine
-            .execute(
-                &second.ctx,
-                ALICE,
-                "INSERT INTO users (id, name, age) VALUES (1, 'Alice', 30)",
-                &[],
-            )
-            .unwrap(),
-        SqlResult::RowsAffected(1)
-    );
     assert_eq!(second.count("users"), 1);
-
-    let mut transaction =
-        WasmDbmsDatabase::from_transaction(&second.ctx, TestSchema, second_transaction);
-    transaction.rollback().unwrap();
-
-    assert_eq!(
-        first
-            .engine
-            .execute(&second.ctx, ALICE, "BEGIN", &[])
-            .unwrap(),
-        SqlResult::TxBegin
-    );
-    assert!(first.engine.in_transaction(&first.ctx, ALICE));
-    assert!(first.engine.in_transaction(&second.ctx, ALICE));
-    first
-        .engine
-        .execute(&second.ctx, ALICE, "ROLLBACK", &[])
-        .unwrap();
-    first
-        .engine
-        .execute(&first.ctx, ALICE, "ROLLBACK", &[])
-        .unwrap();
-}
-
-#[test]
-fn test_transactions_of_dropped_contexts_are_evicted() {
-    let engine = SqlEngine::new(TestSchema);
-    for _ in 0..3 {
-        let ctx = DbmsContext::new(HeapMemoryProvider::default());
-        TestSchema::register_tables(&ctx).expect("failed to register tables");
-        assert_eq!(
-            engine.execute(&ctx, ALICE, "BEGIN", &[]).unwrap(),
-            SqlResult::TxBegin
-        );
-    }
-    assert_eq!(engine.transactions.borrow().len(), 1);
-
-    let active = DbmsContext::new(HeapMemoryProvider::default());
-    TestSchema::register_tables(&active).expect("failed to register tables");
-    assert!(!engine.in_transaction(&active, ALICE));
-    assert!(engine.transactions.borrow().is_empty());
-}
-
-#[test]
-fn test_closed_programmatic_transaction_does_not_lock_sql_caller() {
-    let db = TestDb::new();
-    db.engine.execute(&db.ctx, ALICE, "BEGIN", &[]).unwrap();
-
-    let transaction_id = db
-        .engine
-        .transactions
-        .borrow()
-        .get(&(db.ctx.id(), ALICE.to_vec()))
-        .copied()
-        .expect("SQL transaction must be tracked");
-    let mut transaction = WasmDbmsDatabase::from_transaction(&db.ctx, TestSchema, transaction_id);
-    transaction.rollback().unwrap();
-
-    assert!(!db.engine.in_transaction(&db.ctx, ALICE));
-    assert_eq!(
-        db.engine.execute(&db.ctx, ALICE, "BEGIN", &[]).unwrap(),
-        SqlResult::TxBegin
-    );
-    db.engine.execute(&db.ctx, ALICE, "ROLLBACK", &[]).unwrap();
+    assert_eq!(first.count("users"), 0);
 }
 
 #[test]
 fn test_failed_statement_leaves_the_transaction_open() {
     let db = TestDb::seeded();
-    db.run("BEGIN");
-    db.run("INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)");
+    let tx = db.begin();
+    db.run_in(
+        Some(tx),
+        "INSERT INTO users (id, name, age) VALUES (4, 'Dan', 20)",
+    );
     assert!(matches!(
-        db.fail("INSERT INTO nowhere (id) VALUES (1)"),
+        db.fail_in(Some(tx), "INSERT INTO nowhere (id) VALUES (1)"),
         SqlError::UnknownTable(_)
     ));
-    assert!(matches!(db.fail("SELEC 1"), SqlError::Parse { .. }));
-    assert!(db.engine.in_transaction(&db.ctx, ALICE));
-    db.run("COMMIT");
+    assert!(matches!(
+        db.fail_in(Some(tx), "SELEC 1"),
+        SqlError::Parse { .. }
+    ));
+    assert!(db.ctx.has_transaction(&tx));
+    db.run_in(Some(tx), "COMMIT");
     assert_eq!(db.count("users"), 4);
 }
 
 #[test]
 fn test_failed_commit_ends_the_transaction() {
     let db = TestDb::seeded();
-    db.execute(ALICE, "BEGIN", &[]).unwrap();
+    let tx = db.begin();
     db.execute(
-        ALICE,
+        Some(tx),
         "INSERT INTO users (id, name, age) VALUES (4, 'A', 1)",
         &[],
     )
     .unwrap();
-    // Bob takes the same key first
+    // the same key is taken outside the transaction first
     db.execute(
-        BOB,
+        None,
         "INSERT INTO users (id, name, age) VALUES (4, 'B', 2)",
         &[],
     )
     .unwrap();
 
     assert!(matches!(
-        query_error(db.execute(ALICE, "COMMIT", &[]).unwrap_err()),
+        query_error(db.execute(Some(tx), "COMMIT", &[]).unwrap_err()),
         QueryError::PrimaryKeyConflict
     ));
-    assert!(!db.engine.in_transaction(&db.ctx, ALICE));
+    assert!(!db.ctx.has_transaction(&tx));
     assert_eq!(
         db.values("SELECT name FROM users WHERE id = 4"),
         vec![vec![text("B")]]
     );
-    // the caller can start over
-    assert_eq!(db.run("BEGIN"), SqlResult::TxBegin);
-    assert_eq!(db.run("ROLLBACK"), SqlResult::TxRollback);
+    // a new transaction can start over
+    let next = db.begin();
+    assert_eq!(db.run_in(Some(next), "ROLLBACK"), SqlResult::TxRollback);
 }
 
 #[test]
@@ -1248,26 +1283,26 @@ fn test_schema_drift_is_reported_and_keeps_the_transaction_until_rollback() {
         ));
     };
 
-    drift(engine.execute(&db.ctx, ALICE, "SELECT * FROM users", &[]));
+    drift(engine.execute(&db.ctx, None, "SELECT * FROM users", &[]));
     drift(engine.execute(
         &db.ctx,
-        ALICE,
+        None,
         "INSERT INTO users (id, name, age) VALUES (9, 'Zed', 1)",
         &[],
     ));
 
-    assert_eq!(
-        engine.execute(&db.ctx, ALICE, "BEGIN", &[]).unwrap(),
-        SqlResult::TxBegin
-    );
+    let tx = match engine.execute(&db.ctx, None, "BEGIN", &[]).unwrap() {
+        SqlResult::TxBegin(tx) => tx,
+        other => panic!("BEGIN did not return a transaction id: {other:?}"),
+    };
     // the commit is refused, but the transaction is still there to roll back
-    drift(engine.execute(&db.ctx, ALICE, "COMMIT", &[]));
-    assert!(engine.in_transaction(&db.ctx, ALICE));
+    drift(engine.execute(&db.ctx, Some(tx), "COMMIT", &[]));
+    assert!(db.ctx.has_transaction(&tx));
     assert_eq!(
-        engine.execute(&db.ctx, ALICE, "ROLLBACK", &[]).unwrap(),
+        engine.execute(&db.ctx, Some(tx), "ROLLBACK", &[]).unwrap(),
         SqlResult::TxRollback
     );
-    assert!(!engine.in_transaction(&db.ctx, ALICE));
+    assert!(!db.ctx.has_transaction(&tx));
     assert_eq!(db.count("users"), 3);
 }
 
@@ -1317,7 +1352,7 @@ fn test_parameter_count_must_match() {
     let db = TestDb::seeded();
     assert!(matches!(
         db.execute(
-            ALICE,
+            None,
             "SELECT * FROM users WHERE id = ? AND age = ?",
             &[Value::from(1u32)]
         ),
@@ -1327,20 +1362,30 @@ fn test_parameter_count_must_match() {
         })
     ));
     assert!(matches!(
-        db.execute(ALICE, "SELECT * FROM users", &[Value::from(1u32)]),
+        db.execute(None, "SELECT * FROM users", &[Value::from(1u32)]),
         Err(SqlError::ParameterCountMismatch {
             expected: 0,
             got: 1
         })
     ));
     assert!(matches!(
-        db.execute(ALICE, "BEGIN", &[Value::Null]),
+        db.execute(None, "BEGIN", &[Value::Null]),
         Err(SqlError::ParameterCountMismatch {
             expected: 0,
             got: 1
         })
     ));
-    assert!(!db.engine.in_transaction(&db.ctx, ALICE));
+    // the mismatch is reported before the transaction logic runs, with or
+    // without an id, and no transaction was opened: the first real BEGIN
+    // gets the first id of the context
+    assert!(matches!(
+        db.execute(Some(0), "BEGIN", &[Value::Null]),
+        Err(SqlError::ParameterCountMismatch {
+            expected: 0,
+            got: 1
+        })
+    ));
+    assert_eq!(db.begin(), 0);
 }
 
 #[test]
@@ -1386,7 +1431,7 @@ fn test_text_is_never_interpreted_as_sql() {
     let db = TestDb::seeded();
     let hostile = "x'; DELETE FROM users WHERE id > 0; --";
     db.execute(
-        ALICE,
+        None,
         "UPDATE users SET name = ? WHERE id = 1",
         &[text(hostile)],
     )
@@ -1394,7 +1439,7 @@ fn test_text_is_never_interpreted_as_sql() {
     assert_eq!(db.count("users"), 3);
     assert_eq!(
         db.query_as(
-            ALICE,
+            None,
             "SELECT id FROM users WHERE name = ?",
             &[text(hostile)]
         ),
@@ -1422,10 +1467,8 @@ fn test_statement_with_comments_and_semicolon() {
 #[test]
 fn test_engine_debug_output() {
     let db = TestDb::new();
-    db.run("BEGIN");
     let debug = format!("{engine:?}", engine = db.engine);
     assert!(debug.contains("SqlEngine"), "{debug}");
-    assert!(debug.contains("active_transactions: 1"), "{debug}");
 }
 
 #[test]

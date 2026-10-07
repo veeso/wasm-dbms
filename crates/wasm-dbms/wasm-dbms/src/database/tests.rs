@@ -452,8 +452,7 @@ fn test_transaction_commit_rejects_oversized_text() {
     use wasm_dbms_api::prelude::{DbmsError, MemoryError};
 
     let ctx = setup();
-    let owner = vec![1, 2, 3];
-    let tx_id = ctx.begin_transaction(owner);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
     db.insert::<User>(user_insert_with_name_len(1, 70_000))
@@ -611,8 +610,7 @@ fn test_transaction_update_and_commit() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "alice");
 
-    let owner = vec![1, 2, 3];
-    let tx_id = ctx.begin_transaction(owner);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
     let patch = UserUpdateRequest::from_values(
@@ -637,8 +635,7 @@ fn test_transaction_delete_and_commit() {
     insert_user(&db, 1, "alice");
     insert_user(&db, 2, "bob");
 
-    let owner = vec![1, 2, 3];
-    let tx_id = ctx.begin_transaction(owner);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
     db.delete::<User>(
@@ -662,8 +659,7 @@ fn test_transaction_pk_update_then_column_update_and_commit() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "alice");
 
-    let owner = vec![1, 2, 3];
-    let tx_id = ctx.begin_transaction(owner);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
     // Step 1: update PK from 1 to 10
@@ -704,8 +700,7 @@ fn test_transaction_pk_update_then_delete() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "alice");
 
-    let owner = vec![1, 2, 3];
-    let tx_id = ctx.begin_transaction(owner);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
     // Step 1: update PK from 1 to 10
@@ -740,7 +735,7 @@ fn test_transaction_pk_update_then_delete() {
 #[test]
 fn test_transaction_insert_delete_reinsert_same_pk_is_visible_once() {
     let ctx = setup();
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
     insert_user(&db, 1, "first");
@@ -786,7 +781,7 @@ fn test_transaction_delete_committed_row_then_reinsert_same_pk_is_visible_once()
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "first");
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     db.delete::<User>(
         DeleteBehavior::Restrict,
@@ -814,7 +809,7 @@ fn test_transaction_pk_update_then_reinsert_old_pk_yields_both_rows() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "alice");
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
     // move alice from id 1 to id 2, then reuse id 1 for a new row
@@ -849,7 +844,7 @@ fn test_transaction_pk_update_then_reinsert_old_pk_yields_both_rows() {
 #[test]
 fn test_transaction_insert_pk_update_then_reinsert_old_pk_yields_both_rows() {
     let ctx = setup();
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
     // insert alice as id 1 inside the transaction, move her to id 2, reuse id 1
@@ -880,7 +875,7 @@ fn test_transaction_update_commit_ignores_rows_inserted_after_staging() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "old");
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("new".to_string())))],
@@ -921,7 +916,7 @@ fn test_transaction_update_commit_includes_rows_inserted_in_same_transaction() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "old");
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     insert_user(&tx_db, 2, "old");
     let patch = UserUpdateRequest::from_values(
@@ -951,7 +946,7 @@ fn test_transaction_update_matching_no_rows_does_not_update_later_insertions() {
     let ctx = setup();
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("new".to_string())))],
@@ -975,7 +970,7 @@ fn test_transaction_delete_commit_ignores_rows_inserted_after_staging() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "old");
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     let staged = tx_db
         .delete::<User>(
@@ -1000,7 +995,7 @@ fn test_transaction_update_conflicts_when_captured_primary_key_is_reused() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "original");
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     let patch = UserUpdateRequest::from_values(
         &[(User::columns()[1], Value::Text(Text("updated".to_string())))],
@@ -1030,7 +1025,7 @@ fn test_transaction_delete_conflicts_when_captured_primary_key_is_reused() {
     let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
     insert_user(&db, 1, "original");
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let mut tx_db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     assert_eq!(
         tx_db
@@ -1589,7 +1584,7 @@ fn test_select_eq_on_indexed_column_in_transaction() {
     insert_name_indexed_user(&db, 1, "alice", 20);
     insert_name_indexed_user(&db, 2, "bob", 25);
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let tx_db = WasmDbmsDatabase::from_transaction(&ctx, NameIndexedTestSchema, tx_id);
     insert_name_indexed_user(&tx_db, 3, "alice", 35);
 
@@ -1611,7 +1606,7 @@ fn test_select_eq_on_indexed_column_after_delete_and_reinsert_in_transaction() {
     let db = WasmDbmsDatabase::oneshot(&ctx, NameIndexedTestSchema);
     insert_name_indexed_user(&db, 1, "alice", 20);
 
-    let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+    let tx_id = ctx.begin_transaction();
     let tx_db = WasmDbmsDatabase::from_transaction(&ctx, NameIndexedTestSchema, tx_id);
     let deleted = tx_db
         .delete::<NameIndexedUser>(
@@ -2464,8 +2459,7 @@ fn test_unique_constraint_with_transaction_commit() {
     insert_contract(&db, 1, "CONTRACT-001", 1);
 
     // Insert a second contract within a transaction
-    let owner = vec![1, 2, 3];
-    let tx_id = ctx.begin_transaction(owner);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     insert_contract(&db, 2, "CONTRACT-002", 1);
     db.commit().unwrap();
@@ -2594,8 +2588,7 @@ fn test_autoincrement_with_transaction_commit() {
     insert_contract(&db, 1, "C-001", 1); // order = 1
 
     // Insert inside transaction
-    let owner = vec![1, 2, 3];
-    let tx_id = ctx.begin_transaction(owner);
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     insert_contract(&db, 2, "C-002", 1); // order = 2
     db.commit().unwrap();
@@ -2623,8 +2616,7 @@ fn test_autoincrement_with_transaction_rollback_does_not_revert_counter() {
     insert_contract(&db, 1, "C-001", 1); // order = 1
 
     // Insert inside transaction then rollback
-    let owner = vec![1, 2, 3];
-    let tx_id = ctx.begin_transaction(owner.clone());
+    let tx_id = ctx.begin_transaction();
     let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
     insert_contract(&db, 2, "C-002", 1); // order = 2 (consumed)
     db.rollback().unwrap();
@@ -3236,7 +3228,7 @@ mod aggregate_tests {
     #[test]
     fn aggregate_inside_transaction_sees_writes() {
         let ctx = setup();
-        let tx_id = ctx.begin_transaction(b"tester".to_vec());
+        let tx_id = ctx.begin_transaction();
         let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
         // Inside the transaction, insert rows then aggregate.
@@ -4713,7 +4705,7 @@ fn transaction_primary_key_lookup_sees_its_own_update() {
     let ctx = setup();
     insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
 
-    let tx = ctx.begin_transaction(vec![1]);
+    let tx = ctx.begin_transaction();
     let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
     let updated = TestSchema
         .update(
@@ -4765,7 +4757,7 @@ fn transaction_update_by_primary_key_builds_on_its_previous_update() {
     let ctx = setup();
     insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
 
-    let tx = ctx.begin_transaction(vec![1]);
+    let tx = ctx.begin_transaction();
     let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
     let rename = |from: &str, to: &str| {
         TestSchema
@@ -4828,7 +4820,7 @@ fn transaction_index_lookup_sees_update_of_non_indexed_column() {
         30,
     );
 
-    let tx = ctx.begin_transaction(vec![1]);
+    let tx = ctx.begin_transaction();
     let db = WasmDbmsDatabase::from_transaction(&ctx, NameIndexedTestSchema, tx);
     update_name_indexed_in_tx(
         &db,
@@ -4861,7 +4853,7 @@ fn transaction_index_lookup_follows_update_of_indexed_column() {
         30,
     );
 
-    let tx = ctx.begin_transaction(vec![1]);
+    let tx = ctx.begin_transaction();
     let db = WasmDbmsDatabase::from_transaction(&ctx, NameIndexedTestSchema, tx);
     update_name_indexed_in_tx(
         &db,
@@ -4889,7 +4881,7 @@ fn transaction_primary_key_lookup_follows_primary_key_update() {
     let ctx = setup();
     insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
 
-    let tx = ctx.begin_transaction(vec![1]);
+    let tx = ctx.begin_transaction();
     let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
     let updated = TestSchema
         .update(
@@ -4925,7 +4917,7 @@ fn transaction_primary_key_lookup_does_not_see_deleted_row() {
     let ctx = setup();
     insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
 
-    let tx = ctx.begin_transaction(vec![1]);
+    let tx = ctx.begin_transaction();
     let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
     TestSchema
         .update(
@@ -4962,7 +4954,7 @@ fn transaction_primary_key_lookup_returns_reinserted_row_after_delete() {
     let ctx = setup();
     insert_user(&WasmDbmsDatabase::oneshot(&ctx, TestSchema), 1, "Alice");
 
-    let tx = ctx.begin_transaction(vec![1]);
+    let tx = ctx.begin_transaction();
     let db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx);
     TestSchema
         .delete(

@@ -62,6 +62,7 @@ Step-by-step guides for building databases with wasm-dbms:
 - [Custom Data Types](./guides/custom-data-types.md) - Define your own data types (enums, structs)
 - [Schema Migrations](./guides/migrations.md) - Evolve your schema across releases without losing data
 - [Wasmtime Example](./guides/wasmtime-example.md) - Using wasm-dbms with the WIT Component Model and Wasmtime
+- [Embedding wasm-dbms](./guides/embedding.md) - Build an application layer: memory provider, context lifetime, transactions across calls, and ownership
 
 ### Reference
 

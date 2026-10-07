@@ -7,6 +7,7 @@
     - [Perform Operations](#perform-operations)
     - [Commit](#commit)
     - [Rollback](#rollback)
+  - [Who May Use a Transaction](#who-may-use-a-transaction)
   - [ACID Properties](#acid-properties)
     - [Atomicity](#atomicity)
     - [Consistency](#consistency)
@@ -110,6 +111,20 @@ After rollback:
 - The database state is as if the transaction never happened
 
 ---
+
+## Who May Use a Transaction
+
+The engine identifies a transaction by its id and nothing else. Any code that
+holds the id can read and write through it, commit it, or roll it back;
+`DbmsContext` does not record who opened it. This keeps the engine free of
+platform concepts such as users, principals, or tenants.
+
+When transactions cross a trust boundary, for example a canister serving many
+principals or a host serving many tenants, the application layer that embeds
+the engine decides who may use an id. The
+[Embedding wasm-dbms](./embedding.md#transaction-ownership) guide shows how to
+keep a ledger from transaction id to identity and check it before every
+transactional call. Single-tenant programs do not need one.
 
 ## ACID Properties
 

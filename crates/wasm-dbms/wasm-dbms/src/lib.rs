@@ -147,7 +147,7 @@
 //! ### Transactions
 //!
 //! ```rust,ignore
-//! let tx_id = ctx.begin_transaction(caller_id);
+//! let tx_id = ctx.begin_transaction();
 //! let mut db = WasmDbmsDatabase::from_transaction(&ctx, MySchema, tx_id);
 //!
 //! db.insert::<User>(insert_req)?;
@@ -156,9 +156,10 @@
 //! db.commit()?;        // or db.rollback()?;
 //! ```
 //!
-//! Transactions are per-caller. The overlay records uncommitted writes
-//! so reads inside the session observe read-your-writes semantics
-//! without leaking changes to other sessions until `commit`.
+//! A transaction is identified by its ID; any code that holds the ID can use
+//! it. The overlay records uncommitted writes so reads inside the session
+//! observe read-your-writes semantics without leaking changes to other
+//! sessions until `commit`.
 //!
 //! ## Memory backends
 //!

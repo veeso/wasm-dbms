@@ -405,10 +405,9 @@ mod tests {
     #[test]
     fn test_commit_rolls_back_all_operations_on_failure() {
         let ctx = setup();
-        let owner = vec![1, 2, 3];
 
         // Begin a transaction and queue two inserts.
-        let tx_id = ctx.begin_transaction(owner);
+        let tx_id = ctx.begin_transaction();
         let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
         let first = ItemInsertRequest::from_values(&[

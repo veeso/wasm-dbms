@@ -5,7 +5,7 @@
   - [Setup](#setup)
     - [Dependencies](#dependencies)
     - [Create the Engine](#create-the-engine)
-    - [Keep the Engine Alive](#keep-the-engine-alive)
+    - [Where to Keep the Engine](#where-to-keep-the-engine)
   - [Running Statements](#running-statements)
     - [Parameters](#parameters)
     - [Reading Results](#reading-results)
@@ -29,7 +29,7 @@ SQL text instead of the query builder:
 ```rust
 let result = engine.execute(
     &ctx,
-    caller,
+    None,
     "SELECT name, email FROM users WHERE age >= ? ORDER BY name",
     &[Value::from(18u8)],
 )?;
@@ -98,12 +98,12 @@ MySchema::register_tables(&ctx)?;
 let engine = SqlEngine::new(MySchema);
 ```
 
-### Keep the Engine Alive
+### Where to Keep the Engine
 
-The engine remembers which caller has a transaction open. Create it once and
-keep it for as long as the database context lives, so that a `BEGIN` in one
-call is still known in the next one. The engine does not borrow the context,
-so both can be stored side by side:
+The engine holds nothing but the schema. Open transactions live in the
+`DbmsContext`, so an engine created for a single call and an engine kept for
+the life of the process behave the same. The engine does not borrow the
+context, so both can be stored side by side:
 
 ```rust
 thread_local! {
@@ -111,13 +111,10 @@ thread_local! {
     static SQL: SqlEngine<MySchema> = SqlEngine::new(MySchema);
 }
 
-fn run_sql(caller: &[u8], sql: &str, params: &[Value]) -> Result<SqlResult, SqlError> {
-    DBMS.with(|ctx| SQL.with(|engine| engine.execute(ctx, caller, sql, params)))
+fn run_sql(tx: Option<TransactionId>, sql: &str, params: &[Value]) -> Result<SqlResult, SqlError> {
+    DBMS.with(|ctx| SQL.with(|engine| engine.execute(ctx, tx, sql, params)))
 }
 ```
-
-An engine that is created for a single call works too, as long as that code
-never uses `BEGIN`.
 
 ---
 
@@ -127,22 +124,23 @@ never uses `BEGIN`.
 pub fn execute(
     &self,
     ctx: &DbmsContext<M>,
-    caller: &[u8],
+    tx: Option<TransactionId>,
     sql: &str,
     params: &[Value],
 ) -> Result<SqlResult, SqlError>
 ```
 
-| Argument | Meaning                                                             |
-| -------- | ------------------------------------------------------------------- |
-| `ctx`    | The database to run against                                         |
-| `caller` | Who is running the statement; selects the transaction it belongs to |
-| `sql`    | One SQL statement, with an optional trailing `;`                    |
-| `params` | One value per `?` placeholder, in order                             |
+| Argument | Meaning                                                                    |
+| -------- | -------------------------------------------------------------------------- |
+| `ctx`    | The database to run against                                                |
+| `tx`     | `None` to apply the statement on its own, `Some(id)` to run it inside `id` |
+| `sql`    | One SQL statement, with an optional trailing `;`                           |
+| `params` | One value per `?` placeholder, in order                                    |
 
-`caller` is any byte string that identifies the user or session, the same kind
-of identity that `DbmsContext::begin_transaction` takes. Programs with a
-single user can pass a constant.
+`tx` is a transaction id returned by `BEGIN` or by
+`DbmsContext::begin_transaction`. The engine does not check who passes an id:
+see [Transaction Ownership](./embedding.md#transaction-ownership) when
+statements come from more than one user.
 
 ### Parameters
 
@@ -151,7 +149,7 @@ Write `?` where a value goes and pass the values separately:
 ```rust
 engine.execute(
     &ctx,
-    caller,
+    None,
     "INSERT INTO users (id, name, email, age) VALUES (?, ?, ?, ?)",
     &[
         Value::from(1u32),
@@ -175,7 +173,7 @@ converted the same way as a string literal.
 `execute` returns a `SqlResult`:
 
 ```rust
-match engine.execute(&ctx, caller, sql, &[])? {
+match engine.execute(&ctx, None, sql, &[])? {
     SqlResult::Rows(rows) => {
         for row in rows {
             for (column, value) in row {
@@ -184,7 +182,8 @@ match engine.execute(&ctx, caller, sql, &[])? {
         }
     }
     SqlResult::RowsAffected(count) => println!("{count} rows written"),
-    SqlResult::TxBegin | SqlResult::TxCommit | SqlResult::TxRollback => {}
+    SqlResult::TxBegin(tx) => println!("transaction {tx} started"),
+    SqlResult::TxCommit | SqlResult::TxRollback => {}
 }
 ```
 
@@ -288,26 +287,30 @@ typed API.
 
 ## Transactions
 
-`BEGIN`, `COMMIT`, and `ROLLBACK` group several statements into one unit:
+`BEGIN`, `COMMIT`, and `ROLLBACK` group several statements into one unit.
+`BEGIN` returns the id of the new transaction; every later statement of the
+unit, including `COMMIT` or `ROLLBACK`, passes that id:
 
 ```rust
-engine.execute(&ctx, caller, "BEGIN", &[])?;
+let SqlResult::TxBegin(tx) = engine.execute(&ctx, None, "BEGIN", &[])? else {
+    unreachable!("BEGIN returns TxBegin");
+};
 
 let transfer = (|| {
-    engine.execute(&ctx, caller, "UPDATE accounts SET balance = ? WHERE id = ?", &[
+    engine.execute(&ctx, Some(tx), "UPDATE accounts SET balance = ? WHERE id = ?", &[
         Value::from(50u64),
         Value::from(1u32),
     ])?;
-    engine.execute(&ctx, caller, "UPDATE accounts SET balance = ? WHERE id = ?", &[
+    engine.execute(&ctx, Some(tx), "UPDATE accounts SET balance = ? WHERE id = ?", &[
         Value::from(150u64),
         Value::from(2u32),
     ])
 })();
 
 match transfer {
-    Ok(_) => engine.execute(&ctx, caller, "COMMIT", &[])?,
+    Ok(_) => engine.execute(&ctx, Some(tx), "COMMIT", &[])?,
     Err(error) => {
-        engine.execute(&ctx, caller, "ROLLBACK", &[])?;
+        engine.execute(&ctx, Some(tx), "ROLLBACK", &[])?;
         return Err(error);
     }
 };
@@ -315,21 +318,31 @@ match transfer {
 
 What to know:
 
-- The transaction belongs to the `caller` that sent `BEGIN` in the supplied
-  context. Each caller has at most one transaction per context, and callers do
-  not see each other's uncommitted changes.
-- Statements of a caller without a transaction are applied immediately.
+- `BEGIN` is sent without an id and returns the new id in
+  `SqlResult::TxBegin`. Sending `BEGIN` with an id fails with
+  `SqlError::TransactionAlreadyActive`.
+- Statements sent with the id run inside the transaction and see its
+  uncommitted writes. Statements sent without an id are applied immediately
+  and do not see them.
+- Several transactions can be open at once. Each is addressed by its own id
+  and does not see the writes of the others.
 - A statement that fails does not close the transaction. Send `ROLLBACK` to
   discard it, as in the example above.
 - `COMMIT` applies all changes together. If it fails, for example because
-  another caller took the same primary key in the meantime, nothing is applied
-  and the transaction is closed.
-- `engine.in_transaction(ctx, caller)` tells whether a caller has a transaction
-  open in that context.
+  another statement took the same primary key in the meantime, nothing is
+  applied and the transaction is closed. A later `COMMIT` with the same id
+  fails with
+  `SqlError::Runtime(DbmsError::Query(QueryError::TransactionNotFound))`.
+- `COMMIT` or `ROLLBACK` without an id fails with
+  `SqlError::NoActiveTransaction`.
+- `ctx.has_transaction(&tx)` tells whether a transaction is still open.
 
-SQL transactions and the transactions of the typed API
-(`ctx.begin_transaction`) do not know about each other. Use one kind for a
-given unit of work.
+The ids are shared with the typed API: a transaction opened with
+`ctx.begin_transaction()` can run SQL statements, and one opened with `BEGIN`
+can be passed to `WasmDbmsDatabase::from_transaction`. The engine does not
+check who sends an id; a program that serves several users keeps its own
+ledger, as described in
+[Transaction Ownership](./embedding.md#transaction-ownership).
 
 ---
 
@@ -369,7 +382,7 @@ for example `300` for a `Uint8` column or `'2026-02-30'` for a `Date` column.
 `execute` returns a `SqlError`:
 
 ```rust
-match engine.execute(&ctx, caller, sql, params) {
+match engine.execute(&ctx, None, sql, params) {
     Ok(result) => { /* ... */ }
     Err(SqlError::Parse { line, col, msg }) => {
         println!("syntax error at {line}:{col}: {msg}");
