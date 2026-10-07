@@ -10,7 +10,7 @@ test test_name="":
 # Run only wasm-dbms crate tests (fast feedback loop for generic development)
 [group('test')]
 test_wasm_dbms test_name="":
-  cargo test --lib {{test_name}} -p wasm-dbms-api -p wasm-dbms-memory -p wasm-dbms
+  cargo test --lib {{test_name}} -p wasm-dbms-api -p wasm-dbms-memory -p wasm-dbms -p wasm-dbms-sql
 
 # Generate an LCOV coverage report with the CI exclusions.
 [group('test')]

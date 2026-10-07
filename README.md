@@ -60,6 +60,7 @@ This repository contains two crate families:
 | `wasm-dbms-memory` | Memory abstraction and page management                      |
 | `wasm-dbms`        | Core DBMS engine with transactions, joins, integrity checks |
 | `wasm-dbms-macros` | Procedural macros: `Encode`, `Table`, `CustomDataType`      |
+| `wasm-dbms-sql`    | SQL front-end: parser, planner, and executor                |
 | `wasi-dbms-memory` | Memory provider implementations for WASI runtimes           |
 
 ## Quick Start (Generic)
@@ -142,7 +143,7 @@ See the [Getting Started Guide](https://wasm-dbms.cc/guides/get-started.html) to
 - [x] Runtime-agnostic core (wasm-dbms) for any WASM runtime
 - [x] Indexes for faster queries
 - [x] Migrations to update the database schema on the fly
-- [ ] SQL query support
+- [x] SQL query support
 
 ## Documentation
 

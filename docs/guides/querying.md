@@ -651,7 +651,9 @@ let query = Query::builder()
     .build();
 ```
 
-For LEFT, RIGHT, and FULL joins, columns from the unmatched side are filled with `Value::Null`.
+Join keys match only when both values are non-null and equal. A `NULL` join key
+does not match another `NULL`. For LEFT, RIGHT, and FULL joins, the row remains
+unmatched and columns from the missing side are filled with `Value::Null`.
 
 ### Chaining Multiple Joins
 

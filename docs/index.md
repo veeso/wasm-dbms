@@ -57,6 +57,7 @@ Step-by-step guides for building databases with wasm-dbms:
 - [CRUD Operations](./guides/crud-operations.md) - Insert, select, update, and delete records
 - [Querying](./guides/querying.md) - Filters, ordering, pagination, and field selection
 - [Transactions](./guides/transactions.md) - ACID transactions with commit/rollback
+- [SQL](./guides/sql.md) - Query and modify data with SQL statements
 - [Relationships](./guides/relationships.md) - Foreign keys, delete behaviors, and eager loading
 - [Custom Data Types](./guides/custom-data-types.md) - Define your own data types (enums, structs)
 - [Schema Migrations](./guides/migrations.md) - Evolve your schema across releases without losing data
@@ -72,6 +73,7 @@ API and type reference documentation:
 - [Validation](./reference/validation.md) - Built-in and custom validators
 - [Sanitization](./reference/sanitization.md) - Built-in and custom sanitizers
 - [JSON](./reference/json.md) - JSON data type and filtering
+- [SQL](./reference/sql.md) - SQL syntax, statements, type conversion, and reserved words
 - [Errors](./reference/errors.md) - Error types and handling
 
 ### Internet Computer

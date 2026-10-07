@@ -13,6 +13,10 @@ repository = { workspace = true }
 rust-version = { workspace = true }
 description = "Runtime-agnostic DBMS engine for WASM environments"
 
+[features]
+default = []
+sql = ["wasm-dbms-api/sql"]
+
 [dependencies]
 rust_decimal = { workspace = true }
 wasm-dbms-api = { workspace = true }

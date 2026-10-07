@@ -1,0 +1,23 @@
+[package]
+name = "wasm-dbms-sql"
+version = { workspace = true }
+authors = { workspace = true }
+categories = ["database", "wasm"]
+documentation = "https://docs.rs/wasm-dbms-sql"
+edition = { workspace = true }
+include = ["src/**/*", "../../../LICENSE", "README.md", "../../../CHANGELOG.md"]
+keywords = ["database", "wasm", "dbms", "sql"]
+license = { workspace = true }
+readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "SQL front-end (parser, planner, executor) for the wasm-dbms DBMS engine"
+
+[dependencies]
+rust_decimal = { workspace = true }
+wasm-dbms = { workspace = true, features = ["sql"] }
+wasm-dbms-api = { workspace = true, features = ["sql"] }
+wasm-dbms-memory = { workspace = true }
+
+[dev-dependencies]
+wasm-dbms-macros = { workspace = true }

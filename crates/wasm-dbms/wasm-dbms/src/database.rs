@@ -742,7 +742,11 @@ where
             DatabaseOverlay::default()
         };
 
-        let mut results = Vec::with_capacity(query.limit.unwrap_or(DEFAULT_SELECT_CAPACITY));
+        let initial_capacity = query
+            .limit
+            .unwrap_or(DEFAULT_SELECT_CAPACITY)
+            .min(DEFAULT_SELECT_CAPACITY);
+        let mut results = Vec::with_capacity(initial_capacity);
         // When ORDER BY or DISTINCT is present, LIMIT and OFFSET must be applied after
         // sorting and deduplication to comply with standard SQL semantics
         // (WHERE -> DISTINCT -> ORDER BY -> OFFSET -> LIMIT).
@@ -760,6 +764,9 @@ where
                     if query.offset.is_some_and(|offset| count <= offset) {
                         continue;
                     }
+                }
+                if !defer_pagination && query.limit.is_some_and(|limit| results.len() >= limit) {
+                    break;
                 }
                 results.push(vec![(ValuesSource::This, values)]);
                 if !defer_pagination && query.limit.is_some_and(|limit| results.len() >= limit) {
@@ -782,6 +789,9 @@ where
                     if query.offset.is_some_and(|offset| count <= offset) {
                         continue;
                     }
+                }
+                if !defer_pagination && query.limit.is_some_and(|limit| results.len() >= limit) {
+                    break;
                 }
                 results.push(vec![(ValuesSource::This, values)]);
                 if !defer_pagination && query.limit.is_some_and(|limit| results.len() >= limit) {

@@ -14,7 +14,7 @@ publish_all: publish_wasm_dbms_all publish_wasi_dbms_all
 
 # Publish all wasm-dbms crates in dependency order
 [group('publish')]
-publish_wasm_dbms_all: publish_wasm_dbms_macros publish_wasm_dbms_api publish_wasm_dbms_memory publish_wasm_dbms
+publish_wasm_dbms_all: publish_wasm_dbms_macros publish_wasm_dbms_api publish_wasm_dbms_memory publish_wasm_dbms publish_wasm_dbms_sql
 
 [group('publish')]
 publish_wasm_dbms_macros: (_publish "wasm-dbms-macros")
@@ -27,6 +27,9 @@ publish_wasm_dbms_memory: (_publish "wasm-dbms-memory")
 
 [group('publish')]
 publish_wasm_dbms: (_publish "wasm-dbms")
+
+[group('publish')]
+publish_wasm_dbms_sql: (_publish "wasm-dbms-sql")
 
 # Publish all WASI-specific crates in dependency order
 [group('publish')]

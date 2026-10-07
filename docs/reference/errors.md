@@ -28,6 +28,18 @@
   - [Validation Errors](#validation-errors)
   - [Sanitization Errors](#sanitization-errors)
   - [Memory Errors](#memory-errors)
+  - [SQL Errors](#sql-errors)
+    - [Parse](#parse)
+    - [UnknownTable](#unknowntable)
+    - [UnknownColumn (SQL)](#unknowncolumn-sql)
+    - [AmbiguousColumn](#ambiguouscolumn)
+    - [TypeMismatch](#typemismatch)
+    - [InvalidLiteral](#invalidliteral)
+    - [MissingWhereClause](#missingwhereclause)
+    - [ParameterCountMismatch](#parametercountmismatch)
+    - [TransactionAlreadyActive](#transactionalreadyactive)
+    - [Unsupported](#unsupported)
+    - [Runtime](#runtime)
   - [Error Handling Examples](#error-handling-examples)
 
 ---
@@ -45,6 +57,7 @@ wasm-dbms uses a structured error system to provide clear information about what
 | Memory       | Low-level memory errors                               |
 | Migration    | Schema migration / drift detection errors             |
 | Table        | Schema/table definition errors                        |
+| SQL          | Errors of the SQL engine (`SqlError`, `sql` feature)  |
 
 ---
 
@@ -633,6 +646,191 @@ pub enum MemoryError {
 - Running out of available memory
 - Corrupted memory state
 - Bug in wasm-dbms (please report!)
+
+---
+
+## SQL Errors
+
+Statements run through `SqlEngine::execute` (crate `wasm-dbms-sql`) fail with
+a `SqlError`. The type lives in `wasm-dbms-api` behind the `sql` feature, which
+`wasm-dbms-sql` turns on.
+
+```rust
+use wasm_dbms_api::prelude::SqlError;
+
+pub enum SqlError {
+    Parse {
+        line: usize,
+        col: usize,
+        msg: String,
+    },
+    UnknownTable(String),
+    UnknownColumn {
+        table: String,
+        column: String,
+    },
+    AmbiguousColumn(String),
+    TypeMismatch {
+        column: String,
+        expected: CandidDataTypeKind,
+        got: String,
+    },
+    InvalidLiteral {
+        column: String,
+        expected: CandidDataTypeKind,
+        reason: String,
+    },
+    MissingWhereClause,
+    ParameterCountMismatch {
+        expected: usize,
+        got: usize,
+    },
+    TransactionAlreadyActive,
+    Unsupported(String),
+    Runtime(DbmsError),
+}
+```
+
+Every variant except `Runtime` is detected before the database is read or
+written, so a statement that fails with one of them has no effect.
+
+The SQL dialect is described in the [SQL Reference](./sql.md).
+
+### Parse
+
+**Cause:** The text is not a statement of the supported grammar. `line` and
+`col` start at 1 and point at the first token that cannot be accepted. `msg`
+says what was expected.
+
+```rust
+match engine.execute(&ctx, caller, "SELECT name FORM users", &[]) {
+    Err(SqlError::Parse { line, col, msg }) => {
+        // line 1, column 13: expected `FROM`, found identifier `FORM`
+        println!("syntax error at {line}:{col}: {msg}");
+    }
+    _ => {}
+}
+```
+
+**Common causes:**
+
+- A typo in a keyword, or a missing comma or parenthesis
+- A reserved word used as a name without double quotes
+- Several statements in one call
+- A feature that the dialect does not have, such as a subquery or an
+  expression
+
+### UnknownTable
+
+**Cause:** The statement names a table that is not in the schema, or qualifies
+a column with a name that is not a table or alias of the statement.
+
+Names are case-sensitive. A table that has an alias must be referred to by the
+alias.
+
+### UnknownColumn (SQL)
+
+**Cause:** The table has no column with that name.
+
+```rust
+match engine.execute(&ctx, caller, "SELECT nickname FROM users", &[]) {
+    Err(SqlError::UnknownColumn { table, column }) => {
+        println!("table {table} has no column {column}");
+    }
+    _ => {}
+}
+```
+
+### AmbiguousColumn
+
+**Cause:** In a join, a column name without a table qualifier exists in more
+than one table.
+
+**Solution:** Qualify the column: `users.id` instead of `id`.
+
+### TypeMismatch
+
+**Cause:** A literal or parameter of the wrong kind is used with a column, for
+example a string compared with an integer column. `got` names the kind of the
+literal (`Integer`, `Float`, `String`, `Boolean`, `Null`) or the type of the
+parameter. Incompatible underlying types of columns in a join's `ON`
+condition also cause this error; `got` is the type of the joined column.
+For example, `users.name = posts.user_id` compares `Text` with `Uint32` and
+reports column `posts.user_id`, expected `Text`, got `Uint32`.
+
+```rust
+// `age` is a Uint8 column
+match engine.execute(&ctx, caller, "SELECT * FROM users WHERE age = 'old'", &[]) {
+    Err(SqlError::TypeMismatch { column, expected, got }) => {
+        // column "age", expected Uint8, got "String"
+    }
+    _ => {}
+}
+```
+
+A `NULL` parameter in a comparison is also reported this way: use `IS NULL`.
+
+### InvalidLiteral
+
+**Cause:** A literal or parameter has the right kind but a value the column
+cannot hold. `reason` describes the problem.
+
+**Examples:**
+
+- `300` for a `Uint8` column
+- `'2026-02-30'` for a `Date` column
+- `'xyz'` for a `Blob` column, which expects hexadecimal digits
+- A negative `LIMIT` parameter
+
+### MissingWhereClause
+
+**Cause:** An `UPDATE` or `DELETE` statement has no `WHERE` clause.
+
+The statement is rejected so that a forgotten condition cannot change or
+remove every row. To target every row on purpose, write a condition that is
+true for all of them.
+
+### ParameterCountMismatch
+
+**Cause:** The number of values passed to `execute` differs from the number of
+`?` placeholders in the statement.
+
+### TransactionAlreadyActive
+
+**Cause:** `BEGIN` was sent by a caller that already has a SQL transaction
+open.
+
+**Solution:** Send `COMMIT` or `ROLLBACK` first.
+
+### Unsupported
+
+**Cause:** The statement is valid SQL, but combines features that cannot run
+together. The message names the combination.
+
+**Examples:**
+
+- `DISTINCT` or an aggregate function together with a `JOIN`
+- A column in the select list of an aggregate query that is not in `GROUP BY`
+- `LIKE` in `HAVING`
+- The same table twice in one statement
+
+### Runtime
+
+**Cause:** The database rejected the operation while running it. The wrapped
+`DbmsError` is one of the errors described in the sections above.
+
+```rust
+match engine.execute(&ctx, caller, "INSERT INTO users (id, name) VALUES (1, 'A')", &[]) {
+    Err(SqlError::Runtime(DbmsError::Query(QueryError::PrimaryKeyConflict))) => {
+        println!("a user with this id already exists");
+    }
+    Err(SqlError::Runtime(error)) => println!("database error: {error}"),
+    _ => {}
+}
+```
+
+`COMMIT` and `ROLLBACK` sent without an open transaction fail with
+`Runtime(DbmsError::Transaction(TransactionError::NoActiveTransaction))`.
 
 ---
 

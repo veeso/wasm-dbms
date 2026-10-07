@@ -41,6 +41,12 @@
 //! `wasm-dbms-macros` (derives). For IC canisters, prefer the
 //! `ic-dbms-canister` adapter, which is built on top of this crate.
 //!
+//! ## Feature flags
+//!
+//! | name  | description                                                                         | default |
+//! |-------|-------------------------------------------------------------------------------------|---------|
+//! | `sql` | Enables the `sql` feature of `wasm-dbms-api`, required by the `wasm-dbms-sql` crate. |         |
+//!
 //! ## Layout
 //!
 //! Each engine concern lives in its own module:
@@ -195,7 +201,7 @@ pub mod referenced_tables;
 pub mod schema;
 pub mod transaction;
 
-pub use self::context::DbmsContext;
+pub use self::context::{ContextId, DbmsContext};
 pub use self::database::WasmDbmsDatabase;
 
 /// Prelude re-exports for convenient use.
@@ -206,7 +212,7 @@ pub use self::database::WasmDbmsDatabase;
 /// use wasm_dbms::prelude::*;
 /// ```
 pub mod prelude {
-    pub use super::context::DbmsContext;
+    pub use super::context::{ContextId, DbmsContext};
     pub use super::database::WasmDbmsDatabase;
     pub use super::integrity::{InsertIntegrityValidator, UpdateIntegrityValidator};
     pub use super::join::JoinEngine;

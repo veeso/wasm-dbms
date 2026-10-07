@@ -1,0 +1,189 @@
+# Lexical structure: whitespace, comments, keyword case, identifiers, quoting.
+#
+# Format: see src/parser/tests/fixtures.rs.
+
+=== tabs and newlines between tokens
+DELETE
+	FROM	users
+WHERE
+	id = 1
+---
+(delete users (where (= id 1)) restrict)
+
+=== leading and trailing blank lines
+
+  DELETE FROM users WHERE id = 1
+
+---
+(delete users (where (= id 1)) restrict)
+
+=== mixed keyword case
+dElEtE fRoM users wHeRe id = 1 cAsCaDe
+---
+(delete users (where (= id 1)) cascade)
+
+=== identifiers keep their case
+DELETE FROM Users WHERE ID = 1 AND userName = 'x'
+---
+(delete Users (where (and (= ID 1) (= userName 'x'))) restrict)
+
+=== identifiers with digits and underscores
+DELETE FROM _t1 WHERE col_2 = 1 AND __x = 2
+---
+(delete _t1 (where (and (= col_2 1) (= __x 2))) restrict)
+
+=== keywords are only reserved as whole words
+DELETE FROM selects WHERE fromage = 1 AND order_id = 2 AND nullable = 3
+---
+(delete selects (where (and (and (= fromage 1) (= order_id 2)) (= nullable 3))) restrict)
+
+=== line comments
+-- leading comment
+DELETE FROM users -- trailing comment
+WHERE id = 1 -- another
+-- final comment
+---
+(delete users (where (= id 1)) restrict)
+
+=== block comments
+/* leading */ DELETE /* a */ FROM /* b
+spanning lines */ users WHERE /**/ id = 1 /* trailing */
+---
+(delete users (where (= id 1)) restrict)
+
+=== comment markers inside block comments
+DELETE FROM users /* -- not a line comment */ WHERE id = 1 /* 'quote' "quote" ? */
+---
+(delete users (where (= id 1)) restrict)
+
+=== quotes inside line comments
+DELETE FROM users WHERE id = 1 -- it's "fine" /* still a comment
+---
+(delete users (where (= id 1)) restrict)
+
+=== comment directly after a token
+DELETE FROM users WHERE id = 1--comment
+---
+(delete users (where (= id 1)) restrict)
+
+=== minus followed by a comment is still a minus
+DELETE FROM users WHERE id = - -- comment
+1
+---
+(delete users (where (= id -1)) restrict)
+
+=== quoted identifier keeps case and spaces
+DELETE FROM "My Table" WHERE "Mixed Case" = 1
+---
+(delete "My Table" (where (= "Mixed Case" 1)) restrict)
+
+=== quoted identifier with an escaped quote
+DELETE FROM "a""b" WHERE "c""" = 1
+---
+(delete "a""b" (where (= "c""" 1)) restrict)
+
+=== quoted identifier with non-ascii characters
+DELETE FROM "città" WHERE "naïve" = 1
+---
+(delete "città" (where (= "naïve" 1)) restrict)
+
+=== quoted qualified column
+DELETE FROM "t" WHERE "t"."order" = 1
+---
+(delete t (where (= t.order 1)) restrict)
+
+=== string with a newline
+DELETE FROM users WHERE bio = 'line one
+line two'
+---
+(delete users (where (= bio 'line one line two')) restrict)
+
+=== string with non-ascii characters
+DELETE FROM users WHERE name = 'Zoë ☕'
+---
+(delete users (where (= name 'Zoë ☕')) restrict)
+
+=== semicolon followed by comments
+DELETE FROM users WHERE id = 1; -- done
+/* really done */
+---
+(delete users (where (= id 1)) restrict)
+
+=== error: unterminated string
+DELETE FROM users WHERE name = 'Alice
+---
+error 1:32: unterminated string literal
+
+=== error: unterminated quoted identifier
+DELETE FROM "users WHERE id = 1
+---
+error 1:13: unterminated quoted identifier
+
+=== error: empty quoted identifier
+DELETE FROM "" WHERE id = 1
+---
+error 1:13: quoted identifier cannot be empty
+
+=== error: unterminated block comment
+DELETE FROM users /* WHERE id = 1
+---
+error 1:19: unterminated block comment
+
+=== error: backtick quoting
+DELETE FROM `users` WHERE id = 1
+---
+error 1:13: backtick-quoted identifiers are not supported; use double quotes
+
+=== error: numbered placeholder
+DELETE FROM users WHERE id = $1
+---
+error 1:30: named and numbered placeholders are not supported; use `?`
+
+=== error: named placeholder
+DELETE FROM users WHERE id = :id
+---
+error 1:30: named and numbered placeholders are not supported; use `?`
+
+=== error: hash comment
+DELETE FROM users WHERE id = 1 # comment
+---
+error 1:32: unexpected character `#`
+
+=== error: non-ascii unquoted identifier
+DELETE FROM città WHERE id = 1
+---
+error 1:17: unexpected character `à`
+
+=== error: position on a later line
+DELETE FROM users
+WHERE id = 1
+  AND name = = 'x'
+---
+error 3:14: expected a literal or `?`, found `=`
+
+=== error: position after a multi-line comment
+DELETE /* one
+two
+three */ FROM users WHERE id ~ 1
+---
+error 3:30: unexpected character `~`
+
+=== error: exponent notation
+DELETE FROM users WHERE score = 1e3
+---
+error 1:33: invalid numeric literal
+
+=== error: leading dot decimal
+DELETE FROM users WHERE score = .5
+---
+error 1:33: expected a literal or `?`, found `.`
+
+=== error: integer literal too large
+DELETE FROM users WHERE id = 18446744073709551616
+---
+error 1:30: integer literal is too large
+
+=== error: square bracket quoting
+DELETE FROM [users] WHERE id = 1
+---
+error 1:13: unexpected character `[`

@@ -7,6 +7,8 @@ pub mod foreign_fetcher;
 pub mod migration;
 pub mod query;
 pub mod sanitize;
+#[cfg(feature = "sql")]
+pub mod sql;
 pub mod table;
 pub mod transaction;
 pub mod types;
