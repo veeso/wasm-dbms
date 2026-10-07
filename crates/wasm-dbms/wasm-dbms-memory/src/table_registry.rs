@@ -8,16 +8,21 @@ mod raw_record;
 mod raw_table_reader;
 mod record_address;
 mod schema_snapshot_ledger;
+mod sized_read;
 mod table_reader;
 mod write_at;
 
-use wasm_dbms_api::prelude::{Encode, MSize, MemoryError, MemoryResult, PageOffset, Value};
+use std::borrow::Cow;
+
+use wasm_dbms_api::prelude::{
+    DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult, Page, PageOffset, Value,
+};
 
 pub use self::autoincrement_ledger::AutoincrementLedger;
 use self::free_segments_ledger::FreeSegmentsLedger;
 pub use self::index_ledger::{IndexLedger, IndexTreeWalker};
 use self::page_ledger::PageLedger;
-use self::raw_record::RawRecord;
+use self::raw_record::{RAW_RECORD_HEADER_SIZE, RawRecord};
 pub use self::raw_table_reader::{RawRecordBytes, RawTableReader};
 pub use self::record_address::RecordAddress;
 pub use self::schema_snapshot_ledger::SchemaSnapshotLedger;
@@ -34,7 +39,8 @@ use crate::{MemoryAccess, TableRegistryPage, align_up};
 /// but just allow to read/write records from/to memory.
 /// So CRUD checks must be performed by a higher layer, prior to calling these methods.
 pub struct TableRegistry {
-    schema_snapshot_ledger: SchemaSnapshotLedger,
+    /// Page holding the schema snapshot, loaded on demand since only migrations read it.
+    schema_snapshot_page: Page,
     pub(crate) page_ledger: PageLedger,
     free_segments_ledger: FreeSegmentsLedger,
     index_ledger: IndexLedger,
@@ -45,10 +51,7 @@ impl TableRegistry {
     /// Loads the table registry from memory.
     pub fn load(table_pages: TableRegistryPage, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
-            schema_snapshot_ledger: SchemaSnapshotLedger::load(
-                table_pages.schema_snapshot_page,
-                mm,
-            )?,
+            schema_snapshot_page: table_pages.schema_snapshot_page,
             page_ledger: PageLedger::load(table_pages.pages_list_page, mm)?,
             free_segments_ledger: FreeSegmentsLedger::load(table_pages.free_segments_page, mm)?,
             index_ledger: IndexLedger::load(table_pages.index_registry_page, mm)?,
@@ -113,13 +116,47 @@ impl TableRegistry {
     }
 
     /// Reads a single record at the given address.
+    ///
+    /// Only the record bytes are copied out of memory: the length header is
+    /// read first, then exactly that many body bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::OffsetNotAligned`] when `address` is not aligned
+    /// for `E`, and [`DecodeError::TooShort`] when the stored length runs past
+    /// the end of the page.
     pub fn read_at<E, MA>(&self, address: RecordAddress, mm: &mut MA) -> MemoryResult<E>
     where
         E: Encode,
         MA: MemoryAccess,
     {
-        let raw_record: RawRecord<E> = mm.read_at(address.page, address.offset)?;
-        Ok(raw_record.data)
+        if let DataSize::Fixed(_) = E::SIZE {
+            let raw_record: RawRecord<E> = mm.read_at(address.page, address.offset)?;
+            return Ok(raw_record.data);
+        }
+
+        let alignment = <RawRecord<E> as Encode>::ALIGNMENT;
+        if alignment != 0 && !address.offset.is_multiple_of(alignment) {
+            return Err(MemoryError::OffsetNotAligned {
+                offset: address.offset,
+                alignment,
+            });
+        }
+
+        let mut header = [0u8; RAW_RECORD_HEADER_SIZE as usize];
+        if mm.read_at_raw(address.page, address.offset, &mut header)? < header.len() {
+            return Err(MemoryError::DecodeError(DecodeError::TooShort));
+        }
+        let length = MSize::from_le_bytes(header) as usize;
+
+        let body_offset = address.offset as usize + RAW_RECORD_HEADER_SIZE as usize;
+        if body_offset + length > mm.page_size() as usize {
+            return Err(MemoryError::DecodeError(DecodeError::TooShort));
+        }
+        let mut body = vec![0u8; length];
+        mm.read_at_raw(address.page, body_offset as PageOffset, &mut body)?;
+
+        E::decode(Cow::Owned(body))
     }
 
     /// Deletes a record at the given page and offset.
@@ -198,8 +235,6 @@ impl TableRegistry {
         alignment: PageOffset,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<RecordAddress> {
-        use self::raw_record::RAW_RECORD_HEADER_SIZE;
-
         let physical_size_msize = raw_record_footprint(bytes.len(), alignment, mm.page_size())?;
         // The footprint fits in an `MSize`, so header + body does too.
         let length = bytes.len() as MSize;
@@ -244,8 +279,6 @@ impl TableRegistry {
         address: RecordAddress,
         mm: &mut impl MemoryAccess,
     ) -> MemoryResult<Vec<u8>> {
-        use self::raw_record::RAW_RECORD_HEADER_SIZE;
-
         let mut header = [0u8; RAW_RECORD_HEADER_SIZE as usize];
         mm.read_at_raw(address.page, address.offset, &mut header)?;
         let length = u16::from_le_bytes(header) as usize;
@@ -339,14 +372,20 @@ impl TableRegistry {
         &mut self.index_ledger
     }
 
-    /// Get a reference to the [`SchemaSnapshotLedger`], allowing to read the schema snapshot.
-    pub fn schema_snapshot_ledger(&self) -> &SchemaSnapshotLedger {
-        &self.schema_snapshot_ledger
-    }
-
-    /// Get a mutable reference to the [`SchemaSnapshotLedger`], allowing to modify the schema snapshot.
-    pub fn schema_snapshot_ledger_mut(&mut self) -> &mut SchemaSnapshotLedger {
-        &mut self.schema_snapshot_ledger
+    /// Loads the [`SchemaSnapshotLedger`] of this table from memory.
+    ///
+    /// The snapshot is only needed by migrations, so it is read on demand
+    /// instead of on every [`Self::load`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MemoryError`] if the snapshot page cannot be read or does
+    /// not decode into a valid snapshot.
+    pub fn schema_snapshot_ledger(
+        &self,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<SchemaSnapshotLedger> {
+        SchemaSnapshotLedger::load(self.schema_snapshot_page, mm)
     }
 
     /// Get next value for an autoincrement column of the given type, and increment it in the ledger.
@@ -484,8 +523,6 @@ fn raw_record_footprint(
     alignment: PageOffset,
     page_size: u64,
 ) -> MemoryResult<MSize> {
-    use self::raw_record::RAW_RECORD_HEADER_SIZE;
-
     let unaligned = (body_len as u64).saturating_add(RAW_RECORD_HEADER_SIZE as u64);
     let aligned = if alignment == 0 {
         unaligned
@@ -811,6 +848,71 @@ mod tests {
             .read_at(address, &mut mm)
             .expect("failed to read record");
         assert_eq!(stored, record);
+    }
+
+    #[test]
+    fn test_read_at_rejects_record_length_past_page_end() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+        let address = registry
+            .insert(
+                User {
+                    id: 1,
+                    name: "Alice".to_string(),
+                    email: "alice@example.com".to_string(),
+                    age: 30,
+                },
+                &mut mm,
+            )
+            .expect("failed to insert record");
+
+        // Corrupt the length header so the record would run past the page end.
+        mm.write_at_raw(address.page, address.offset, &MSize::MAX.to_le_bytes())
+            .expect("failed to corrupt header");
+
+        let result: MemoryResult<User> = registry.read_at(address, &mut mm);
+        assert!(
+            matches!(result, Err(MemoryError::DecodeError(DecodeError::TooShort))),
+            "expected TooShort, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_read_at_rejects_misaligned_address() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let mut registry = registry(&mut mm);
+        let address = registry
+            .insert(
+                User {
+                    id: 1,
+                    name: "Alice".to_string(),
+                    email: "alice@example.com".to_string(),
+                    age: 30,
+                },
+                &mut mm,
+            )
+            .expect("failed to insert record");
+
+        let misaligned = RecordAddress {
+            page: address.page,
+            offset: address.offset + 1,
+        };
+        let result: MemoryResult<User> = registry.read_at(misaligned, &mut mm);
+        assert!(
+            matches!(result, Err(MemoryError::OffsetNotAligned { .. })),
+            "expected OffsetNotAligned, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_schema_snapshot_ledger_is_read_on_demand() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let registry = registry_with_autoincrement(&mut mm);
+
+        let ledger = registry
+            .schema_snapshot_ledger(&mut mm)
+            .expect("failed to load snapshot ledger");
+        assert_eq!(ledger.get(), &AutoincUser::schema_snapshot());
     }
 
     #[test]

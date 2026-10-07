@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.10.1
+
+Released on 2026-10-07
+
+### Performance
+
+- **memory:** read table rows without copying the rest of the page
+
+> Reading a variable-size record went through MemoryAccess::read_at, which
+> allocates and zero-fills a buffer as large as the remainder of the page
+> (up to 64 KiB) for every row, copies the page into it and decodes only
+> the few bytes of the record.
+>
+> TableReader already holds the whole page, so decode each record straight
+> from that buffer. TableRegistry::read_at now reads the length header and
+> then exactly the record body.
+>
+> The filtered query benchmark over 10,000 rows drops from 7.85 ms to
+> 1.35 ms and the join benchmark improves by about 36%.
+
+- **memory:** look up index keys without decoding whole B-tree nodes
+
+- **memory:** load table metadata without copying whole pages
+
 ## 0.10.0
 
 Released on 2026-10-07

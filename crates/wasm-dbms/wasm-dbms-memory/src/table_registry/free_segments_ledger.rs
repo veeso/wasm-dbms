@@ -11,6 +11,7 @@ pub use self::free_segment::FreeSegment;
 use self::free_segments_table::FreeSegmentsTable;
 use self::pages_table::PagesTable;
 use self::tables_iter::TablesIter;
+use super::sized_read::read_sized;
 use crate::{MemoryAccess, align_up};
 
 /// A ticket representing a reusable free segment.
@@ -57,7 +58,7 @@ impl FreeSegmentsLedger {
     /// Loads the deleted records ledger from memory.
     pub fn load(free_segments_page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         // read from memory
-        let tables = mm.read_at(free_segments_page, 0)?;
+        let tables = read_sized(free_segments_page, mm, PagesTable::encoded_len)?;
 
         Ok(Self {
             free_segments_page,

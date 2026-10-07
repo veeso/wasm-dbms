@@ -17,6 +17,7 @@ use wasm_dbms_api::prelude::{Encode, IndexDef, MemoryError, MemoryResult, PageOf
 use self::index_tree::IndexTree;
 pub use self::index_tree::IndexTreeWalker;
 use super::RecordAddress;
+use super::sized_read::read_sized;
 use crate::MemoryAccess;
 
 /// Longest column name the one-byte length prefix of the ledger encoding can
@@ -127,7 +128,7 @@ impl IndexLedger {
     /// Load the page ledger from memory at the given [`Page`].
     pub fn load(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
-            tables: mm.read_at(page, 0)?,
+            tables: read_sized(page, mm, IndexLedgerTables::encoded_len)?,
             ledger_page: page,
         })
     }
@@ -264,6 +265,32 @@ impl IndexLedger {
     }
 }
 
+impl IndexLedgerTables {
+    /// Returns the encoded length of the ledger stored at the start of `prefix`.
+    ///
+    /// Walks the length prefixes without decoding names. Returns `None` when
+    /// `prefix` ends before the last entry.
+    fn encoded_len(prefix: &[u8]) -> Option<usize> {
+        let read_u64 = |offset: usize| -> Option<usize> {
+            let bytes = prefix.get(offset..offset + 8)?;
+            Some(u64::from_le_bytes(bytes.try_into().ok()?) as usize)
+        };
+
+        let num_entries = read_u64(0)?;
+        let mut offset = 8;
+        for _ in 0..num_entries {
+            let num_columns = read_u64(offset)?;
+            offset += 8;
+            for _ in 0..num_columns {
+                offset += 1 + *prefix.get(offset)? as usize;
+            }
+            // Root page number.
+            offset += 4;
+        }
+        (offset <= prefix.len()).then_some(offset)
+    }
+}
+
 impl Encode for IndexLedgerTables {
     const ALIGNMENT: PageOffset = DEFAULT_ALIGNMENT;
 
@@ -345,6 +372,34 @@ mod tests {
 
     use super::*;
     use crate::{HeapMemoryProvider, MemoryManager};
+
+    #[test]
+    fn test_encoded_len_matches_encoding() {
+        let mut map = HashMap::new();
+        map.insert(vec!["id".to_string()], 1u32);
+        map.insert(
+            vec!["first_name".to_string(), "last_name".to_string()],
+            2u32,
+        );
+        let tables = IndexLedgerTables(map);
+        let encoded = tables.encode();
+
+        assert_eq!(
+            IndexLedgerTables::encoded_len(&encoded),
+            Some(encoded.len())
+        );
+        for cut in [0, 7, 8, 20, encoded.len() - 1] {
+            assert_eq!(IndexLedgerTables::encoded_len(&encoded[..cut]), None);
+        }
+    }
+
+    #[test]
+    fn test_encoded_len_of_empty_ledger() {
+        let tables = IndexLedgerTables(HashMap::new());
+        let encoded = tables.encode();
+
+        assert_eq!(IndexLedgerTables::encoded_len(&encoded), Some(8));
+    }
 
     #[test]
     fn test_encode_decode_empty_ledger() {
