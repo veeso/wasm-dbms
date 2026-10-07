@@ -872,7 +872,9 @@ fn parse_field_type(ty: &syn::Type) -> syn::Result<FieldType> {
 /// Returns the path of `ty`, or an error if the type is not a plain path.
 fn type_path(ty: &syn::Type) -> syn::Result<&syn::Path> {
     match ty {
-        syn::Type::Path(syn::TypePath { qself: None, path }) => Ok(path),
+        syn::Type::Path(syn::TypePath {
+            qself: None, path, ..
+        }) => Ok(path),
         syn::Type::Group(group) => type_path(&group.elem),
         syn::Type::Paren(paren) => type_path(&paren.elem),
         _ => Err(unsupported_field_type(ty)),
