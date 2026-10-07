@@ -75,9 +75,7 @@ pub fn check_non_nullable_fields<T: TableSchema>(
 #[cfg(test)]
 mod tests {
 
-    use wasm_dbms_api::prelude::{
-        Database as _, InsertRecord as _, MaxStrlenValidator, TableSchema as _, Text, Uint32, Value,
-    };
+    use wasm_dbms_api::prelude::{InsertRecord as _, MaxStrlenValidator, Text, Uint32, Value};
     use wasm_dbms_macros::{DatabaseSchema, Table};
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
