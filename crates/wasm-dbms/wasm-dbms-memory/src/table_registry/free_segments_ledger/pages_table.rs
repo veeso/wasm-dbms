@@ -23,6 +23,16 @@ impl PagesTable {
     }
 }
 
+impl PagesTable {
+    /// Returns the encoded length of the table stored at the start of `prefix`.
+    ///
+    /// Returns `None` when `prefix` is too short to hold the entry count.
+    pub fn encoded_len(prefix: &[u8]) -> Option<usize> {
+        let count = u16::from_le_bytes(prefix.get(..TABLE_LEN_SIZE)?.try_into().ok()?) as usize;
+        Some(TABLE_LEN_SIZE + count * size_of::<Page>())
+    }
+}
+
 impl Encode for PagesTable {
     const SIZE: DataSize = DataSize::Dynamic;
 
@@ -65,6 +75,15 @@ impl Encode for PagesTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_encoded_len_matches_encoding() {
+        let table = PagesTable(vec![3, 5, 8]);
+        let encoded = table.encode();
+
+        assert_eq!(PagesTable::encoded_len(&encoded), Some(encoded.len()));
+        assert_eq!(PagesTable::encoded_len(&encoded[..1]), None);
+    }
 
     #[test]
     fn test_pages_table_encode() {

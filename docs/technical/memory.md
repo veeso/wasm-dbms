@@ -375,13 +375,22 @@ Each table has a `TableRegistry` managing its records, plus an optional
 
 ```rust
 pub struct TableRegistry {
-    schema_snapshot_ledger: SchemaSnapshotLedger,
+    schema_snapshot_page: Page,
     page_ledger: PageLedger,
     free_segments_ledger: FreeSegmentsLedger,
     index_ledger: IndexLedger,
     auto_increment_ledger: Option<AutoincrementLedger>,
 }
 ```
+
+`TableRegistry::load` runs before every CRUD operation, so it reads only what
+those operations need:
+
+- The page, free-segments and index ledgers are read with `read_sized`, which
+  reads a short prefix of the page, works out the encoded length from the
+  entry counts and then copies exactly those bytes instead of the whole page.
+- The schema snapshot is not read at all. Only migrations use it, and they load
+  it on demand through `TableRegistry::schema_snapshot_ledger(mm)`.
 
 ### Schema Snapshot Ledger
 

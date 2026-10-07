@@ -6,6 +6,7 @@ use wasm_dbms_api::prelude::{Encode, MemoryResult, Page, PageOffset};
 
 pub use self::page_table::PageRecord;
 use self::page_table::PageTable;
+use super::sized_read::read_sized;
 use crate::{MemoryAccess, align_up};
 
 /// Takes care of storing the pages for each table
@@ -21,7 +22,7 @@ impl PageLedger {
     /// Load the page ledger from memory at the given [`Page`].
     pub fn load(page: Page, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
-            pages: mm.read_at(page, 0)?,
+            pages: read_sized(page, mm, PageTable::encoded_len)?,
             ledger_page: page,
         })
     }

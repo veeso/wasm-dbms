@@ -92,6 +92,39 @@ impl<'a> NodeView<'a> {
         })
     }
 
+    /// Decodes the first key of the leaf stored in `buf` without parsing the node.
+    ///
+    /// Returns `None` for an empty leaf.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError::TooShort`] when `buf` is not a leaf page or its
+    /// first entry runs past the end of `buf`, and propagates key decode errors.
+    pub(super) fn first_leaf_key<K>(buf: &[u8]) -> MemoryResult<Option<K>>
+    where
+        K: Encode,
+    {
+        if buf.len() < LEAF_HEADER_SIZE || buf[0] != NODE_TYPE_LEAF {
+            return Err(too_short());
+        }
+        if u16::from_le_bytes([buf[5], buf[6]]) == 0 {
+            return Ok(None);
+        }
+
+        let start = LEAF_HEADER_SIZE + 2;
+        let key_size =
+            u16::from_le_bytes([buf[LEAF_HEADER_SIZE], buf[LEAF_HEADER_SIZE + 1]]) as usize;
+        if start + key_size + RECORD_POINTER_SIZE > buf.len() {
+            return Err(too_short());
+        }
+        K::decode(Cow::Borrowed(&buf[start..start + key_size])).map(Some)
+    }
+
+    /// Returns whether `buf` holds a leaf node, judging by its type byte only.
+    pub(super) fn is_leaf_page(buf: &[u8]) -> bool {
+        buf.first() == Some(&NODE_TYPE_LEAF)
+    }
+
     /// Returns the number of entries in the node.
     pub(super) fn len(&self) -> usize {
         self.key_offsets.len()
@@ -381,6 +414,29 @@ mod tests {
         assert_eq!(route(20), Some(3));
         assert_eq!(route(30), Some(4));
         assert_eq!(route(99), Some(4));
+    }
+
+    #[test]
+    fn test_first_leaf_key_peeks_without_parsing() {
+        let buf = leaf_buf(&[42, 50], None, None);
+        assert_eq!(
+            NodeView::first_leaf_key::<Uint32>(&buf).expect("first key"),
+            Some(Uint32(42))
+        );
+        assert!(NodeView::is_leaf_page(&buf));
+
+        let empty = leaf_buf(&[], Some(3), None);
+        assert_eq!(
+            NodeView::first_leaf_key::<Uint32>(&empty).expect("first key"),
+            None
+        );
+
+        let internal = internal_buf(&[(10, 1)], 2);
+        assert!(!NodeView::is_leaf_page(&internal));
+        assert!(matches!(
+            NodeView::first_leaf_key::<Uint32>(&internal),
+            Err(MemoryError::DecodeError(DecodeError::TooShort))
+        ));
     }
 
     #[test]

@@ -709,13 +709,10 @@ where
         let mut page = self.find_leaf_page_into(key, buf, mm)?;
 
         loop {
-            let prev_page = {
-                let view = NodeView::parse(buf)?;
-                if view.len() > 0 && view.key::<K>(0)? < *key {
-                    return Ok(page);
-                }
-                view.prev_leaf()
-            };
+            if NodeView::first_leaf_key::<K>(buf)?.is_some_and(|first| first < *key) {
+                return Ok(page);
+            }
+            let prev_page = NodeView::parse(buf)?.prev_leaf();
 
             // Skip emptied leaves while looking for an earlier leaf that may
             // still hold `key`.
@@ -761,6 +758,9 @@ where
         let mut page = self.root_page;
         loop {
             mm.read_at_raw(page, 0, buf)?;
+            if NodeView::is_leaf_page(buf) {
+                return Ok(page);
+            }
             match NodeView::parse(buf)?.child_for(key)? {
                 Some(child) => page = child,
                 None => return Ok(page),

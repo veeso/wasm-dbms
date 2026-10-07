@@ -856,8 +856,8 @@ where
             .as_mut()
             .expect("journal must be active inside atomic");
         let mut writer = JournaledWriter::new(&mut *mm, journal);
-        let mut registry = TableRegistry::load(pages, &mut writer)?;
-        registry.schema_snapshot_ledger_mut().write(
+        let registry = TableRegistry::load(pages, &mut writer)?;
+        registry.schema_snapshot_ledger(&mut writer)?.write(
             pages.schema_snapshot_page,
             snapshot,
             &mut writer,

@@ -8,13 +8,14 @@ mod raw_record;
 mod raw_table_reader;
 mod record_address;
 mod schema_snapshot_ledger;
+mod sized_read;
 mod table_reader;
 mod write_at;
 
 use std::borrow::Cow;
 
 use wasm_dbms_api::prelude::{
-    DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult, PageOffset, Value,
+    DataSize, DecodeError, Encode, MSize, MemoryError, MemoryResult, Page, PageOffset, Value,
 };
 
 pub use self::autoincrement_ledger::AutoincrementLedger;
@@ -38,7 +39,8 @@ use crate::{MemoryAccess, TableRegistryPage, align_up};
 /// but just allow to read/write records from/to memory.
 /// So CRUD checks must be performed by a higher layer, prior to calling these methods.
 pub struct TableRegistry {
-    schema_snapshot_ledger: SchemaSnapshotLedger,
+    /// Page holding the schema snapshot, loaded on demand since only migrations read it.
+    schema_snapshot_page: Page,
     pub(crate) page_ledger: PageLedger,
     free_segments_ledger: FreeSegmentsLedger,
     index_ledger: IndexLedger,
@@ -49,10 +51,7 @@ impl TableRegistry {
     /// Loads the table registry from memory.
     pub fn load(table_pages: TableRegistryPage, mm: &mut impl MemoryAccess) -> MemoryResult<Self> {
         Ok(Self {
-            schema_snapshot_ledger: SchemaSnapshotLedger::load(
-                table_pages.schema_snapshot_page,
-                mm,
-            )?,
+            schema_snapshot_page: table_pages.schema_snapshot_page,
             page_ledger: PageLedger::load(table_pages.pages_list_page, mm)?,
             free_segments_ledger: FreeSegmentsLedger::load(table_pages.free_segments_page, mm)?,
             index_ledger: IndexLedger::load(table_pages.index_registry_page, mm)?,
@@ -373,14 +372,20 @@ impl TableRegistry {
         &mut self.index_ledger
     }
 
-    /// Get a reference to the [`SchemaSnapshotLedger`], allowing to read the schema snapshot.
-    pub fn schema_snapshot_ledger(&self) -> &SchemaSnapshotLedger {
-        &self.schema_snapshot_ledger
-    }
-
-    /// Get a mutable reference to the [`SchemaSnapshotLedger`], allowing to modify the schema snapshot.
-    pub fn schema_snapshot_ledger_mut(&mut self) -> &mut SchemaSnapshotLedger {
-        &mut self.schema_snapshot_ledger
+    /// Loads the [`SchemaSnapshotLedger`] of this table from memory.
+    ///
+    /// The snapshot is only needed by migrations, so it is read on demand
+    /// instead of on every [`Self::load`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MemoryError`] if the snapshot page cannot be read or does
+    /// not decode into a valid snapshot.
+    pub fn schema_snapshot_ledger(
+        &self,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<SchemaSnapshotLedger> {
+        SchemaSnapshotLedger::load(self.schema_snapshot_page, mm)
     }
 
     /// Get next value for an autoincrement column of the given type, and increment it in the ledger.
@@ -897,6 +902,17 @@ mod tests {
             matches!(result, Err(MemoryError::OffsetNotAligned { .. })),
             "expected OffsetNotAligned, got {result:?}"
         );
+    }
+
+    #[test]
+    fn test_schema_snapshot_ledger_is_read_on_demand() {
+        let mut mm = MemoryManager::init(HeapMemoryProvider::default());
+        let registry = registry_with_autoincrement(&mut mm);
+
+        let ledger = registry
+            .schema_snapshot_ledger(&mut mm)
+            .expect("failed to load snapshot ledger");
+        assert_eq!(ledger.get(), &AutoincUser::schema_snapshot());
     }
 
     #[test]

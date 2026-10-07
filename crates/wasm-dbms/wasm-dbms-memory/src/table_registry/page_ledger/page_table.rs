@@ -17,6 +17,19 @@ pub struct PageRecord {
     pub free: u64,
 }
 
+impl PageTable {
+    /// Returns the encoded length of the table stored at the start of `prefix`.
+    ///
+    /// Returns `None` when `prefix` is too short to hold the entry count.
+    pub fn encoded_len(prefix: &[u8]) -> Option<usize> {
+        let count = u32::from_le_bytes(prefix.get(..size_of::<u32>())?.try_into().ok()?) as usize;
+        let record_size = PageRecord::SIZE
+            .get_fixed_size()
+            .expect("Should be fixed size") as usize;
+        Some(size_of::<u32>() + count.saturating_mul(record_size))
+    }
+}
+
 impl Encode for PageTable {
     const SIZE: DataSize = DataSize::Dynamic;
 
@@ -102,6 +115,17 @@ impl Encode for PageRecord {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn test_encoded_len_matches_encoding() {
+        let table = PageTable {
+            pages: (0..5).map(|page| PageRecord { page, free: 100 }).collect(),
+        };
+        let encoded = table.encode();
+
+        assert_eq!(PageTable::encoded_len(&encoded), Some(encoded.len()));
+        assert_eq!(PageTable::encoded_len(&encoded[..3]), None);
+    }
 
     #[test]
     fn test_should_encode_and_decode_page_table() {
