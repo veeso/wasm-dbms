@@ -1,5 +1,6 @@
 // Rust guideline compliant 2026-02-28
 
+use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use wasm_dbms_api::prelude::{
@@ -95,8 +96,10 @@ where
             return Ok(None);
         };
 
-        // read raw record
-        let record: RawRecord<E> = self.mm.read_at(next_record.page, next_record.offset)?;
+        // decode the record from the page already held in the buffer
+        let start = next_record.offset as usize;
+        let end = start + next_record.length as usize;
+        let record = RawRecord::<E>::decode(Cow::Borrowed(&self.buffer[start..end]))?;
 
         // update position
         self.position = next_record.new_position;
