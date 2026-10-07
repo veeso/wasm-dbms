@@ -398,7 +398,7 @@ fn bench_transaction_commit(c: &mut Criterion) {
         b.iter_batched(
             setup::setup_wasm_dbms,
             |ctx| {
-                let tx_id = ctx.begin_transaction(vec![1, 2, 3]);
+                let tx_id = ctx.begin_transaction();
                 let mut db = WasmDbmsDatabase::from_transaction(&ctx, BenchDatabaseSchema, tx_id);
                 for id in 1..=100u32 {
                     let req = UserInsertRequest {

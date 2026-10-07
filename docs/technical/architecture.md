@@ -191,7 +191,7 @@ The engine does not authenticate callers, check permissions, or decide how the d
 
 - Expose the database to the outside world (host functions, WIT interface, RPC endpoints, CLI, and so on)
 - Identify callers and enforce permissions or access control lists (ACL) before calling the engine
-- Map transaction owners to caller identities
+- Decide who may use a transaction id. The engine addresses transactions by id only; an application layer that serves several identities keeps its own ledger from id to identity (see [Embedding wasm-dbms](../guides/embedding.md))
 - Add business rules that go beyond sanitizers and validators
 - Provide the `MemoryProvider` for the target runtime and own the `DbmsContext`
 
@@ -282,7 +282,8 @@ Application layers, such as [ic-dbms](https://github.com/veeso/ic-dbms), depend 
 - Planner that resolves names against the schema, converts literals and
   parameters to column types, and builds `Query` and `Filter` values
 - `SqlEngine`, which runs statements through `WasmDbmsDatabase` and
-  `DatabaseSchema` and tracks one SQL transaction per caller
+  `DatabaseSchema`, outside a transaction or inside the one whose id is
+  passed to `execute`
 
 The result and error types (`SqlResult`, `SqlError`) live in `wasm-dbms-api`
 behind its `sql` feature, so that adapters can expose SQL without depending on
@@ -385,11 +386,10 @@ See [Join Engine](./join-engine.md) for implementation details.
 ### Transaction Flow
 
 ```
-DbmsContext::begin_transaction(owner):
+DbmsContext::begin_transaction():
   1. Generate transaction ID
   2. Create empty overlay
-  3. Record the owner identity (opaque bytes chosen by the caller)
-  4. Return transaction ID
+  3. Return transaction ID
 
 Operation within a transaction (WasmDbmsDatabase::from_transaction):
   1. Read from: overlay first, then committed

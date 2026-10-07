@@ -14,6 +14,7 @@
 - [Custom Data Types](guides/custom-data-types.md)
 - [Migrations](guides/migrations.md)
 - [Wasmtime Example](guides/wasmtime-example.md)
+- [Embedding wasm-dbms](guides/embedding.md)
 
 # Reference
 

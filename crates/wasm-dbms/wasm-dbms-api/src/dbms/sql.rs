@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::dbms::table::{CandidDataTypeKind, JoinColumnDef};
+use crate::dbms::transaction::TransactionId;
 use crate::dbms::value::Value;
 use crate::error::DbmsError;
 
@@ -28,8 +29,8 @@ pub enum SqlResult {
     Rows(Vec<SqlRow>),
     /// Number of rows written by an `INSERT`, `UPDATE`, or `DELETE`.
     RowsAffected(u64),
-    /// A transaction was started by `BEGIN`.
-    TxBegin,
+    /// A transaction was started by `BEGIN`; later statements pass its ID.
+    TxBegin(TransactionId),
     /// The active transaction was committed by `COMMIT`.
     TxCommit,
     /// The active transaction was discarded by `ROLLBACK`.
@@ -90,9 +91,13 @@ pub enum SqlError {
     #[error("Statement expects {expected} parameters, got {got}")]
     ParameterCountMismatch { expected: usize, got: usize },
 
-    /// `BEGIN` was issued while the caller already has an active SQL transaction.
-    #[error("A SQL transaction is already active for this caller")]
+    /// `BEGIN` was issued together with a transaction ID.
+    #[error("BEGIN was issued inside an active transaction")]
     TransactionAlreadyActive,
+
+    /// `COMMIT` or `ROLLBACK` was issued without a transaction ID.
+    #[error("COMMIT or ROLLBACK was issued without an active transaction")]
+    NoActiveTransaction,
 
     /// The statement is valid SQL but uses a combination the engine cannot execute.
     #[error("Unsupported SQL: {0}")]
@@ -198,7 +203,11 @@ mod test {
         );
         assert_eq!(
             SqlError::TransactionAlreadyActive.to_string(),
-            "A SQL transaction is already active for this caller"
+            "BEGIN was issued inside an active transaction"
+        );
+        assert_eq!(
+            SqlError::NoActiveTransaction.to_string(),
+            "COMMIT or ROLLBACK was issued without an active transaction"
         );
         assert_eq!(
             SqlError::Unsupported("DISTINCT is not supported with JOIN".to_string()).to_string(),
@@ -231,7 +240,7 @@ mod test {
         for result in [
             sample_rows(),
             SqlResult::RowsAffected(3),
-            SqlResult::TxBegin,
+            SqlResult::TxBegin(7),
             SqlResult::TxCommit,
             SqlResult::TxRollback,
         ] {

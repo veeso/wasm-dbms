@@ -315,8 +315,7 @@ mod tests {
     #[test]
     fn test_rollback_discards_transaction() {
         let ctx = setup();
-        let owner = vec![1, 2, 3];
-        let tx_id = ctx.begin_transaction(owner);
+        let tx_id = ctx.begin_transaction();
         let mut db = WasmDbmsDatabase::from_transaction(&ctx, TestSchema, tx_id);
 
         let insert = ItemInsertRequest::from_values(&[

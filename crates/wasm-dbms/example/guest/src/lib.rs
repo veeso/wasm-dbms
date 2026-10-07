@@ -792,7 +792,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     }
 
     fn begin_transaction() -> Result<wit::TransactionId, wit::DbmsError> {
-        with_dbms(|ctx| ctx.begin_transaction(vec![0u8]))
+        with_dbms(|ctx| ctx.begin_transaction())
     }
 
     fn commit(tx: wit::TransactionId) -> Result<(), wit::DbmsError> {

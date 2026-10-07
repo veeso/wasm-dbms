@@ -3,13 +3,10 @@
 #[cfg(test)]
 mod tests;
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-
-use wasm_dbms::prelude::{ContextId, DatabaseSchema, DbmsContext, WasmDbmsDatabase};
+use wasm_dbms::prelude::{DatabaseSchema, DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::{
-    AggregatedRow, AggregatedValue, ColumnDef, Database as _, DbmsError, JoinColumnDef, SqlError,
-    SqlResult, SqlRow, TransactionError, TransactionId, Value,
+    AggregatedRow, AggregatedValue, ColumnDef, Database as _, JoinColumnDef, SqlError, SqlResult,
+    SqlRow, TransactionId, Value,
 };
 use wasm_dbms_memory::prelude::MemoryProvider;
 
@@ -19,24 +16,24 @@ use crate::planner::{self, AggregateOutput, AggregateSource, OutputColumn, Selec
 
 /// Runs SQL statements against a `wasm-dbms` database.
 ///
-/// The engine owns the database schema and the SQL transaction of each
-/// caller in each context. It does not borrow the [`DbmsContext`]: the context is passed to
-/// every [`execute`](Self::execute) call, so an engine can be stored next to
-/// its context, for example in a `thread_local!`, and keep transactions open
-/// across calls.
+/// The engine holds the database schema and nothing else. It does not borrow
+/// the [`DbmsContext`]: the context is passed to every
+/// [`execute`](Self::execute) call, so one engine can serve several contexts
+/// and can be stored next to its context, for example in a `thread_local!`.
 ///
 /// # Transactions
 ///
-/// `BEGIN` opens a transaction for the caller that issued it in the supplied
-/// context. Until that
-/// caller issues `COMMIT` or `ROLLBACK`, its statements run inside the
-/// transaction and see its uncommitted writes; other callers do not. A
-/// statement that fails leaves the transaction open. Statements of a caller
-/// without a transaction are applied immediately.
+/// Transactions are addressed by their [`TransactionId`], the same ids that
+/// [`DbmsContext::begin_transaction`] returns. `BEGIN` opens a transaction and
+/// returns its id in [`SqlResult::TxBegin`]; passing that id to later calls
+/// runs them inside the transaction, where they see its uncommitted writes.
+/// `COMMIT` and `ROLLBACK` close the transaction whose id they receive. A
+/// statement that fails leaves the transaction open. Calls without an id are
+/// applied immediately and do not see open transactions.
 ///
-/// SQL transactions are separate from the transactions started with
-/// [`DbmsContext::begin_transaction`]: a unit of work should use one or the
-/// other.
+/// The engine does not check who holds an id. An application layer that
+/// serves several identities keeps its own ledger from id to identity and
+/// checks it before calling `execute` with that id.
 ///
 /// # Examples
 ///
@@ -56,43 +53,35 @@ use crate::planner::{self, AggregateOutput, AggregateSource, OutputColumn, Selec
 ///
 /// engine.execute(
 ///     &ctx,
-///     b"alice",
+///     None,
 ///     "INSERT INTO users (id, name) VALUES (?, ?)",
 ///     &[Value::from(1u32), Value::from("Alice")],
 /// )?;
-/// let result = engine.execute(&ctx, b"alice", "SELECT name FROM users WHERE id = 1", &[])?;
+///
+/// let SqlResult::TxBegin(tx) = engine.execute(&ctx, None, "BEGIN", &[])? else {
+///     unreachable!("BEGIN returns TxBegin");
+/// };
+/// engine.execute(&ctx, Some(tx), "UPDATE users SET name = 'Alicia' WHERE id = 1", &[])?;
+/// engine.execute(&ctx, Some(tx), "COMMIT", &[])?;
 /// ```
 pub struct SqlEngine<S> {
     schema: S,
-    /// The open SQL transaction of each caller in each DBMS context.
-    transactions: RefCell<HashMap<(ContextId, Vec<u8>), TransactionId>>,
 }
 
 impl<S> SqlEngine<S> {
     /// Creates an engine for the tables of `schema`.
     pub fn new(schema: S) -> Self {
-        Self {
-            schema,
-            transactions: RefCell::new(HashMap::new()),
-        }
+        Self { schema }
     }
 
-    /// Returns whether `caller` has a SQL transaction open in `ctx`.
-    pub fn in_transaction<M>(&self, ctx: &DbmsContext<M>, caller: &[u8]) -> bool
-    where
-        M: MemoryProvider,
-    {
-        self.evict_closed_transaction(ctx, caller);
-        self.transactions
-            .borrow()
-            .contains_key(&(ctx.id(), caller.to_vec()))
-    }
-
-    /// Parses and runs one SQL statement on behalf of `caller`.
+    /// Parses and runs one SQL statement, outside or inside a transaction.
     ///
-    /// `caller` identifies who issued the statement; together with `ctx`, it
-    /// selects the SQL transaction the statement runs in. `params` supplies
-    /// one value per `?` placeholder, in order.
+    /// `tx` selects where the statement runs: `None` applies it immediately
+    /// through [`WasmDbmsDatabase::oneshot`], `Some(id)` runs it through
+    /// [`WasmDbmsDatabase::from_transaction`]. `BEGIN` requires `None` and
+    /// returns the new id in [`SqlResult::TxBegin`]; `COMMIT` and `ROLLBACK`
+    /// require `Some(id)`. `params` supplies one value per `?` placeholder, in
+    /// order.
     ///
     /// # Errors
     ///
@@ -106,15 +95,16 @@ impl<S> SqlEngine<S> {
     ///   value cannot be converted to the type of its column.
     /// - [`SqlError::Unsupported`] when the statement combines features the
     ///   DBMS cannot run together.
-    /// - [`SqlError::TransactionAlreadyActive`] for `BEGIN` inside a
-    ///   transaction.
+    /// - [`SqlError::TransactionAlreadyActive`] for `BEGIN` with `Some(id)`.
+    /// - [`SqlError::NoActiveTransaction`] for `COMMIT` or `ROLLBACK` with
+    ///   `None`.
     /// - [`SqlError::Runtime`] when the DBMS rejects the operation, for
-    ///   example on a constraint violation, or on `COMMIT` or `ROLLBACK`
-    ///   without a transaction.
+    ///   example on a constraint violation, or when `id` does not name an
+    ///   open transaction.
     pub fn execute<'ctx, M>(
         &self,
         ctx: &'ctx DbmsContext<M>,
-        caller: &[u8],
+        tx: Option<TransactionId>,
         sql: &str,
         params: &[Value],
     ) -> Result<SqlResult, SqlError>
@@ -122,7 +112,6 @@ impl<S> SqlEngine<S> {
         M: MemoryProvider,
         S: DatabaseSchema<M> + Clone + 'ctx,
     {
-        self.evict_closed_transaction(ctx, caller);
         let parsed = parse(sql)?;
         if parsed.parameter_count != params.len() {
             return Err(SqlError::ParameterCountMismatch {
@@ -130,89 +119,29 @@ impl<S> SqlEngine<S> {
                 got: params.len(),
             });
         }
-        match &parsed.statement {
-            Statement::Begin => self.begin(ctx, caller),
-            Statement::Commit => {
-                self.end_transaction(ctx, caller, |db| db.commit())?;
+        match (&parsed.statement, tx) {
+            (Statement::Begin, None) => Ok(SqlResult::TxBegin(ctx.begin_transaction())),
+            (Statement::Begin, Some(_)) => Err(SqlError::TransactionAlreadyActive),
+            (Statement::Commit | Statement::Rollback, None) => Err(SqlError::NoActiveTransaction),
+            (Statement::Commit, Some(id)) => {
+                WasmDbmsDatabase::from_transaction(ctx, self.schema.clone(), id).commit()?;
                 Ok(SqlResult::TxCommit)
             }
-            Statement::Rollback => {
-                self.end_transaction(ctx, caller, |db| db.rollback())?;
+            (Statement::Rollback, Some(id)) => {
+                WasmDbmsDatabase::from_transaction(ctx, self.schema.clone(), id).rollback()?;
                 Ok(SqlResult::TxRollback)
             }
-            statement => {
-                let transaction = self
-                    .transactions
-                    .borrow()
-                    .get(&(ctx.id(), caller.to_vec()))
-                    .copied();
-                let db = match transaction {
-                    Some(id) => WasmDbmsDatabase::from_transaction(ctx, self.schema.clone(), id),
-                    None => WasmDbmsDatabase::oneshot(ctx, self.schema.clone()),
-                };
-                self.run(&db, statement, params)
-            }
+            (statement, Some(id)) => self.run(
+                &WasmDbmsDatabase::from_transaction(ctx, self.schema.clone(), id),
+                statement,
+                params,
+            ),
+            (statement, None) => self.run(
+                &WasmDbmsDatabase::oneshot(ctx, self.schema.clone()),
+                statement,
+                params,
+            ),
         }
-    }
-
-    fn begin<M>(&self, ctx: &DbmsContext<M>, caller: &[u8]) -> Result<SqlResult, SqlError>
-    where
-        M: MemoryProvider,
-    {
-        let key = (ctx.id(), caller.to_vec());
-        let mut transactions = self.transactions.borrow_mut();
-        if transactions.contains_key(&key) {
-            return Err(SqlError::TransactionAlreadyActive);
-        }
-        let id = ctx.begin_transaction(caller.to_vec());
-        transactions.insert(key, id);
-        Ok(SqlResult::TxBegin)
-    }
-
-    /// Forgets transactions whose context or transaction session no longer exists.
-    fn evict_closed_transaction<M>(&self, ctx: &DbmsContext<M>, caller: &[u8])
-    where
-        M: MemoryProvider,
-    {
-        let key = (ctx.id(), caller.to_vec());
-        let mut transactions = self.transactions.borrow_mut();
-        transactions.retain(|(context_id, _), _| context_id.is_alive());
-        let id = transactions.get(&key).copied();
-        if id.is_some_and(|id| !ctx.has_transaction(&id, caller)) {
-            transactions.remove(&key);
-        }
-    }
-
-    /// Commits or rolls back the transaction of `caller` with `finish`.
-    ///
-    /// The caller's transaction is forgotten once the DBMS has consumed it,
-    /// which it also does when a commit fails while applying the changes.
-    fn end_transaction<'ctx, M, F>(
-        &self,
-        ctx: &'ctx DbmsContext<M>,
-        caller: &[u8],
-        finish: F,
-    ) -> Result<(), SqlError>
-    where
-        M: MemoryProvider,
-        S: DatabaseSchema<M> + Clone + 'ctx,
-        F: FnOnce(&mut WasmDbmsDatabase<'ctx, M>) -> Result<(), DbmsError>,
-    {
-        let key = (ctx.id(), caller.to_vec());
-        let id = self
-            .transactions
-            .borrow()
-            .get(&key)
-            .copied()
-            .ok_or(DbmsError::Transaction(
-                TransactionError::NoActiveTransaction,
-            ))?;
-        let mut db = WasmDbmsDatabase::from_transaction(ctx, self.schema.clone(), id);
-        let result = finish(&mut db);
-        if !ctx.has_transaction(&id, caller) {
-            self.transactions.borrow_mut().remove(&key);
-        }
-        result.map_err(SqlError::from)
     }
 
     /// Plans and runs a data statement on `db`.
@@ -280,9 +209,7 @@ impl<S> SqlEngine<S> {
 
 impl<S> std::fmt::Debug for SqlEngine<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SqlEngine")
-            .field("active_transactions", &self.transactions.borrow().len())
-            .finish_non_exhaustive()
+        f.debug_struct("SqlEngine").finish_non_exhaustive()
     }
 }
 

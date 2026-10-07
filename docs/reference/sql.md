@@ -505,24 +505,28 @@ UPDATE accounts SET balance = 150 WHERE id = 2;
 COMMIT;
 ```
 
-Each statement above is a separate `execute` call.
+Each statement above is a separate `execute` call. `BEGIN` returns the id of
+the new transaction; the statements that follow pass that id to `execute`,
+and so do `COMMIT` and `ROLLBACK`.
 
 | Statement                | Effect                                          |
 | ------------------------ | ----------------------------------------------- |
-| `BEGIN [TRANSACTION]`    | Opens a transaction for the caller              |
+| `BEGIN [TRANSACTION]`    | Opens a transaction and returns its id          |
 | `COMMIT [TRANSACTION]`   | Applies every change of the transaction at once |
 | `ROLLBACK [TRANSACTION]` | Discards every change of the transaction        |
 
-- A transaction belongs to the caller that opened it. Each caller has at most
-  one, and `BEGIN` inside a transaction is an error.
-- Inside a transaction, the caller's statements see its own uncommitted
-  changes. Other callers do not see them until `COMMIT`.
-- A statement that fails does not end the transaction. The caller decides
+- `BEGIN` is sent without a transaction id. Sending it with one is an error.
+- A statement sent with a transaction id runs inside that transaction and
+  sees its uncommitted changes. Statements sent without an id, and other
+  transactions, do not see them until `COMMIT`.
+- A statement that fails does not end the transaction. The program decides
   whether to continue, `COMMIT`, or `ROLLBACK`.
 - `COMMIT` checks the constraints again while applying the changes. If it
   fails, nothing is applied and the transaction is over.
-- `COMMIT` or `ROLLBACK` without a transaction is an error.
-- Without a transaction, each statement is applied immediately and atomically.
+- `COMMIT` or `ROLLBACK` without a transaction id is an error, and `COMMIT`
+  with the id of a transaction that is already over reports it as not found.
+- Without a transaction id, each statement is applied immediately and
+  atomically.
 
 `START TRANSACTION`, `END`, savepoints, and isolation level settings are not
 supported.
@@ -750,13 +754,13 @@ non-negative integer. A `LIKE` parameter must be `Text`.
 
 `SqlEngine::execute` returns a `SqlResult`:
 
-| Variant           | Returned by                  | Content                    |
-| ----------------- | ---------------------------- | -------------------------- |
-| `Rows(rows)`      | `SELECT`                     | The rows, possibly none    |
-| `RowsAffected(n)` | `INSERT`, `UPDATE`, `DELETE` | The number of rows written |
-| `TxBegin`         | `BEGIN`                      |                            |
-| `TxCommit`        | `COMMIT`                     |                            |
-| `TxRollback`      | `ROLLBACK`                   |                            |
+| Variant           | Returned by                  | Content                       |
+| ----------------- | ---------------------------- | ----------------------------- |
+| `Rows(rows)`      | `SELECT`                     | The rows, possibly none       |
+| `RowsAffected(n)` | `INSERT`, `UPDATE`, `DELETE` | The number of rows written    |
+| `TxBegin(id)`     | `BEGIN`                      | The id of the new transaction |
+| `TxCommit`        | `COMMIT`                     |                               |
+| `TxRollback`      | `ROLLBACK`                   |                               |
 
 A row is a list of `(JoinColumnDef, Value)` pairs, one per column of the
 select list, in order. The column definition describes the column:
