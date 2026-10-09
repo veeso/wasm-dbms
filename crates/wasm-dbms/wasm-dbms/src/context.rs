@@ -112,6 +112,14 @@ where
         }
     }
 
+    /// Publishes changes made through this context to the memory provider.
+    ///
+    /// Providers without durable storage implement this as a no-op. Active
+    /// transaction overlays remain uncommitted and are not flushed.
+    pub fn flush(&self) -> DbmsResult<()> {
+        self.mm.borrow_mut().flush().map_err(Into::into)
+    }
+
     /// Returns the stable identity of this context.
     pub fn id(&self) -> ContextId {
         ContextId(Rc::downgrade(&self.identity))
@@ -194,9 +202,62 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use wasm_dbms_api::prelude::{MemoryError, MemoryResult};
+    use wasm_dbms_memory::MemoryProvider;
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
     use super::*;
+
+    struct FlushProbe {
+        provider: HeapMemoryProvider,
+        calls: Rc<Cell<usize>>,
+        fail: Rc<Cell<bool>>,
+    }
+
+    impl FlushProbe {
+        fn new(calls: Rc<Cell<usize>>, fail: Rc<Cell<bool>>) -> Self {
+            Self {
+                provider: HeapMemoryProvider::default(),
+                calls,
+                fail,
+            }
+        }
+    }
+
+    impl MemoryProvider for FlushProbe {
+        const PAGE_SIZE: u64 = HeapMemoryProvider::PAGE_SIZE;
+
+        fn size(&self) -> u64 {
+            self.provider.size()
+        }
+
+        fn pages(&self) -> u64 {
+            self.provider.pages()
+        }
+
+        fn grow(&mut self, new_pages: u64) -> MemoryResult<u64> {
+            self.provider.grow(new_pages)
+        }
+
+        fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()> {
+            self.provider.read(offset, buf)
+        }
+
+        fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()> {
+            self.provider.write(offset, buf)
+        }
+
+        fn flush(&mut self) -> MemoryResult<()> {
+            self.calls.set(self.calls.get() + 1);
+            if self.fail.get() {
+                return Err(MemoryError::ProviderError("flush failed".to_owned()));
+            }
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_should_create_context() {
@@ -235,5 +296,31 @@ mod tests {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
         let debug = format!("{ctx:?}");
         assert!(debug.contains("DbmsContext"));
+    }
+
+    #[test]
+    fn context_flush_reaches_provider_and_preserves_error() {
+        let calls = Rc::new(Cell::new(0));
+        let fail = Rc::new(Cell::new(false));
+        let ctx = DbmsContext::new(FlushProbe::new(calls.clone(), fail.clone()));
+        assert_eq!(calls.get(), 0);
+        ctx.flush().unwrap();
+        assert_eq!(calls.get(), 1);
+        fail.set(true);
+        assert!(
+            ctx.flush()
+                .unwrap_err()
+                .to_string()
+                .contains("flush failed")
+        );
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn default_flush_keeps_heap_context_and_transaction_usable() {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        let tx = ctx.begin_transaction();
+        ctx.flush().unwrap();
+        assert!(ctx.has_transaction(&tx));
     }
 }

@@ -6,6 +6,7 @@
   - [Guest Component](#guest-component)
   - [Host Binary](#host-binary)
 - [FileMemoryProvider](#filememoryprovider)
+- [Key-Value Guest Variant](#key-value-guest-variant)
 - [Building and Running](#building-and-running)
   - [Prerequisites](#prerequisites)
   - [Build](#build)
@@ -60,7 +61,7 @@ This raw/dynamic API is intentional: WIT cannot express Rust generics or user-de
 
 The guest (`crates/wasm-dbms/example/guest/`) compiles to `wasm32-wasip2` and exports the WIT `database` interface. Internally it:
 
-1. Initializes a `DbmsContext<FileMemoryProvider>` lazily on first call; if the database file cannot be opened or the tables cannot be registered, the call returns a `dbms-error` (for example `memory-error`) instead of trapping, and the next call retries
+1. Initializes a file-backed or key-value `DbmsContext` lazily on first call; if storage cannot be opened or the tables cannot be registered, the call returns a `dbms-error` (for example `memory-error`) instead of trapping, and the next call retries
 2. Registers example tables (`users`, `posts`) using `#[derive(Table)]`
 3. Converts between WIT variant values and wasm-dbms `Value` types
 4. Dispatches operations through a `DatabaseSchema` implementation
@@ -101,6 +102,23 @@ Operations:
 The provider is initialized with a file path relative to the WASI preopened directory (defaults to `wasm-dbms.db`).
 
 > **Note:** `FileMemoryProvider` does not handle concurrent access. It assumes single-writer usage.
+
+## Key-Value Guest Variant
+
+The guest also has a `key-value` feature. Build and test it with:
+
+```bash
+just test_wasm_dbms_key_value_example
+wasm-tools component wit .artifact/wasm-dbms-example-guest-key-value.wasm
+```
+
+This variant opens bucket `default` and database namespace `example`. It
+imports only `wasi:keyvalue/store@0.2.0-draft2` and
+`wasi:keyvalue/batch@0.2.0-draft2` for persistence; it does not require a
+filesystem preopen. Successful WIT operations checkpoint through `ctx.flush()`.
+The host must retain the bucket across component restarts, provide durable
+backing, and coordinate a single writer. See the [key-value provider guide](../wasi/wasi-key-value-memory-provider.md)
+for the checkpoint and failure model.
 
 ---
 

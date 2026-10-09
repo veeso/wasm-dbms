@@ -131,15 +131,19 @@ pub trait MemoryProvider {
 
     /// Write bytes to memory at offset
     fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()>;
+
+    /// Publish provider-specific durable state. The default is a no-op.
+    fn flush(&mut self) -> MemoryResult<()>;
 }
 ```
 
 **Implementations:**
 
-| Implementation       | Use Case                                        |
-| -------------------- | ----------------------------------------------- |
-| `WasiMemoryProvider` | WASI production (file-backed, single flat file) |
-| `HeapMemoryProvider` | Testing (uses `Vec<u8>`)                        |
+| Implementation               | Use Case                                        |
+| ---------------------------- | ----------------------------------------------- |
+| `WasiMemoryProvider`         | WASI production (file-backed, single flat file) |
+| `WasiKeyValueMemoryProvider` | WASI key-value host with explicit checkpoints   |
+| `HeapMemoryProvider`         | Testing (uses `Vec<u8>`)                        |
 
 ```rust
 // Testing: Uses heap memory

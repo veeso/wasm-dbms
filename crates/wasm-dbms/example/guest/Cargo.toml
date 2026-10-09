@@ -9,12 +9,17 @@ repository = { workspace = true }
 rust-version = { workspace = true }
 description = "WIT Component Model guest example for wasm-dbms"
 
+[features]
+default = []
+key-value = ["dep:wasi-dbms-key-value-memory"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rust_decimal = { workspace = true }
 serde_json = { workspace = true }
+wasi-dbms-key-value-memory = { workspace = true, optional = true }
 wasm-dbms = { workspace = true }
 wasm-dbms-api = { workspace = true }
 wasm-dbms-memory = { workspace = true }

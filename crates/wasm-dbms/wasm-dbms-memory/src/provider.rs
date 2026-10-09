@@ -35,6 +35,15 @@ pub trait MemoryProvider {
     ///
     /// Returns an error if `offset + buf.len()` exceeds the current memory size.
     fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()>;
+
+    /// Publishes pending changes to the provider's durable storage.
+    ///
+    /// Providers without an explicit persistence boundary use the default
+    /// no-op implementation. This hook does not flush active transaction
+    /// overlays held by the DBMS context.
+    fn flush(&mut self) -> MemoryResult<()> {
+        Ok(())
+    }
 }
 
 /// An implementation of [`MemoryProvider`] that uses heap memory for testing purposes.

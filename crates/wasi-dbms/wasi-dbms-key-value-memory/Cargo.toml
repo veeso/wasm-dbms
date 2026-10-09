@@ -1,0 +1,31 @@
+[package]
+name = "wasi-dbms-key-value-memory"
+version = { workspace = true }
+authors = { workspace = true }
+categories = ["database", "wasm"]
+documentation = "https://docs.rs/wasi-dbms-key-value-memory"
+edition = { workspace = true }
+include = [
+  "src/**/*",
+  "wit/**/*",
+  "../../../LICENSE",
+  "../../../CHANGELOG.md",
+  "README.md",
+]
+keywords = ["database", "key-value", "memory", "wasi", "wasm"]
+license = { workspace = true }
+readme = "README.md"
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Cached key-value memory provider for wasm-dbms on WASI"
+
+[dependencies]
+wasm-dbms-api = { workspace = true }
+wasm-dbms-memory = { workspace = true }
+wit-bindgen = { workspace = true }
+xxhash-rust = { workspace = true }
+
+[dev-dependencies]
+wasi-dbms-memory = { workspace = true }
+wasm-dbms = { workspace = true }
+wasm-dbms-macros = { workspace = true }

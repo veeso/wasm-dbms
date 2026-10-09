@@ -1,0 +1,6 @@
+The store.wit and batch.wit definitions in this directory are vendored from
+WebAssembly/wasi-keyvalue commit
+aa972c86e4294b97908b8d24d5950cc525ace7a6.
+
+Upstream project: https://github.com/WebAssembly/wasi-keyvalue
+Pinned package: wasi:keyvalue@0.2.0-draft2

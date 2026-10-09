@@ -41,13 +41,20 @@ The engine reads and writes 64 KiB pages through the `MemoryProvider` trait of
 | ----------------------------------- | ------------------------------- | ------------------------------------------------ |
 | `HeapMemoryProvider`                | A `Vec<u8>` on the heap         | Tests and throwaway databases                    |
 | `WasiMemoryProvider`                | A file opened through WASI      | Wasmtime, Wasmer, WasmEdge, and other WASI hosts |
+| `WasiKeyValueMemoryProvider`        | A draft2 key-value bucket       | Hosts with persistent WASI key-value storage     |
 | Stable memory provider of `ic-dbms` | Internet Computer stable memory | Canisters                                        |
 
 `HeapMemoryProvider` ships with `wasm-dbms-memory`. `WasiMemoryProvider` is
 described in the [WASI Memory Provider](../wasi/wasi-memory-provider.md)
+page. The key-value option is described in the
+[WASI Key-Value Memory Provider](../wasi/wasi-key-value-memory-provider.md)
 page. A new runtime needs a new provider; the
 [Memory Management](../technical/memory.md) page explains what the engine
 expects from it.
+
+The key-value provider caches the complete database and needs an explicit
+`ctx.flush()` after committed work. Its host must provide draft2 store and
+batch, durable bucket backing, and single-writer coordination.
 
 ---
 

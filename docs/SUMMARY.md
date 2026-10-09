@@ -38,3 +38,4 @@
 # WASI
 
 - [WASI Memory Provider](wasi/wasi-memory-provider.md)
+- [WASI Key-Value Memory Provider](wasi/wasi-key-value-memory-provider.md)

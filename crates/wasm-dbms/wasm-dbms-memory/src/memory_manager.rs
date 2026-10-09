@@ -86,6 +86,15 @@ where
         self.provider.pages()
     }
 
+    /// Publishes pending provider changes.
+    ///
+    /// The default provider implementation is a no-op. Transaction overlays
+    /// remain owned by the DBMS context and are not materialized by this
+    /// method.
+    pub fn flush(&mut self) -> MemoryResult<()> {
+        self.provider.flush()
+    }
+
     /// Calculates the absolute offset in memory given a page number and an
     /// offset within that page.
     fn absolute_offset(&self, page: Page, offset: PageOffset) -> u64 {

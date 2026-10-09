@@ -212,7 +212,8 @@ wasm-dbms/
 │   │   └── wasm-dbms-macros/       # Procedural macros (Encode, Table, CustomDataType, DatabaseSchema)
 │   │
 │   └── wasi-dbms/                  # WASI-specific crates
-│       └── wasi-dbms-memory/       # File-backed memory provider for WASI runtimes
+│       ├── wasi-dbms-memory/       # File-backed memory provider for WASI runtimes
+│       └── wasi-dbms-key-value-memory/ # Draft2 key-value provider with checkpoints
 │
 └── .artifact/                      # Build outputs (.wasm)
 ```
@@ -457,12 +458,14 @@ pub trait MemoryProvider {
     fn grow(&mut self, new_pages: u64) -> MemoryResult<u64>;
     fn read(&mut self, offset: u64, buf: &mut [u8]) -> MemoryResult<()>;
     fn write(&mut self, offset: u64, buf: &[u8]) -> MemoryResult<()>;
+    fn flush(&mut self) -> MemoryResult<()>;
 }
 ```
 
 Built-in providers:
 
 - `WasiMemoryProvider` - Uses a single flat file (WASI production)
+- `WasiKeyValueMemoryProvider` - Uses a draft2 key-value bucket and explicit checkpoints
 - `HeapMemoryProvider` - Uses heap memory (testing)
 
 Other runtimes ship their own provider. For the Internet Computer, see [ic-dbms](https://ic.wasm-dbms.cc).

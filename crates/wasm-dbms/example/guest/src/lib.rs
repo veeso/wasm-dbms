@@ -4,11 +4,13 @@
 //! WIT Component Model guest example for wasm-dbms.
 //!
 //! This crate wraps the wasm-dbms engine behind a WIT-exported `database`
-//! interface. A [`FileMemoryProvider`] gives the DBMS persistent,
-//! file-backed storage so that data survives across invocations.
+//! interface. The default build uses a
+//! [`FileMemoryProvider`](crate::file_provider::FileMemoryProvider), while the
+//! `key-value` feature uses the WASI key-value memory provider.
 
 pub mod file_provider;
 pub mod schema;
+pub mod storage;
 
 use std::cell::RefCell;
 use std::path::Path;
@@ -16,8 +18,8 @@ use std::path::Path;
 use ::wasm_dbms::prelude::{DatabaseSchema as _, DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::*;
 
-use crate::file_provider::FileMemoryProvider;
 use crate::schema::ExampleDatabaseSchema;
+use crate::storage::SelectedProvider;
 
 wit_bindgen::generate!({
     world: "dbms",
@@ -30,7 +32,7 @@ use crate::wasm_dbms::dbms::types as wit;
 const DB_FILE_PATH: &str = "wasm-dbms.db";
 
 thread_local! {
-    static DBMS_CTX: RefCell<Option<DbmsContext<FileMemoryProvider>>> = const { RefCell::new(None) };
+    static DBMS_CTX: RefCell<Option<DbmsContext<SelectedProvider>>> = const { RefCell::new(None) };
 }
 
 /// Opens the database file at `path` and registers the example tables.
@@ -39,11 +41,24 @@ thread_local! {
 ///
 /// Returns [`wit::DbmsError::MemoryError`] when the file cannot be opened or
 /// created, and the converted [`DbmsError`] when table registration fails.
-fn open_dbms(path: &Path) -> Result<DbmsContext<FileMemoryProvider>, wit::DbmsError> {
-    let provider =
-        FileMemoryProvider::new(path).map_err(|e| wit::DbmsError::MemoryError(e.to_string()))?;
+fn open_dbms(path: &Path) -> Result<DbmsContext<SelectedProvider>, wit::DbmsError> {
+    let provider = {
+        #[cfg(feature = "key-value")]
+        {
+            let _ = path;
+            crate::storage::open_provider()
+        }
+        #[cfg(not(feature = "key-value"))]
+        {
+            crate::storage::open_provider_at(path)
+        }
+    }
+    .map_err(|e| wit::DbmsError::MemoryError(e.to_string()))?;
     let dbms_ctx = DbmsContext::new(provider);
     ExampleDatabaseSchema::register_tables(&dbms_ctx).map_err(dbms_error_to_wit)?;
+    dbms_ctx
+        .flush()
+        .map_err(|e| wit::DbmsError::MemoryError(e.to_string()))?;
     Ok(dbms_ctx)
 }
 
@@ -57,7 +72,7 @@ fn open_dbms(path: &Path) -> Result<DbmsContext<FileMemoryProvider>, wit::DbmsEr
 /// Returns the initialization error from [`open_dbms`] without calling `f`.
 fn with_dbms<F, R>(f: F) -> Result<R, wit::DbmsError>
 where
-    F: FnOnce(&DbmsContext<FileMemoryProvider>) -> R,
+    F: FnOnce(&DbmsContext<SelectedProvider>) -> R,
 {
     DBMS_CTX.with(|cell| {
         let mut ctx = cell.borrow_mut();
@@ -65,7 +80,36 @@ where
             Some(dbms_ctx) => dbms_ctx,
             None => open_dbms(Path::new(DB_FILE_PATH))?,
         };
-        Ok(f(ctx.insert(dbms_ctx)))
+        let result = f(&dbms_ctx);
+        ctx.replace(dbms_ctx);
+        Ok(result)
+    })
+}
+
+/// Runs a result-bearing operation and checkpoints successful changes.
+fn with_dbms_result<F, R>(f: F) -> Result<R, wit::DbmsError>
+where
+    F: FnOnce(&DbmsContext<SelectedProvider>) -> Result<R, wit::DbmsError>,
+{
+    DBMS_CTX.with(|cell| {
+        let mut ctx = cell.borrow_mut();
+        let dbms_ctx = match ctx.take() {
+            Some(dbms_ctx) => dbms_ctx,
+            None => open_dbms(Path::new(DB_FILE_PATH))?,
+        };
+        match f(&dbms_ctx) {
+            Ok(value) => match dbms_ctx.flush() {
+                Ok(()) => {
+                    ctx.replace(dbms_ctx);
+                    Ok(value)
+                }
+                Err(error) => Err(wit::DbmsError::MemoryError(error.to_string())),
+            },
+            Err(error) => {
+                ctx.replace(dbms_ctx);
+                Err(error)
+            }
+        }
     })
 }
 
@@ -689,12 +733,12 @@ export!(GuestDbms);
 impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     fn select(table: String, query: wit::Query) -> Result<Vec<wit::Row>, wit::DbmsError> {
         let query = wit_query_to_dbms(query).map_err(wit::DbmsError::InvalidQuery)?;
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.select_raw(&table, query)
                 .map(|rows| rows.into_iter().map(dbms_row_to_wit).collect())
                 .map_err(dbms_error_to_wit)
-        })?
+        })
     }
 
     fn insert(
@@ -704,7 +748,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     ) -> Result<(), wit::DbmsError> {
         let named_values = wit_row_to_named_values(values)?;
         let table_name = resolve_table_name(&table)?;
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let col_values =
                 match_column_defs(table_name, named_values).map_err(dbms_error_to_wit)?;
 
@@ -719,7 +763,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
                     .insert(&db, table_name, &col_values)
                     .map_err(dbms_error_to_wit)
             }
-        })?
+        })
     }
 
     fn aggregate(
@@ -731,13 +775,13 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         let aggs: Vec<AggregateFunction> =
             aggregates.into_iter().map(wit_aggregate_to_dbms).collect();
         let table_name = resolve_table_name(&table)?;
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             ExampleDatabaseSchema
                 .aggregate(&db, table_name, query, &aggs)
                 .map(|rows| rows.into_iter().map(aggregated_row_to_wit).collect())
                 .map_err(dbms_error_to_wit)
-        })?
+        })
     }
 
     fn update(
@@ -749,7 +793,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         let filter = parse_filter_json(filter)?;
         let named_values = wit_row_to_named_values(values)?;
         let table_name = resolve_table_name(&table)?;
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let col_values =
                 match_column_defs(table_name, named_values).map_err(dbms_error_to_wit)?;
 
@@ -764,7 +808,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
                     .update(&db, table_name, &col_values, filter)
                     .map_err(dbms_error_to_wit)
             }
-        })?
+        })
     }
 
     fn delete(
@@ -776,7 +820,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
         let filter = parse_filter_json(filter)?;
         let behavior = wit_delete_behavior(behavior);
         let table_name = resolve_table_name(&table)?;
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             if let Some(tx_id) = tx {
                 let db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx_id);
                 ExampleDatabaseSchema
@@ -788,7 +832,7 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
                     .delete(&db, table_name, behavior, filter)
                     .map_err(dbms_error_to_wit)
             }
-        })?
+        })
     }
 
     fn begin_transaction() -> Result<wit::TransactionId, wit::DbmsError> {
@@ -796,41 +840,41 @@ impl exports::wasm_dbms::dbms::database::Guest for GuestDbms {
     }
 
     fn commit(tx: wit::TransactionId) -> Result<(), wit::DbmsError> {
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let mut db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx);
             db.commit().map_err(dbms_error_to_wit)
-        })?
+        })
     }
 
     fn rollback(tx: wit::TransactionId) -> Result<(), wit::DbmsError> {
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let mut db = WasmDbmsDatabase::from_transaction(ctx, ExampleDatabaseSchema, tx);
             db.rollback().map_err(dbms_error_to_wit)
-        })?
+        })
     }
 
     fn has_drift() -> Result<bool, wit::DbmsError> {
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.has_drift().map_err(dbms_error_to_wit)
-        })?
+        })
     }
 
     fn pending_migrations() -> Result<Vec<wit::MigrationOp>, wit::DbmsError> {
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.pending_migrations()
                 .map(|ops| ops.into_iter().map(migration_op_to_wit).collect())
                 .map_err(dbms_error_to_wit)
-        })?
+        })
     }
 
     fn migrate(policy: wit::MigrationPolicy) -> Result<(), wit::DbmsError> {
         let policy = wit_migration_policy(policy);
-        with_dbms(|ctx| {
+        with_dbms_result(|ctx| {
             let mut db = WasmDbmsDatabase::oneshot(ctx, ExampleDatabaseSchema);
             db.migrate(policy).map_err(dbms_error_to_wit)
-        })?
+        })
     }
 }
 
@@ -1041,7 +1085,7 @@ mod tests {
             .map(ToString::to_string)
             .collect();
         let mut compiled: Vec<String> =
-            <ExampleDatabaseSchema as ::wasm_dbms::prelude::DatabaseSchema<FileMemoryProvider>>::compiled_snapshots()
+            <ExampleDatabaseSchema as ::wasm_dbms::prelude::DatabaseSchema<SelectedProvider>>::compiled_snapshots()
                 .into_iter()
                 .map(|snapshot| snapshot.name)
                 .collect();

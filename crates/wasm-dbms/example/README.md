@@ -16,7 +16,7 @@ This example demonstrates using wasm-dbms with the [WebAssembly Component Model]
 
 The example consists of two components:
 
-- **Guest** (`guest/`): A WASM component compiled to `wasm32-wasip2` that wraps wasm-dbms behind a WIT-exported `database` interface. It includes a `FileMemoryProvider` for persistent, file-backed storage and registers two example tables (`users`, `posts`).
+- **Guest** (`guest/`): A WASM component compiled to `wasm32-wasip2` that wraps wasm-dbms behind a WIT-exported `database` interface. It includes a file-backed provider by default and a `key-value` feature for the draft2 WASI key-value provider. Both register two example tables (`users`, `posts`).
 
 - **Host** (`host/`): A native Rust binary that uses Wasmtime to load the guest component and exercise every exported operation: insert, select, transactions with commit, and transactions with rollback.
 
@@ -28,7 +28,7 @@ The example consists of two components:
 ├─────────────────────────────────────────────────┤
 │               Guest (wasm32-wasip2)             │
 │   WIT exports ← bridge → wasm-dbms engine       │
-│   FileMemoryProvider → wasm-dbms.db              │
+│   FileMemoryProvider or draft2 key-value bucket  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -68,6 +68,7 @@ just build_wasm_dbms_example
 
 # Or build individually
 just build_wasm_dbms_example_guest   # → .artifact/wasm-dbms-example-guest.wasm
+just build_wasm_dbms_example_key_value # → .artifact/wasm-dbms-example-guest-key-value.wasm
 just build_wasm_dbms_example_host    # → target/release/wasm-dbms-example
 ```
 
@@ -83,6 +84,16 @@ cargo run --release -p wasm-dbms-example-host -- .artifact/wasm-dbms-example-gue
 ```
 
 Each run creates a fresh, uniquely named directory under the system temporary directory, preopens it as the guest's root, and removes it when the demo exits. The guest's `wasm-dbms.db` lives only in that directory, so the demo never reads, modifies, or deletes a `wasm-dbms.db` in your current directory.
+
+The key-value variant uses no filesystem preopen:
+
+```bash
+just test_wasm_dbms_key_value_example
+```
+
+It uses bucket `default`, namespace `example`, and requires draft2 store and
+batch imports. The host test keeps the bucket backing map across component
+restarts and exercises page/publication failures.
 
 Expected output:
 

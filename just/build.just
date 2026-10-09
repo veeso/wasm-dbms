@@ -16,7 +16,7 @@ release args="":
   cargo build --workspace --all-targets --release --exclude wasm-dbms-example-guest {{ args }}
 
 [group('build')]
-build_all: build_wasm_dbms build_wasi_dbms build_wasm_dbms_example
+build_all: build_wasm_dbms build_wasi_dbms build_wasi_dbms_key_value build_wasm_dbms_example
 
 # Build generic wasm-dbms crates for wasm32-unknown-unknown
 [group('build')]
@@ -32,15 +32,26 @@ build_wasm_dbms:
 build_wasi_dbms:
   cargo build --target wasm32-unknown-unknown --release --package "wasi-dbms-memory"
 
+# Build the WASI key-value provider for wasm32-wasip2.
+[group('build')]
+build_wasi_dbms_key_value:
+  cargo build --target wasm32-wasip2 --release --package "wasi-dbms-key-value-memory"
+
 # Build the WIT Component Model example (guest + host)
 [group('build')]
-build_wasm_dbms_example: build_wasm_dbms_example_guest build_wasm_dbms_example_host
+build_wasm_dbms_example: build_wasm_dbms_example_guest build_wasm_dbms_example_key_value build_wasm_dbms_example_host
 
 # Build the WIT guest component for wasm32-wasip2
 [group('build')]
 build_wasm_dbms_example_guest: pre_build
   cargo build --target wasm32-wasip2 --release --package "wasm-dbms-example-guest"
   cp "target/wasm32-wasip2/release/wasm_dbms_example_guest.wasm" "{{WASM_DIR}}/wasm-dbms-example-guest.wasm"
+
+# Build the WIT guest component with the WASI key-value memory provider.
+[group('build')]
+build_wasm_dbms_example_key_value: pre_build
+  cargo build --target wasm32-wasip2 --release --package "wasm-dbms-example-guest" --features key-value
+  cp "target/wasm32-wasip2/release/wasm_dbms_example_guest.wasm" "{{WASM_DIR}}/wasm-dbms-example-guest-key-value.wasm"
 
 # Build the Wasmtime host binary (native)
 [group('build')]

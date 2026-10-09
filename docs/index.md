@@ -86,6 +86,7 @@ Internet Computer support lives in the dedicated [ic-dbms](https://github.com/ve
 For deploying wasm-dbms on WASI runtimes (Wasmer, Wasmtime, WasmEdge):
 
 - [WASI Memory Provider](./wasi/wasi-memory-provider.md) - File-backed persistent storage for WASI
+- [WASI Key-Value Memory Provider](./wasi/wasi-key-value-memory-provider.md) - Draft2 host-bucket storage with explicit checkpoints
 
 ### Technical Documentation
 

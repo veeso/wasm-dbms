@@ -54,14 +54,15 @@ This repository contains two crate families:
 
 ### Crate Architecture
 
-| Crate              | Description                                                 |
-| ------------------ | ----------------------------------------------------------- |
-| `wasm-dbms-api`    | Shared types, traits, validators, sanitizers                |
-| `wasm-dbms-memory` | Memory abstraction and page management                      |
-| `wasm-dbms`        | Core DBMS engine with transactions, joins, integrity checks |
-| `wasm-dbms-macros` | Procedural macros: `Encode`, `Table`, `CustomDataType`      |
-| `wasm-dbms-sql`    | SQL front-end: parser, planner, and executor                |
-| `wasi-dbms-memory` | Memory provider implementations for WASI runtimes           |
+| Crate                        | Description                                                 |
+| ---------------------------- | ----------------------------------------------------------- |
+| `wasm-dbms-api`              | Shared types, traits, validators, sanitizers                |
+| `wasm-dbms-memory`           | Memory abstraction and page management                      |
+| `wasm-dbms`                  | Core DBMS engine with transactions, joins, integrity checks |
+| `wasm-dbms-macros`           | Procedural macros: `Encode`, `Table`, `CustomDataType`      |
+| `wasm-dbms-sql`              | SQL front-end: parser, planner, and executor                |
+| `wasi-dbms-memory`           | Memory provider implementations for WASI runtimes           |
+| `wasi-dbms-key-value-memory` | Draft2 key-value `MemoryProvider` with checkpoints          |
 
 ## Quick Start (Generic)
 
@@ -112,6 +113,39 @@ let users = database.select::<User>(Query::builder().all().build())?;
 
 The `MemoryProvider` trait abstracts storage — use `HeapMemoryProvider` for testing, `WasiMemoryProvider` for
 Wasmtime/WASI, or implement your own for any WASM runtime.
+
+## Quick Start (WASI)
+
+For a WASI filesystem, use the file-backed provider. It stores the same 64 KiB
+pages in one file and needs a preopened directory:
+
+```rust,no_run
+use wasi_dbms_memory::WasiMemoryProvider;
+use wasm_dbms::DbmsContext;
+
+let ctx = DbmsContext::new(WasiMemoryProvider::new("./data/example.db")?);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+See the [WASI Memory Provider guide](docs/wasi/wasi-memory-provider.md).
+
+## Quick Start (WASI key-value)
+
+When the host provides persistent key-value storage, use the draft2 provider:
+
+```rust,no_run
+use wasi_dbms_key_value_memory::WasiKeyValueMemoryProvider;
+use wasm_dbms::DbmsContext;
+
+let ctx = DbmsContext::new(WasiKeyValueMemoryProvider::new("default", "example")?);
+// Register tables and perform committed operations.
+ctx.flush()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The host must implement `wasi:keyvalue/store@0.2.0-draft2` and
+`wasi:keyvalue/batch@0.2.0-draft2`; `ctx.flush()` is the explicit checkpoint
+boundary. See the [key-value provider guide](docs/wasi/wasi-key-value-memory-provider.md).
 
 ### Component Model (WIT)
 
