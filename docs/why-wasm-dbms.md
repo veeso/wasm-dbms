@@ -43,7 +43,9 @@ wasm-dbms is a fourth option: a relational engine designed for the sandbox from 
 - **Storage is a trait, not a filesystem.** The engine reads and writes 64 KiB pages, the same size as a WASM memory
   page, through the [`MemoryProvider`](./technical/memory.md) trait. The same engine runs on the heap for tests, on a
   file through [WASI](./wasi/wasi-memory-provider.md), on Internet Computer stable memory through
-  [ic-dbms](https://github.com/veeso/ic-dbms), or on any storage you implement the trait for.
+  [ic-dbms](https://github.com/veeso/ic-dbms), or on any storage you implement the trait for. WASI hosts with durable
+  key-value storage can use the [draft2 key-value provider](./wasi/wasi-key-value-memory-provider.md) without a
+  filesystem preopen.
 - **The schema is Rust code.** Tables are structs with derive macros. Records, insert requests and update requests are
   generated types, so a wrong column type is a compile error and no query string is parsed at runtime.
 - **It is relational, not key-value.** Foreign keys with cascade and restrict behaviors, joins, ACID transactions,
@@ -63,16 +65,16 @@ wasm-dbms is a fourth option: a relational engine designed for the sandbox from 
 The table below reflects the state of each project in October 2026. If something is out of date, please
 [open an issue](https://github.com/veeso/wasm-dbms/issues).
 
-| Option                    | Engine language | How you query                 | Where the data lives                                         | Where it runs                             |
-| ------------------------- | --------------- | ----------------------------- | ------------------------------------------------------------ | ----------------------------------------- |
-| **wasm-dbms**             | Rust            | Typed Rust API, WIT interface | Any `MemoryProvider`: heap, file, IC stable memory, your own | Any WASM runtime                          |
-| SQLite compiled to WASM   | C               | SQL                           | Memory, OPFS, or files through WASI                          | Browsers, WASI runtimes                   |
-| Turso Database            | Rust            | SQL (SQLite compatible)       | SQLite file format                                           | Native, browsers through WASM bindings    |
-| GlueSQL                   | Rust            | SQL, query builder            | Swappable storages                                           | Native, browsers and Node.js              |
-| DuckDB-Wasm               | C++             | SQL (analytics)               | Browser memory, remote files                                 | Browsers                                  |
-| PGlite                    | C               | SQL (Postgres)                | Memory, IndexedDB, filesystem                                | Browsers, Node.js, Bun                    |
-| Embedded key-value stores | Rust            | Get, put, range               | File or custom backend                                       | Native targets, custom backends elsewhere |
-| Host-provided storage     | Host specific   | Host SQL or key-value API     | Outside the module, managed by the host                      | That host only                            |
+| Option                    | Engine language | How you query                 | Where the data lives                                                    | Where it runs                             |
+| ------------------------- | --------------- | ----------------------------- | ----------------------------------------------------------------------- | ----------------------------------------- |
+| **wasm-dbms**             | Rust            | Typed Rust API, WIT interface | Any `MemoryProvider`: heap, file, key-value, IC stable memory, your own | Any WASM runtime                          |
+| SQLite compiled to WASM   | C               | SQL                           | Memory, OPFS, or files through WASI                                     | Browsers, WASI runtimes                   |
+| Turso Database            | Rust            | SQL (SQLite compatible)       | SQLite file format                                                      | Native, browsers through WASM bindings    |
+| GlueSQL                   | Rust            | SQL, query builder            | Swappable storages                                                      | Native, browsers and Node.js              |
+| DuckDB-Wasm               | C++             | SQL (analytics)               | Browser memory, remote files                                            | Browsers                                  |
+| PGlite                    | C               | SQL (Postgres)                | Memory, IndexedDB, filesystem                                           | Browsers, Node.js, Bun                    |
+| Embedded key-value stores | Rust            | Get, put, range               | File or custom backend                                                  | Native targets, custom backends elsewhere |
+| Host-provided storage     | Host specific   | Host SQL or key-value API     | Outside the module, managed by the host                                 | That host only                            |
 
 ### SQLite Compiled to WASM
 

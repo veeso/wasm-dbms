@@ -1,0 +1,6 @@
+package wasm-dbms:key-value-memory;
+
+world key-value-memory {
+    import wasi:keyvalue/store@0.2.0-draft2;
+    import wasi:keyvalue/batch@0.2.0-draft2;
+}

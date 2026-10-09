@@ -197,7 +197,11 @@ assert!(users.iter().any(|u| u.id == new_user.id));
 
 ### Durability
 
-Committed transactions persist in storage. When using a persistent memory provider (e.g., the WASI file-backed provider), data survives restarts.
+Committed transactions persist in the provider's logical memory. With the
+WASI file provider, writes reach the file during normal provider operations.
+With `WasiKeyValueMemoryProvider`, call `ctx.flush()` after the commit to
+publish the checkpoint; a transaction commit alone does not guarantee that a
+fresh component instance sees the data after restart. See the [key-value provider guide](../wasi/wasi-key-value-memory-provider.md).
 
 ---
 

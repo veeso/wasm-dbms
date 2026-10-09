@@ -16,6 +16,8 @@ use wasmtime::{Config, Engine, Result, Store};
 use wasmtime_wasi::p2::add_to_linker_sync;
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
+mod keyvalue;
+
 // Generate host-side bindings from the WIT definition.
 //
 // The `dbms` world exports a `database` interface with `select`, `insert`,
@@ -100,6 +102,7 @@ impl Drop for DemoWorkDir {
 struct HostState {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
+    keyvalue: keyvalue::KeyValueState,
 }
 
 impl WasiView for HostState {
@@ -224,6 +227,7 @@ fn main() -> Result<()> {
     // 2. Linker with WASI host functions.
     let mut linker: Linker<HostState> = Linker::new(&engine);
     add_to_linker_sync(&mut linker)?;
+    keyvalue::add_to_linker(&mut linker, |state| &mut state.keyvalue)?;
 
     // 3. WASI context with the demo directory preopened as "/".
     let mut wasi_builder = WasiCtxBuilder::new();
@@ -234,6 +238,7 @@ fn main() -> Result<()> {
     let state = HostState {
         wasi_ctx,
         resource_table: ResourceTable::new(),
+        keyvalue: keyvalue::KeyValueState::new(keyvalue::KeyValueBackend::new("default")),
     };
     let mut store = Store::new(&engine, state);
 

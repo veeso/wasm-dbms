@@ -1,0 +1,37 @@
+/// A keyvalue interface that provides batch operations.
+///
+/// A batch operation is an operation that operates on multiple keys at once.
+///
+/// Batch operations are useful for reducing network round-trip time. For example, if you want to
+/// get the values associated with 100 keys, you can either do 100 get operations or do 1 batch get
+/// operation. The batch operation is faster because it only needs to make 1 network call instead
+/// of 100.
+///
+/// A batch operation does not guarantee atomicity, meaning that if the batch operation fails, some
+/// of the keys may have been modified and some may not.
+interface batch {
+    use store.{bucket, error};
+
+    /// Get the key-value pairs associated with the keys in the store. It returns a list of
+    /// key-value pairs, one for each key requested.
+    ///
+    /// The returned list contains an entry for every key provided. If a key does not exist in the
+    /// store, its corresponding value will be `none`.
+    ///
+    /// If any other error occurs, it returns an `Err(error)`.
+    get-many: func(bucket: borrow<bucket>, keys: list<string>) -> result<list<tuple<string, option<list<u8>>>>, error>;
+
+    /// Set the values associated with the keys in the store. If the key already exists in the store,
+    /// it overwrites the value.
+    ///
+    /// The key-value pairs are not guaranteed to be set in the order they are provided.
+    ///
+    /// If any of the keys do not exist in the store, it creates a new key-value pair.
+    ///
+    /// If any other error occurs, it returns an `Err(error)`. When an error occurs, it does not
+    /// rollback the key-value pairs that were already set.
+    set-many: func(bucket: borrow<bucket>, key-values: list<tuple<string, list<u8>>>) -> result<_, error>;
+
+    /// Delete the key-value pairs associated with the keys in the store.
+    delete-many: func(bucket: borrow<bucket>, keys: list<string>) -> result<_, error>;
+}

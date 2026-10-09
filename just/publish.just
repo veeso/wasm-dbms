@@ -33,10 +33,13 @@ publish_wasm_dbms_sql: (_publish "wasm-dbms-sql")
 
 # Publish all WASI-specific crates in dependency order
 [group('publish')]
-publish_wasi_dbms_all: publish_wasi_dbms_memory
+publish_wasi_dbms_all: publish_wasi_dbms_memory publish_wasi_dbms_key_value_memory
 
 [group('publish')]
 publish_wasi_dbms_memory: (_publish "wasi-dbms-memory")
+
+[group('publish')]
+publish_wasi_dbms_key_value_memory: (_publish "wasi-dbms-key-value-memory")
 
 # Publish a crate with retry logic to handle registry lag
 [private]

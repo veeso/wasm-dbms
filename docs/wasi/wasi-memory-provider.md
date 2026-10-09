@@ -66,6 +66,9 @@ size must be a multiple of 64 KiB; otherwise `WasiMemoryProvider::new` returns a
 
 The parent directory must already exist before creating the provider.
 
+For hosts with persistent key-value storage instead of a filesystem, use the
+[WASI Key-Value Memory Provider](./wasi-key-value-memory-provider.md).
+
 ### Using with DbmsContext
 
 Pass the provider directly to `DbmsContext`:
@@ -136,9 +139,10 @@ across runtimes.
 
 ## Comparison with Other Providers
 
-| Provider             | Use case        | Backing storage                |
-| -------------------- | --------------- | ------------------------------ |
-| `WasiMemoryProvider` | WASI production | Single flat file on filesystem |
-| `HeapMemoryProvider` | Testing         | In-process `Vec<u8>`           |
+| Provider                     | Use case            | Backing storage                |
+| ---------------------------- | ------------------- | ------------------------------ |
+| `WasiMemoryProvider`         | WASI production     | Single flat file on filesystem |
+| `HeapMemoryProvider`         | Testing             | In-process `Vec<u8>`           |
+| `WasiKeyValueMemoryProvider` | WASI key-value host | Draft2 bucket with checkpoints |
 
 Both share the same page layout, so data is portable across implementations.

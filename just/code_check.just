@@ -53,3 +53,17 @@ check:
   just doc
   just deny
   just test
+
+# Verify the key-value guest component's resolved imports and exports.
+[group('code-check')]
+check_wasm_dbms_example_key_value_wit: build_wasm_dbms_example_key_value
+  #!/usr/bin/env bash
+  set -euo pipefail
+  wit="$(wasm-tools component wit "{{WASM_DIR}}/wasm-dbms-example-guest-key-value.wasm")"
+  printf '%s\n' "$wit"
+  grep -Fq 'import wasi:keyvalue/store@0.2.0-draft2;' <<<"$wit"
+  grep -Fq 'import wasi:keyvalue/batch@0.2.0-draft2;' <<<"$wit"
+  if grep -Eq 'import wasi:filesystem|import wasi:keyvalue/(atomics|atomic)' <<<"$wit"; then
+    echo 'key-value guest has a forbidden persistence import' >&2
+    exit 1
+  fi
