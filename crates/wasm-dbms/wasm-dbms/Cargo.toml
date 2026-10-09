@@ -14,6 +14,7 @@ rust-version = { workspace = true }
 description = "Runtime-agnostic DBMS engine for WASM environments"
 
 [features]
+access-stats = []
 default = []
 sql = ["wasm-dbms-api/sql"]
 

@@ -10,7 +10,7 @@ const PAGE_SIZE: usize = 65_536; // 64 KiB, matches WASM_PAGE_SIZE
 /// Unlike `HeapMemoryProvider` (contiguous `Vec<u8>`), this avoids
 /// reallocation overhead on grow — each page is an independent
 /// heap allocation keyed by page number.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct HashMapMemoryProvider {
     pages: HashMap<u64, Box<[u8; PAGE_SIZE]>>,
     num_pages: u64,

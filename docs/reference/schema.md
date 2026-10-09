@@ -297,6 +297,11 @@ pub struct Product {
 Fields sharing the same `group` name form a composite index, with columns ordered by field declaration order. In the example above, the composite index covers `(category, brand)`.
 The primary key can be a member of a composite index.
 
+Queries use a composite index from its first column onward: equality on the
+leading columns, optionally followed by a range on the next column. A condition
+on a later column alone cannot use the index. See
+[Composite Indexes](../guides/querying.md#composite-indexes).
+
 Indexes with the same column list are created once: an `#[index]` on the primary key or on a
 `#[unique]` field (which already has an implicit index) adds nothing.
 

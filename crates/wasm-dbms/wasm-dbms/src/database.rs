@@ -1,12 +1,15 @@
 //! Core DBMS database struct providing CRUD and transaction operations.
 
+mod access_planner;
 mod aggregate;
 mod filter_analyzer;
 mod index_reader;
 mod migration;
+mod plan_executor;
 
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
+use std::ops::ControlFlow;
 
 use wasm_dbms_api::prelude::{
     AggregateFunction, AggregatedRow, ColumnDef, Database, DbmsError, DbmsResult, DeleteBehavior,
@@ -17,9 +20,10 @@ use wasm_dbms_api::prelude::{
 use wasm_dbms_memory::RecordAddress;
 use wasm_dbms_memory::prelude::{MemoryAccess, MemoryProvider, NextRecord, TableRegistry};
 
-use self::filter_analyzer::{IndexPlan, analyze_filter};
-use self::index_reader::{IndexReader, IndexSearchResult};
-use crate::context::DbmsContext;
+use self::access_planner::{AccessPath, collect_filter_columns, is_fallible, plan_filter};
+use self::index_reader::{IndexReader, IndexScan};
+use self::plan_executor::{Budget, materialize, plan_access};
+use crate::context::{AccessKind, DbmsContext};
 use crate::database::migration::snapshots;
 use crate::schema::DatabaseSchema;
 use crate::transaction::journal::{Journal, JournaledWriter};
@@ -560,40 +564,6 @@ where
         });
     }
 
-    fn execute_index_plan<MA>(
-        &self,
-        reader: &IndexReader<'_>,
-        plan: &IndexPlan,
-        mm: &mut MA,
-    ) -> DbmsResult<IndexSearchResult>
-    where
-        MA: MemoryAccess,
-    {
-        let columns = [plan.column()];
-        match plan {
-            IndexPlan::Eq { value, .. } => {
-                let key = [value.clone()];
-                reader
-                    .search_eq(&columns, &key, mm)
-                    .map_err(DbmsError::from)
-            }
-            IndexPlan::Range { start, end, .. } => {
-                let start_key = start.as_ref().map(|value| vec![value.clone()]);
-                let end_key = end.as_ref().map(|value| vec![value.clone()]);
-                reader
-                    .search_range(&columns, start_key.as_deref(), end_key.as_deref(), mm)
-                    .map_err(DbmsError::from)
-            }
-            IndexPlan::In { values, .. } => {
-                let keys: Vec<Vec<Value>> =
-                    values.iter().cloned().map(|value| vec![value]).collect();
-                reader
-                    .search_in(&columns, &keys, mm)
-                    .map_err(DbmsError::from)
-            }
-        }
-    }
-
     /// Applies the transaction `changes` to a stored row, then checks it against `filter`.
     ///
     /// Returns [`None`] when the transaction removed the row or the patched row does not match.
@@ -620,9 +590,158 @@ where
         Ok(Some(values))
     }
 
+    /// Returns the persistent addresses an access path selects, plus every
+    /// stored row the transaction updated, or `None` when the path exceeds
+    /// its budget and the caller must scan.
+    fn candidate_addresses<T, MA>(
+        &self,
+        reader: &IndexReader<'_>,
+        path: &AccessPath,
+        changes: Option<&TableOverlay>,
+        mm: &mut MA,
+    ) -> DbmsResult<Option<Vec<RecordAddress>>>
+    where
+        T: TableSchema,
+        MA: MemoryAccess,
+    {
+        let mut budget = Budget::default_limits();
+        let addresses = materialize(reader, path, &mut budget, mm)?;
+        self.ctx
+            .count_access(AccessKind::IndexEntry, budget.entries_read());
+        let Some(mut addresses) = addresses else {
+            return Ok(None);
+        };
+
+        if let Some(changes) = changes {
+            // Updated rows may have moved into the predicate from keys the
+            // path never read; fetch them by primary key and re-check them.
+            let pk_columns = [T::primary_key()];
+            let mut columns = BTreeSet::from([T::primary_key()]);
+            path.collect_constrained_columns(&mut columns);
+            for pk in changes.updated_pks(&columns) {
+                let found = reader.exact(&pk_columns, &[pk], mm)?;
+                self.ctx
+                    .count_access(AccessKind::IndexEntry, found.len() as u64);
+                addresses.extend(found);
+            }
+            addresses.sort_unstable();
+            addresses.dedup();
+        }
+        Ok(Some(addresses))
+    }
+
+    /// Serves a read from index keys alone when one index holds every column
+    /// the query needs, or returns `None`.
+    ///
+    /// Eligible reads are non-transactional, load no relations, and use a
+    /// single index range: the filter's plan when it is one range, or a full
+    /// scan of the first covering index for an unfiltered projection.
+    /// Distinct, ordering, and pagination run in the usual pipeline.
     #[expect(
         clippy::type_complexity,
-        reason = "complex return type is necessary for returning addresses and overlay PKs"
+        reason = "database rows retain their schema and value pairs"
+    )]
+    fn try_covering_select<T>(
+        &self,
+        query: &Query,
+        table_registry: &TableRegistry,
+    ) -> DbmsResult<Option<Vec<Vec<(ColumnDef, Value)>>>>
+    where
+        T: TableSchema,
+    {
+        if self.transaction.is_some() || !query.eager_relations.is_empty() {
+            return Ok(None);
+        }
+        let filter = query.filter.as_ref();
+        if filter.is_some_and(is_fallible) {
+            return Ok(None);
+        }
+        let mut needed: BTreeSet<String> = query.columns::<T>().into_iter().collect();
+        needed.extend(query.order_by.iter().map(|(column, _)| column.clone()));
+        needed.extend(query.distinct_by.iter().cloned());
+        if let Some(filter) = filter {
+            collect_filter_columns(filter, &mut needed);
+        }
+        let covers = |columns: &[&str]| {
+            needed
+                .iter()
+                .all(|column| columns.contains(&column.as_str()))
+        };
+
+        let scan = match filter {
+            Some(filter) => match plan_filter(filter, T::indexes(), T::columns()) {
+                Some(AccessPath::Scan(scan)) => scan,
+                _ => return Ok(None),
+            },
+            None => match T::indexes().iter().find(|index| covers(index.columns())) {
+                Some(index) => IndexScan::prefix(index.columns(), Vec::new()),
+                None => return Ok(None),
+            },
+        };
+        if !covers(scan.columns) {
+            return Ok(None);
+        }
+
+        if query.limit == Some(0) {
+            return Ok(Some(Vec::new()));
+        }
+        let stop_after = if query.order_by.is_empty() && query.distinct_by.is_empty() {
+            query
+                .limit
+                .map(|limit| query.offset.unwrap_or_default().saturating_add(limit))
+        } else {
+            None
+        };
+
+        // Key positions of the covered columns, in table column order.
+        let layout: Vec<(usize, ColumnDef)> = T::columns()
+            .iter()
+            .filter_map(|column| {
+                scan.columns
+                    .iter()
+                    .position(|name| *name == column.name)
+                    .map(|position| (position, *column))
+            })
+            .collect();
+        let mut rows = Vec::new();
+        let mut entries = 0u64;
+        let mut mm = self.ctx.mm.borrow_mut();
+        IndexReader::new(table_registry.index_ledger()).for_each_entry(
+            &scan,
+            &mut *mm,
+            |key, _| {
+                entries += 1;
+                let values: Vec<(ColumnDef, Value)> = layout
+                    .iter()
+                    .map(|(position, column)| (*column, key[*position].clone()))
+                    .collect();
+                if let Some(filter) = &query.filter
+                    && !self.record_matches_filter(&values, filter)?
+                {
+                    return Ok(ControlFlow::Continue(()));
+                }
+                rows.push(values);
+                Ok::<_, DbmsError>(if stop_after.is_some_and(|limit| rows.len() >= limit) {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                })
+            },
+        )?;
+        self.ctx.count_access(AccessKind::IndexEntry, entries);
+        Ok(Some(rows))
+    }
+
+    /// Selects rows through an index access path, or returns `None` when no
+    /// index helps or the path exceeds its budget.
+    ///
+    /// Stored rows are patched with the transaction's changes, inserted rows
+    /// are added, and each visible primary key is returned once. Infallible
+    /// filters are checked in full. Fallible filters first check the visible
+    /// index key, then evaluate the legacy residual to preserve error behavior.
+    #[expect(
+        clippy::type_complexity,
+        reason = "database rows retain their schema and value pairs"
     )]
     fn try_index_select<T>(
         &self,
@@ -636,96 +755,59 @@ where
         let Some(filter) = &query.filter else {
             return Ok(None);
         };
-
-        let Some(analyzed) = analyze_filter(filter, T::indexes()) else {
+        let Some(planned) = plan_access(filter, T::indexes(), T::columns()) else {
+            return Ok(None);
+        };
+        let changes = table_overlay.table_overlay(T::table_name());
+        let mut mm = self.ctx.mm.borrow_mut();
+        let reader = IndexReader::new(table_registry.index_ledger());
+        let Some(addresses) =
+            self.candidate_addresses::<T, _>(&reader, &planned.path, changes, &mut *mm)?
+        else {
             return Ok(None);
         };
 
-        let mut mm = self.ctx.mm.borrow_mut();
-        let reader = IndexReader::new(
-            table_registry.index_ledger(),
-            table_overlay.index_overlay(T::table_name()),
-        );
-        let search_result = self.execute_index_plan(&reader, &analyzed.plan, &mut *mm)?;
-
-        let mut indexed_rows = Vec::new();
-        let pk_name = T::primary_key();
-        let table_changes = table_overlay.table_overlay(T::table_name());
-
-        for address in &search_result.addresses {
+        let legacy = is_fallible(filter);
+        let mut rows = Vec::new();
+        let mut visible_pks = HashSet::new();
+        for address in addresses {
             let record: T = table_registry
-                .read_at(*address, &mut *mm)
+                .read_at(address, &mut *mm)
                 .map_err(DbmsError::from)?;
-            let values = record.to_values();
-            let Some(pk) = values
-                .iter()
-                .find(|(column, _)| column.name == pk_name)
-                .map(|(_, value)| value)
-            else {
+            self.ctx.count_access(AccessKind::RecordFetch, 1);
+            let Some(values) = self.patch_and_filter(changes, record.to_values(), None)? else {
                 continue;
             };
-
-            if search_result.removed_pks.contains(pk) || search_result.overlay_pks.contains(pk) {
+            if legacy && !planned.path.matches_row(&values) {
                 continue;
             }
-
-            // The index only tracks indexed columns, so a stored row may still carry changes
-            // that the transaction made to other columns.
-            if let Some(values) =
-                self.patch_and_filter(table_changes, values, analyzed.remaining_filter.as_ref())?
+            if let Some(verify) = &planned.verify
+                && !self.record_matches_filter(&values, verify)?
             {
-                indexed_rows.push(values);
+                continue;
+            }
+            if changes.is_none() || visible_pks.insert(primary_key_value::<T>(&values)) {
+                rows.push(values);
             }
         }
 
-        if let Some(overlay) = table_changes {
-            let mut pending_overlay_pks = search_result.overlay_pks.clone();
-
-            for row in overlay.iter_inserted() {
-                let Some(pk) = row
-                    .iter()
-                    .find(|(column, _)| column.name == pk_name)
-                    .map(|(_, value)| value)
-                else {
-                    continue;
-                };
-
-                if !pending_overlay_pks.remove(pk) {
+        if let Some(changes) = changes {
+            for row in changes.iter_inserted() {
+                if legacy && !planned.path.matches_row(&row) {
                     continue;
                 }
-                if let Some(remaining_filter) = &analyzed.remaining_filter
-                    && !self.record_matches_filter(&row, remaining_filter)?
+                if let Some(verify) = &planned.verify
+                    && !self.record_matches_filter(&row, verify)?
                 {
                     continue;
                 }
-
-                indexed_rows.push(row);
-            }
-
-            if !pending_overlay_pks.is_empty() {
-                let pk_reader = IndexReader::new(table_registry.index_ledger(), None);
-                let pk_columns = [T::primary_key()];
-
-                for pk in pending_overlay_pks {
-                    let pk_key = [pk];
-                    let pk_lookup = pk_reader.search_eq(&pk_columns, &pk_key, &mut *mm)?;
-                    for address in pk_lookup.addresses {
-                        let record: T = table_registry
-                            .read_at(address, &mut *mm)
-                            .map_err(DbmsError::from)?;
-                        if let Some(values) = self.patch_and_filter(
-                            Some(overlay),
-                            record.to_values(),
-                            analyzed.remaining_filter.as_ref(),
-                        )? {
-                            indexed_rows.push(values);
-                        }
-                    }
+                if visible_pks.insert(primary_key_value::<T>(&row)) {
+                    rows.push(row);
                 }
             }
         }
 
-        Ok(Some(indexed_rows))
+        Ok(Some(rows))
     }
 
     /// Core select logic returning intermediate `TableColumns`.
@@ -755,9 +837,11 @@ where
         let defer_pagination = has_order_by || has_distinct;
         let mut count = 0;
 
-        if let Some(indexed_rows) =
-            self.try_index_select::<T>(&query, &table_registry, &table_overlay)?
-        {
+        let indexed_rows = match self.try_covering_select::<T>(&query, &table_registry)? {
+            Some(rows) => Some(rows),
+            None => self.try_index_select::<T>(&query, &table_registry, &table_overlay)?,
+        };
+        if let Some(indexed_rows) = indexed_rows {
             for values in indexed_rows {
                 if !defer_pagination {
                     count += 1;
@@ -779,6 +863,7 @@ where
             let mut table_reader = table_overlay.reader(table_reader);
 
             while let Some(values) = table_reader.try_next()? {
+                self.ctx.count_access(AccessKind::ScannedRow, 1);
                 if let Some(filter) = &query.filter
                     && !self.record_matches_filter(&values, filter)?
                 {
@@ -933,38 +1018,41 @@ where
         // through `select()` and therefore includes the overlay. Using `overlay = None` here is
         // intentional because the atomic write path is operating on committed storage only.
         if let Some(filter) = filter
-            && let Some(analyzed) = analyze_filter(filter, T::indexes())
+            && let Some(planned) = plan_access(filter, T::indexes(), T::columns())
         {
-            let reader = IndexReader::new(table_registry.index_ledger(), None);
-            let search_result = self.execute_index_plan(&reader, &analyzed.plan, &mut *mm)?;
-
-            let mut records = Vec::new();
-            for address in search_result.addresses {
-                let record: T = table_registry
-                    .read_at(address, &mut *mm)
-                    .map_err(DbmsError::from)?;
-                let record_values = record.clone().to_values();
-                if let Some(remaining_filter) = &analyzed.remaining_filter
-                    && !self.record_matches_filter(&record_values, remaining_filter)?
-                {
-                    continue;
+            let reader = IndexReader::new(table_registry.index_ledger());
+            if let Some(addresses) =
+                self.candidate_addresses::<T, _>(&reader, &planned.path, None, &mut *mm)?
+            {
+                let mut records = Vec::new();
+                for address in addresses {
+                    let record: T = table_registry
+                        .read_at(address, &mut *mm)
+                        .map_err(DbmsError::from)?;
+                    self.ctx.count_access(AccessKind::RecordFetch, 1);
+                    let record_values = record.clone().to_values();
+                    if let Some(verify) = &planned.verify
+                        && !self.record_matches_filter(&record_values, verify)?
+                    {
+                        continue;
+                    }
+                    records.push((
+                        NextRecord {
+                            record,
+                            page: address.page,
+                            offset: address.offset,
+                        },
+                        record_values,
+                    ));
                 }
-                records.push((
-                    NextRecord {
-                        record,
-                        page: address.page,
-                        offset: address.offset,
-                    },
-                    record_values,
-                ));
+                return Ok(records);
             }
-
-            return Ok(records);
         }
 
         let mut table_reader = table_registry.read::<T, _>(&mut *mm);
         let mut records = vec![];
         while let Some(values) = table_reader.try_next()? {
+            self.ctx.count_access(AccessKind::ScannedRow, 1);
             let record_values = values.record.clone().to_values();
             if let Some(filter) = filter
                 && !self.record_matches_filter(&record_values, filter)?
@@ -1133,6 +1221,18 @@ fn index_key(columns: &[&str], values: &[(ColumnDef, Value)]) -> Vec<Value> {
                 .unwrap_or(Value::Null)
         })
         .collect()
+}
+
+/// Returns the primary-key value of a row of `T`, or [`Value::Null`] when absent.
+fn primary_key_value<T>(values: &[(ColumnDef, Value)]) -> Value
+where
+    T: TableSchema,
+{
+    values
+        .iter()
+        .find(|(column, _)| column.name == T::primary_key())
+        .map(|(_, value)| value.clone())
+        .unwrap_or(Value::Null)
 }
 
 impl<M> Database for WasmDbmsDatabase<'_, M>

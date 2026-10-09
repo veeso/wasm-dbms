@@ -42,9 +42,12 @@ pub(crate) struct Comment {
 pub(crate) struct Sale {
     #[primary_key]
     pub id: Uint32,
+    #[index(group = "idx_category_region")]
     pub category: Text,
+    #[index(group = "idx_category_region")]
     pub region: Text,
     pub quantity: Uint32,
+    #[index]
     pub bonus: Nullable<Uint32>,
     pub price: Decimal,
 }

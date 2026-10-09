@@ -11,6 +11,8 @@ use super::sort_values_with_direction;
 use crate::prelude::{DbmsContext, WasmDbmsDatabase};
 use crate::schema::DatabaseSchema as _;
 
+mod index_planning;
+
 #[derive(Debug, Table, Clone, PartialEq, Eq)]
 #[table = "users"]
 pub struct User {
@@ -4977,4 +4979,38 @@ fn transaction_primary_key_lookup_returns_reinserted_row_after_delete() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0][1].1, Value::Text(Text("Bob".to_string())));
+}
+
+#[test]
+fn test_access_stats_distinguish_index_fetches_from_scans() {
+    let ctx = setup_name_indexed();
+    let db = WasmDbmsDatabase::oneshot(&ctx, NameIndexedTestSchema);
+    insert_name_indexed_user(&db, 1, "alice", 20);
+    insert_name_indexed_user(&db, 2, "bob", 25);
+    insert_name_indexed_user(&db, 3, "alice", 30);
+
+    ctx.reset_access_stats();
+    assert_eq!(select_name_indexed(&db, name_eq("alice")).len(), 2);
+    assert_eq!(
+        ctx.access_stats(),
+        crate::AccessStats {
+            record_fetches: 2,
+            scanned_rows: 0,
+            index_entries: 2,
+        }
+    );
+
+    ctx.reset_access_stats();
+    assert_eq!(
+        select_name_indexed(&db, Filter::eq("age", Value::Uint32(Uint32(25)))).len(),
+        1
+    );
+    assert_eq!(
+        ctx.access_stats(),
+        crate::AccessStats {
+            record_fetches: 0,
+            scanned_rows: 3,
+            index_entries: 0,
+        }
+    );
 }
