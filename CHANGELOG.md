@@ -6,17 +6,31 @@ All notable changes to this project are documented in this file.
 
 Released on 2026-10-10
 
+### Breaking changes
+
+- **dbms:** execute joins with a hash join into JoinResultSet (#182)
+
+> Database::select_join and DatabaseSchema::select_join return DbmsResult<JoinResultSet> instead of DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>>. Iterate the result with for row in &result and row.iter(), or resolve a column once with column_index and index result.rows. SqlResult::Rows is unchanged.
+
 ### Added
 
 - **wasi:** add key-value memory provider (#177)
 
 > Persist cached database pages through standard WASI store and batch interfaces. Publish recoverable checkpoints and support file snapshot interchange, restart tests, and storage guides.
 
+- Breaking: **dbms:** execute joins with a hash join into JoinResultSet (#182)
+
+> The join engine compared every left row with every right row and cloned both rows for each match, so a join cost grew with the product of the two table sizes and 10,000 by 10,000 rows took over half a second for 10,000 output rows. On top of that the result repeated a JoinColumnDef with owned strings in every cell, which alone cost a quarter of the join time. Each join clause now builds a hash table over the right rows and probes it once per left row, intermediate rows are kept as row indices until filter, ordering, offset and limit have run, and select_join returns a JoinResultSet with the column list once and the rows as plain values. The left join keys are pushed down as an IN filter only when the right join column leads an index and the distinct key count fits the planner's 64-alternative limit; other inner and left joins scan non-null right keys once. DatabaseSchema::table_indexes exposes declared indexes. Filter gains a borrowing matches_joined_row_ref variant and the comparison benchmark gains a query/join_large case.
+
 ### Performance
 
 - **dbms:** plan composite, union, intersection, null, and covering index reads (#178)
 
 > Queries, updates, and deletes now use composite indexes from their leading columns, union index lookups for OR, intersect separate indexes for AND, read IS NULL and IS NOT NULL through indexes, and build covered projections from index keys without loading records. Candidate sets are bounded and fall back to a scan instead of truncating, every candidate is re-checked against the whole filter, and transaction changes are reconciled by visible row identity. LIKE and JSON filters keep the previous single-column behavior. A new index_planning Criterion suite and access counters measure the change against a baseline that already includes #175.
+
+### Build
+
+- bump MSRV 1.96.0
 
 ## 0.10.1
 
