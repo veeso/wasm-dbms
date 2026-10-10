@@ -202,6 +202,9 @@ pub mod referenced_tables;
 pub mod schema;
 pub mod transaction;
 
+#[cfg(any(test, feature = "access-stats"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "access-stats")))]
+pub use self::context::AccessStats;
 pub use self::context::{ContextId, DbmsContext};
 pub use self::database::WasmDbmsDatabase;
 

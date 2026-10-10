@@ -847,11 +847,14 @@ pub struct IndexTreeWalker<K: Encode + Ord> {
     entries: Vec<LeafEntry<K>>, // Current leaf's entries
     cursor: usize,              // Position within current leaf
     next_leaf: Option<Page>,    // Next leaf page for continuation
-    end_key: Option<K>,         // Optional upper bound (inclusive)
+    end_key: Option<K>,         // Optional upper bound (exclusive)
 }
 ```
 
-The walker starts at the first leaf entry `>= start_key` and advances through the
-linked-leaf chain until it reaches an entry `> end_key` (or exhausts all leaves).
-This provides efficient iteration for range queries without revisiting internal
-nodes.
+The walker starts at the first leaf entry `>= start_key` and advances through
+the linked-leaf chain until it reaches an entry `>= end_key` (or exhausts all
+leaves). `next` returns record addresses; `next_entry` also returns each key,
+which prefix scans and covering reads need. Both skip emptied leaves before
+reporting the end of the scan. Prefix scans seek to the prefix (a shorter key
+sorts before every longer key sharing it) and stop as soon as the prefix
+changes, without reading the rest of the index.

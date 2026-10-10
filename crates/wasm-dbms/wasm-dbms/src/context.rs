@@ -14,6 +14,11 @@ use std::rc::{Rc, Weak};
 use wasm_dbms_api::prelude::{DbmsResult, TransactionId};
 use wasm_dbms_memory::prelude::{MemoryManager, MemoryProvider, SchemaRegistry, TableRegistryPage};
 
+mod access_stats;
+
+pub(crate) use self::access_stats::AccessKind;
+#[cfg(any(test, feature = "access-stats"))]
+pub use self::access_stats::AccessStats;
 use crate::transaction::journal::Journal;
 use crate::transaction::session::TransactionSession;
 
@@ -90,6 +95,10 @@ where
     /// per-CRUD drift gate does not block the engine's own internal reads
     /// (e.g. tightening validation that scans existing rows).
     pub(crate) migrating: Cell<bool>,
+
+    /// Storage access counters, see [`AccessStats`].
+    #[cfg(any(test, feature = "access-stats"))]
+    access_stats: Cell<AccessStats>,
 }
 
 impl<M> DbmsContext<M>
@@ -109,6 +118,8 @@ where
             journal: RefCell::new(None),
             drift: Cell::new(None),
             migrating: Cell::new(false),
+            #[cfg(any(test, feature = "access-stats"))]
+            access_stats: Cell::new(AccessStats::default()),
         }
     }
 
@@ -185,6 +196,35 @@ where
     /// Sets the migration-in-progress guard.
     pub(crate) fn set_migrating(&self, value: bool) {
         self.migrating.set(value);
+    }
+
+    /// Records `count` storage accesses of `kind`.
+    ///
+    /// Compiles to nothing unless the `access-stats` feature is enabled.
+    #[inline]
+    pub(crate) fn count_access(&self, kind: AccessKind, count: u64) {
+        #[cfg(any(test, feature = "access-stats"))]
+        {
+            let mut stats = self.access_stats.get();
+            stats.add(kind, count);
+            self.access_stats.set(stats);
+        }
+        #[cfg(not(any(test, feature = "access-stats")))]
+        let _ = (kind, count);
+    }
+
+    /// Returns the storage accesses counted since the last reset.
+    #[cfg(any(test, feature = "access-stats"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "access-stats")))]
+    pub fn access_stats(&self) -> AccessStats {
+        self.access_stats.get()
+    }
+
+    /// Resets every storage access counter to zero.
+    #[cfg(any(test, feature = "access-stats"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "access-stats")))]
+    pub fn reset_access_stats(&self) {
+        self.access_stats.set(AccessStats::default());
     }
 }
 

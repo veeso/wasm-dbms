@@ -1524,3 +1524,108 @@ fn test_aggregate_row_rejects_missing_planned_aggregate() {
         &[output],
     );
 }
+
+// -- index-planned statements ---------------------------------------------------
+
+#[test]
+fn test_select_through_composite_union_and_null_indexes() {
+    let db = TestDb::seeded();
+    let ids = |sql: &str| -> Vec<Value> { db.values(sql).into_iter().flatten().collect() };
+    assert_eq!(
+        ids("SELECT id FROM sales WHERE category = 'game' AND region = 'eu' ORDER BY id"),
+        vec![Value::from(3u32), Value::from(4u32)]
+    );
+    assert_eq!(
+        ids("SELECT id FROM sales WHERE region = 'eu' AND category = 'book'"),
+        vec![Value::from(1u32)]
+    );
+    assert_eq!(
+        ids("SELECT id FROM sales WHERE category = 'book' OR bonus IS NULL ORDER BY id"),
+        vec![Value::from(1u32), Value::from(2u32), Value::from(4u32)]
+    );
+    assert_eq!(
+        ids("SELECT id FROM sales WHERE bonus IS NOT NULL ORDER BY id"),
+        vec![Value::from(1u32), Value::from(3u32), Value::from(5u32)]
+    );
+    assert_eq!(
+        ids("SELECT id FROM sales WHERE category IN ('toy', 'game') AND region = 'us'"),
+        vec![Value::from(5u32)]
+    );
+    assert_eq!(
+        db.values("SELECT category, region FROM sales WHERE category = 'game' ORDER BY region"),
+        vec![
+            vec![text("game"), text("eu")],
+            vec![text("game"), text("eu")]
+        ]
+    );
+}
+
+#[test]
+fn test_update_and_delete_through_index_plans() {
+    let db = TestDb::seeded();
+    assert_eq!(
+        db.run("UPDATE sales SET quantity = 0 WHERE category = 'game' AND region = 'eu'"),
+        SqlResult::RowsAffected(2)
+    );
+    assert_eq!(
+        db.values("SELECT id, quantity FROM sales WHERE quantity = 0 ORDER BY id"),
+        vec![
+            vec![Value::from(3u32), Value::from(0u32)],
+            vec![Value::from(4u32), Value::from(0u32)]
+        ]
+    );
+    assert_eq!(
+        db.run("DELETE FROM sales WHERE category = 'toy' OR bonus IS NULL"),
+        SqlResult::RowsAffected(3)
+    );
+    assert_eq!(
+        db.values("SELECT id FROM sales ORDER BY id"),
+        vec![vec![Value::from(1u32)], vec![Value::from(3u32)]]
+    );
+}
+
+#[test]
+fn test_index_plans_inside_a_transaction() {
+    let db = TestDb::seeded();
+    let tx = db.begin();
+    db.run_in(Some(tx), "UPDATE sales SET category = 'game' WHERE id = 1");
+    db.run_in(Some(tx), "UPDATE sales SET bonus = NULL WHERE id = 3");
+    assert_eq!(
+        db.values_in(
+            Some(tx),
+            "SELECT id FROM sales WHERE category = 'game' AND region = 'eu' ORDER BY id"
+        ),
+        vec![
+            vec![Value::from(1u32)],
+            vec![Value::from(3u32)],
+            vec![Value::from(4u32)]
+        ]
+    );
+    assert_eq!(
+        db.values_in(
+            Some(tx),
+            "SELECT id FROM sales WHERE bonus IS NULL ORDER BY id"
+        ),
+        vec![
+            vec![Value::from(2u32)],
+            vec![Value::from(3u32)],
+            vec![Value::from(4u32)]
+        ]
+    );
+    assert_eq!(db.run_in(Some(tx), "ROLLBACK"), SqlResult::TxRollback);
+    assert_eq!(
+        db.values("SELECT id FROM sales WHERE category = 'game' AND region = 'eu' ORDER BY id"),
+        vec![vec![Value::from(3u32)], vec![Value::from(4u32)]]
+    );
+}
+
+#[test]
+fn test_invalid_like_keeps_scan_error_and_short_circuit_behavior() {
+    let db = TestDb::seeded();
+    let error = db.fail("SELECT id FROM sales WHERE quantity LIKE '1%' AND category = 'book'");
+    assert!(matches!(query_error(error), QueryError::InvalidQuery(_)));
+    assert!(
+        db.values("SELECT id FROM sales WHERE category = 'none' AND quantity LIKE '1%'")
+            .is_empty()
+    );
+}

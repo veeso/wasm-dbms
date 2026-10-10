@@ -553,6 +553,21 @@ where
     /// Nodes are read as [`NodeView`]s, so only the keys visited by binary
     /// search and the matching entries are decoded.
     pub fn search(&self, key: &K, mm: &mut impl MemoryAccess) -> MemoryResult<Vec<RecordAddress>> {
+        self.search_limited(key, usize::MAX, mm)
+            .map(Option::unwrap_or_default)
+    }
+
+    /// Looks up the pointers matching `key`, or returns `None` as soon as
+    /// more than `limit` entries match.
+    ///
+    /// Reads like [`Self::search`], but stops early, so a dense key costs at
+    /// most `limit + 1` decoded entries.
+    pub fn search_limited(
+        &self,
+        key: &K,
+        limit: usize,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<Option<Vec<RecordAddress>>> {
         let mut buf = vec![0u8; mm.page_size() as usize];
         self.find_search_start_page(key, &mut buf, mm)?;
         let mut results = Vec::new();
@@ -561,12 +576,15 @@ where
             let next_page = {
                 let view = NodeView::parse(&buf)?;
                 if !view.is_leaf() {
-                    return Ok(results);
+                    return Ok(Some(results));
                 }
                 let start = view.partition_point(|entry: &K| entry < key)?;
                 for index in start..view.len() {
                     if view.key::<K>(index)? != *key {
-                        return Ok(results);
+                        return Ok(Some(results));
+                    }
+                    if results.len() == limit {
+                        return Ok(None);
                     }
                     results.push(view.pointer(index)?);
                 }
@@ -577,7 +595,7 @@ where
                 Some(page) => {
                     mm.read_at_raw(page, 0, &mut buf)?;
                 }
-                None => return Ok(results),
+                None => return Ok(Some(results)),
             }
         }
     }
@@ -1732,6 +1750,151 @@ mod tests {
         );
         let expected_len = 12_000 - middle_keys.len() + 1;
         assert_eq!(scanned.len(), expected_len);
+    }
+
+    #[test]
+    fn test_next_entry_returns_keys_across_duplicate_runs_and_emptied_leaves() {
+        let mut mm = make_mm();
+        let mut tree = IndexTree::<Uint32>::init(&mut mm).expect("tree init failed");
+        for page in 0..6_000u32 {
+            tree.insert(Uint32(15), RecordAddress { page, offset: 0 }, &mut mm)
+                .expect("duplicate insert failed");
+        }
+        for value in 16..6_016u32 {
+            tree.insert(
+                Uint32(value),
+                RecordAddress {
+                    page: value,
+                    offset: 1,
+                },
+                &mut mm,
+            )
+            .expect("insert failed");
+        }
+
+        let chain = leaf_chain_keys(&tree, &mut mm);
+        let (_, emptied_keys) = chain
+            .iter()
+            .find(|(_, keys)| keys.first().is_some_and(|key| key.0 > 15))
+            .cloned()
+            .expect("a leaf holding only keys above the duplicate run");
+        for key in &emptied_keys {
+            tree.delete(
+                key,
+                RecordAddress {
+                    page: key.0,
+                    offset: 1,
+                },
+                &mut mm,
+            )
+            .expect("delete failed");
+        }
+
+        let mut walker = tree
+            .range_scan(&Uint32(15), None, &mut mm)
+            .expect("range scan failed");
+        let mut entries = Vec::new();
+        while let Some(entry) = walker.next_entry(&mut mm).expect("next entry failed") {
+            entries.push(entry);
+        }
+
+        let mut expected: Vec<(Uint32, RecordAddress)> = (0..6_000u32)
+            .map(|page| (Uint32(15), RecordAddress { page, offset: 0 }))
+            .collect();
+        expected.extend(
+            (16..6_016u32)
+                .filter(|value| !emptied_keys.contains(&Uint32(*value)))
+                .map(|value| {
+                    (
+                        Uint32(value),
+                        RecordAddress {
+                            page: value,
+                            offset: 1,
+                        },
+                    )
+                }),
+        );
+        assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn test_next_entry_on_empty_tree_and_beyond_the_last_key() {
+        let mut mm = make_mm();
+        let mut tree = IndexTree::<Uint32>::init(&mut mm).expect("tree init failed");
+        let mut walker = tree
+            .range_scan(&Uint32(0), None, &mut mm)
+            .expect("range scan failed");
+        assert_eq!(walker.next_entry(&mut mm).expect("next entry failed"), None);
+
+        for value in 0..100u32 {
+            tree.insert(
+                Uint32(value),
+                RecordAddress {
+                    page: value,
+                    offset: 0,
+                },
+                &mut mm,
+            )
+            .expect("insert failed");
+        }
+        let mut walker = tree
+            .range_scan(&Uint32(500), None, &mut mm)
+            .expect("range scan failed");
+        assert_eq!(walker.next_entry(&mut mm).expect("next entry failed"), None);
+
+        let mut walker = tree
+            .range_scan(&Uint32(98), Some(&Uint32(99)), &mut mm)
+            .expect("range scan failed");
+        assert_eq!(
+            walker.next_entry(&mut mm).expect("next entry failed"),
+            Some((
+                Uint32(98),
+                RecordAddress {
+                    page: 98,
+                    offset: 0
+                }
+            ))
+        );
+        assert_eq!(walker.next_entry(&mut mm).expect("next entry failed"), None);
+    }
+
+    #[test]
+    fn test_search_limited_stops_once_the_limit_is_exceeded() {
+        let mut mm = make_mm();
+        let mut tree = IndexTree::<Uint32>::init(&mut mm).expect("tree init failed");
+        for page in 0..6_000u32 {
+            tree.insert(Uint32(15), RecordAddress { page, offset: 0 }, &mut mm)
+                .expect("duplicate insert failed");
+        }
+        tree.insert(
+            Uint32(16),
+            RecordAddress {
+                page: 9_999,
+                offset: 0,
+            },
+            &mut mm,
+        )
+        .expect("insert failed");
+
+        let all = tree
+            .search_limited(&Uint32(15), 6_000, &mut mm)
+            .expect("search failed");
+        assert_eq!(all.map(|hits| hits.len()), Some(6_000));
+        assert_eq!(
+            tree.search_limited(&Uint32(15), 5_999, &mut mm)
+                .expect("search failed"),
+            None
+        );
+        assert_eq!(
+            tree.search_limited(&Uint32(16), 0, &mut mm)
+                .expect("search failed"),
+            None
+        );
+        assert_eq!(
+            tree.search_limited(&Uint32(17), 0, &mut mm)
+                .expect("search failed"),
+            Some(vec![])
+        );
     }
 
     #[test]

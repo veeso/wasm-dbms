@@ -42,7 +42,11 @@
   - [Index-Accelerated Queries](#index-accelerated-queries)
     - [How Indexes Improve Queries](#how-indexes-improve-queries)
     - [Which Filters Use Indexes](#which-filters-use-indexes)
-    - [Residual Filters](#residual-filters)
+    - [Composite Indexes](#composite-indexes)
+    - [OR and AND Across Indexes](#or-and-and-across-indexes)
+    - [Null Checks on Indexed Columns](#null-checks-on-indexed-columns)
+    - [Covering Reads](#covering-reads)
+    - [When the Engine Scans Instead](#when-the-engine-scans-instead)
     - [Transaction-Aware Lookups](#transaction-aware-lookups)
 
 ---
@@ -721,7 +725,8 @@ filters as before, and the engine picks the best available index.
 
 Without indexes, every SELECT, UPDATE, and DELETE scans all records in the table. With an index
 on the filtered column, the engine navigates the B-tree to locate matching records directly,
-then loads only those records from memory.
+then loads only those records from memory. Covered projections can return values from index keys
+without loading record pages.
 
 ```rust
 #[derive(Debug, Table, Clone, PartialEq, Eq)]
@@ -744,42 +749,92 @@ let users = database.select::<User>(query)?;
 
 ### Which Filters Use Indexes
 
-The filter analyzer extracts an index plan from the leftmost AND-chain of conditions on
-indexed columns:
+The planner reads the conditions combined with AND, in any order and nesting,
+and matches them against every index of the table:
 
-| Filter                              | Index plan               | Notes                                  |
-| ----------------------------------- | ------------------------ | -------------------------------------- |
-| `Filter::eq("col", val)`            | Exact match              | Best case — direct B-tree lookup       |
-| `Filter::ge("col", val)`            | Range scan (start bound) | Uses linked-leaf traversal             |
-| `Filter::le("col", val)`            | Range scan (end bound)   | Uses linked-leaf traversal             |
-| `Filter::gt("col", val)`            | Range scan + residual    | Range is inclusive, so GT is rechecked |
-| `Filter::lt("col", val)`            | Range scan + residual    | Range is inclusive, so LT is rechecked |
-| `Filter::in_list("col", vals)`      | Multi-lookup             | One exact match per value              |
-| AND of range filters on same column | Merged range             | e.g., `age >= 18 AND age <= 65`        |
+| Filter                                   | Index access                               |
+| ---------------------------------------- | ------------------------------------------ |
+| `Filter::eq("col", val)`                 | Exact key lookup                           |
+| `Filter::in_list("col", vals)`           | One exact lookup per distinct value        |
+| `ge`, `gt`, `le`, `lt` on one column     | Range scan with inclusive/exclusive bounds |
+| Several bounds on the same column        | The strictest bounds                       |
+| `Filter::is_null("col")`                 | Exact lookup of the NULL key               |
+| `Filter::not_null("col")`                | Range of the non-NULL keys                 |
+| `a OR b` where every branch is indexable | Union of the branch lookups                |
 
-**Filters that fall back to full scan:**
+Each result is checked against the query's filter, so an index narrows the rows
+to consider without changing which rows qualify. Contradictory conditions such
+as `price >= 5 AND price < 5` or an empty `in_list` return no rows without
+reading the table.
 
-- OR at the top level
-- NOT wrapping an indexable condition
-- Filters on non-indexed columns
-- Complex nested expressions
+### Composite Indexes
 
-### Residual Filters
+A composite index is used from its first column onward, in declaration order.
+For an index on `(category, brand, price)`:
 
-When the index narrows down the candidate set but doesn't fully satisfy the filter, the
-remaining conditions are applied as a residual check on each loaded record:
+- Equality on all three columns is one exact lookup.
+- Equality on `category` reads only that category.
+- Equality on `category` and a range on `brand` reads only that range.
+- A condition on `brand` or `price` alone cannot use the index.
+- If an index column has no condition, conditions on later columns are checked
+  on the candidate rows instead.
 
-```rust
-// Index on `email` handles the equality check.
-// `name LIKE 'A%'` is applied as a residual filter on the results.
-let filter = Filter::eq("email", Value::Text("alice@example.com".into()))
-    .and(Filter::like("name", "A%"));
-```
+A leading `in_list` expands into at most 64 index ranges. Above that limit, the
+engine falls back or uses a narrower index path available from other conditions.
+
+### OR and AND Across Indexes
+
+`a OR b` uses an index when every branch can; the results are merged and each
+row is returned once. If one branch has no usable index, the whole OR falls
+back, although another AND condition outside the OR may still use an index. At
+most 64 index ranges are read for one OR.
+
+For `a AND b` on separately indexed columns, the engine prefers a primary-key,
+unique, or complete composite equality. Otherwise it intersects useful index
+paths and keeps only rows present in each chosen path before loading records.
+
+### Null Checks on Indexed Columns
+
+`is_null` is an exact lookup. `not_null` reads the non-NULL part of the index:
+signed integers, dates, date-times, decimals, booleans, blobs, and JSON sort
+below NULL; text and unsigned integers sort above it. Nullable `Uuid` and
+custom columns have no proven range and use a table scan.
+
+### Covering Reads
+
+Outside a transaction, one index can build rows from keys alone when it
+contains every selected, filtered, ordered, and distinct column, the query
+loads no relations, and either the filter plans to one range or no filter is
+given. Duplicate keys still produce one result per record. A secondary index
+contains the primary key only when the index definition lists it.
+
+Without ordering or distinct processing, covering reads stop after enough
+matching rows have been read to satisfy the offset and limit. A zero limit
+does not read index entries.
+
+### When the Engine Scans Instead
+
+The engine uses a full table scan with the same results when no index path can
+provide a complete candidate set. This includes queries where no condition
+matches an index and the query is not eligible for an unfiltered covering read.
+For record-fetching plans, a range that would materialize more than 4,096
+candidates or a plan that would materialize more than 16,384 also triggers a
+scan unless another complete index path narrows the candidates within the
+limit. Covering reads stream index keys instead of materializing addresses.
+Results are never truncated.
+
+Filters containing `like` or JSON keep the earlier single-column index plan
+and residual evaluation so their error and short-circuit behavior stays
+unchanged.
 
 ### Transaction-Aware Lookups
 
-Inside a transaction, index lookups are merged with the transaction overlay. Records
-added in the current transaction appear in index results, and deleted records are
-excluded — even though the on-disk B-tree has not been modified yet. On commit, overlay
-changes are flushed to the persistent B-tree. On rollback, the overlay is discarded and
-the B-tree remains unchanged.
+Inside a transaction, the engine reads committed index entries, applies the
+transaction's inserts, updates, and deletes to the candidate rows, adds rows
+the transaction moved into the filter, and checks every row against the whole
+filter. Updates to columns outside the chosen index conditions do not add
+extra record fetches. Filters containing `like` or JSON first check the visible
+index key and then evaluate the earlier residual filter, preserving their
+error behavior. A row is returned once even when it moved between OR branches or
+changed its primary key. On commit the indexes are updated; on rollback they
+are unchanged.

@@ -8,6 +8,9 @@ publish = false
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+access-stats = ["wasm-dbms/access-stats"]
+
 [dependencies]
 criterion = { workspace = true }
 duckdb = { workspace = true }
@@ -21,3 +24,11 @@ wasm-dbms-memory = { workspace = true }
 [[bench]]
 name = "compare"
 harness = false
+
+[[bench]]
+name = "index_planning"
+harness = false
+
+[[bin]]
+name = "index_planning_stats"
+required-features = ["access-stats"]

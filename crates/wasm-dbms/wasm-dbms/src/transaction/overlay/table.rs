@@ -2,6 +2,8 @@
 
 mod index;
 
+use std::collections::{BTreeSet, HashSet};
+
 use wasm_dbms_api::prelude::{ColumnDef, IndexDef, Value};
 
 pub use self::index::IndexOverlay;
@@ -97,6 +99,30 @@ impl TableOverlay {
                 .delete(index_def.columns(), indexed_values, pk.clone());
         }
         self.operations.push(Operation::Delete(pk));
+    }
+
+    /// Returns the primary keys of updates affecting `columns`, each once,
+    /// in first-seen order.
+    ///
+    /// Callers include the primary-key column so key renames also reach the
+    /// original stored row, even when its first update changed other columns.
+    /// Keys of inserted rows or of renamed keys may also appear; looking them
+    /// up in committed storage is harmless.
+    pub fn updated_pks(&self, columns: &BTreeSet<&str>) -> Vec<Value> {
+        let mut seen = HashSet::new();
+        self.operations
+            .iter()
+            .filter_map(|operation| match operation {
+                Operation::Update(pk, updates)
+                    if updates.iter().any(|(column, _)| columns.contains(column)) =>
+                {
+                    Some(pk)
+                }
+                _ => None,
+            })
+            .filter(|pk| seen.insert((*pk).clone()))
+            .cloned()
+            .collect()
     }
 
     /// Extracts the values for the given indexed columns from a row.
@@ -1129,5 +1155,38 @@ mod tests {
             .index_overlay
             .removed_pks(&["name"], &[Value::Text("Alice".to_string().into())]);
         assert!(!removed.contains(&Value::Uint32(1.into())));
+    }
+
+    #[test]
+    fn test_updated_pks_lists_each_updated_key_once_in_first_seen_order() {
+        let mut overlay = TableOverlay::new(index_defs());
+        let alice = make_row(1, "alice", 30);
+        overlay.update(
+            Value::Uint32(1.into()),
+            vec![("age", Value::Uint32(31.into()))],
+            &alice,
+        );
+        overlay.update(
+            Value::Uint32(1.into()),
+            vec![("id", Value::Uint32(9.into()))],
+            &alice,
+        );
+        overlay.insert(Value::Uint32(5.into()), make_row(5, "eve", 20));
+        overlay.update(
+            Value::Uint32(9.into()),
+            vec![("age", Value::Uint32(32.into()))],
+            &alice,
+        );
+        overlay.delete(Value::Uint32(2.into()), &make_row(2, "bob", 40));
+        overlay.update(
+            Value::Uint32(3.into()),
+            vec![("name", Value::Text("renamed".to_string().into()))],
+            &make_row(3, "carol", 40),
+        );
+
+        assert_eq!(
+            overlay.updated_pks(&BTreeSet::from(["id", "age"])),
+            vec![Value::Uint32(1.into()), Value::Uint32(9.into())]
+        );
     }
 }

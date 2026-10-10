@@ -164,6 +164,22 @@ impl IndexLedger {
         IndexTree::<K>::load(root_page).search(key, mm)
     }
 
+    /// Looks up the pointers matching `key` in the index identified by
+    /// `columns`, or returns `None` when more than `limit` match.
+    pub fn search_limited<K>(
+        &self,
+        columns: &[&str],
+        key: &K,
+        limit: usize,
+        mm: &mut impl MemoryAccess,
+    ) -> MemoryResult<Option<Vec<RecordAddress>>>
+    where
+        K: Encode + Ord,
+    {
+        let root_page = self.lookup_root_page(columns)?;
+        IndexTree::<K>::load(root_page).search_limited(key, limit, mm)
+    }
+
     /// Deletes a specific key-pointer pair from the index identified by `columns`.
     pub fn delete<K>(
         &mut self,

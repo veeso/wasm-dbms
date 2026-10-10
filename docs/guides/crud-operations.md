@@ -236,6 +236,10 @@ database.update::<User>(update)?;
 
 The filter determines which records are updated:
 
+Updates find their target rows with the same index planning as queries,
+including composite indexes, OR, AND, and NULL checks; see
+[Index-Accelerated Queries](./querying.md#index-accelerated-queries).
+
 ```rust
 // Update all users with a specific domain
 let update = UserUpdateRequest::builder()
@@ -268,6 +272,10 @@ if affected == 0 {
 ### Delete with Filter
 
 Delete records matching a filter:
+
+Deletes use the same index planning as queries, including composite indexes,
+OR, AND, and NULL checks; see
+[Index-Accelerated Queries](./querying.md#index-accelerated-queries).
 
 ```rust
 use wasm_dbms_api::prelude::DeleteBehavior;
