@@ -1027,6 +1027,83 @@ mod tests {
     }
 
     #[test]
+    fn test_should_parse_nullable_field_types_from_syn_ast() {
+        let metadata = metadata_for(syn::parse_quote! {
+            #[table = "nullable"]
+            struct NullableRow {
+                #[primary_key]
+                id: Uint32,
+                #[custom_type]
+                priority: Nullable<crate::types::Priority>,
+                #[custom_type]
+                status: Status,
+            }
+        })
+        .expect("nullable custom types should be supported");
+
+        let fields: Vec<(String, bool, Option<String>)> = metadata
+            .fields
+            .iter()
+            .map(|field| {
+                (
+                    field.name.to_string(),
+                    field.nullable,
+                    field
+                        .custom_type_path
+                        .as_ref()
+                        .map(|path| path.to_token_stream().to_string()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            fields,
+            vec![
+                ("id".to_string(), false, None),
+                (
+                    "priority".to_string(),
+                    true,
+                    Some("crate :: types :: Priority".to_string())
+                ),
+                ("status".to_string(), false, Some("Status".to_string())),
+            ]
+        );
+
+        let single_argument = "`Nullable` requires a single type argument, e.g. `Nullable<Text>`";
+        let rejected: [(syn::Type, &str); 4] = [
+            (
+                syn::parse_quote! { Nullable<Text, Uint32> },
+                single_argument,
+            ),
+            (syn::parse_quote! { Nullable<'static> }, single_argument),
+            (
+                syn::parse_quote! { Nullable<(u8, u8)> },
+                "unsupported field type; expected a wasm-dbms data type such as `Uint32` or \
+                 `Nullable<Text>`",
+            ),
+            (
+                syn::parse_quote! { Nullable<Nullable<Text>> },
+                "unsupported field type; expected a wasm-dbms data type such as `Uint32` or \
+                 `Text`, or a `#[custom_type]`",
+            ),
+        ];
+
+        for (ty, expected) in rejected {
+            let ty_str = ty.to_token_stream().to_string();
+            let err = metadata_for(syn::parse_quote! {
+                #[table = "nullable_rejected"]
+                struct NullableRejected {
+                    #[primary_key]
+                    id: Uint32,
+                    value: #ty,
+                }
+            })
+            .err()
+            .unwrap_or_else(|| panic!("`{ty_str}` should be rejected"));
+            assert_eq!(err.to_string(), expected, "unexpected error for `{ty_str}`");
+        }
+    }
+
+    #[test]
     fn test_should_reject_reserved_where_clause_column() {
         let err = metadata_for(syn::parse_quote! {
             #[table = "where_clause_column"]
