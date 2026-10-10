@@ -13,13 +13,14 @@ use std::ops::ControlFlow;
 
 use wasm_dbms_api::prelude::{
     AggregateFunction, AggregatedRow, ColumnDef, Database, DbmsError, DbmsResult, DeleteBehavior,
-    Filter, ForeignFetcher, ForeignKeyDef, InsertRecord, JoinColumnDef, MigrationError,
+    Filter, ForeignFetcher, ForeignKeyDef, InsertRecord, JoinResultSet, MigrationError,
     MigrationOp, MigrationPolicy, OrderDirection, Query, QueryError, TableColumns, TableError,
     TableRecord, TableSchema, TransactionError, TransactionId, UpdateRecord, Value, ValuesSource,
 };
 use wasm_dbms_memory::RecordAddress;
 use wasm_dbms_memory::prelude::{MemoryAccess, MemoryProvider, NextRecord, TableRegistry};
 
+pub(crate) use self::access_planner::MAX_ALTERNATIVES;
 use self::access_planner::{AccessPath, collect_filter_columns, is_fallible, plan_filter};
 use self::index_reader::{IndexReader, IndexScan};
 use self::plan_executor::{Budget, materialize, plan_access};
@@ -912,11 +913,7 @@ where
     }
 
     /// Executes a join query.
-    fn select_join_inner(
-        &self,
-        table: &str,
-        query: Query,
-    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
+    fn select_join_inner(&self, table: &str, query: Query) -> DbmsResult<JoinResultSet> {
         reject_aggregate_clauses(&query)?;
         self.schema.select_join(self, table, query)
     }
@@ -1256,11 +1253,7 @@ where
         self.schema.select(self, table, query)
     }
 
-    fn select_join(
-        &self,
-        table: &str,
-        query: Query,
-    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
+    fn select_join(&self, table: &str, query: Query) -> DbmsResult<JoinResultSet> {
         self.ensure_no_drift()?;
         self.select_join_inner(table, query)
     }

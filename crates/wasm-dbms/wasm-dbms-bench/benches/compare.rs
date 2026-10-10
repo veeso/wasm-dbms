@@ -315,11 +315,12 @@ fn bench_query_filtered(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_query_join(c: &mut Criterion) {
-    let mut group = c.benchmark_group("query/join");
+/// Registers the join benchmark `group_name` for the requested table sizes.
+fn bench_join_group(c: &mut Criterion, group_name: &str, num_users: u32, num_posts: u32) {
+    let mut group = c.benchmark_group(group_name);
 
     group.bench_function("wasm_dbms", |b| {
-        let ctx = setup::setup_wasm_dbms_with_users_and_posts(100, 10_000);
+        let ctx = setup::setup_wasm_dbms_with_users_and_posts(num_users, num_posts);
         b.iter(|| {
             let db = WasmDbmsDatabase::oneshot(&ctx, BenchDatabaseSchema);
             let query = Query::builder()
@@ -331,7 +332,7 @@ fn bench_query_join(c: &mut Criterion) {
     });
 
     group.bench_function("rusqlite", |b| {
-        let conn = setup::setup_rusqlite_with_users_and_posts(100, 10_000);
+        let conn = setup::setup_rusqlite_with_users_and_posts(num_users, num_posts);
         b.iter(|| {
             let mut stmt = conn
                 .prepare_cached(
@@ -359,7 +360,7 @@ fn bench_query_join(c: &mut Criterion) {
     });
 
     group.bench_function("duckdb", |b| {
-        let conn = setup::setup_duckdb_with_users_and_posts(100, 10_000);
+        let conn = setup::setup_duckdb_with_users_and_posts(num_users, num_posts);
         b.iter(|| {
             let mut stmt = conn
                 .prepare_cached(
@@ -387,6 +388,18 @@ fn bench_query_join(c: &mut Criterion) {
     });
 
     group.finish();
+}
+
+/// Benchmarks 100 users joined with 10,000 posts.
+fn bench_query_join(c: &mut Criterion) {
+    bench_join_group(c, "query/join", 100, 10_000);
+}
+
+/// Benchmarks 10,000 users joined with 10,000 posts.
+///
+/// One post per user makes a quadratic join visible immediately.
+fn bench_query_join_large(c: &mut Criterion) {
+    bench_join_group(c, "query/join_large", 10_000, 10_000);
 }
 
 // ── Transactions ──
@@ -497,7 +510,8 @@ criterion_group!(
     config = configure_criterion();
     targets =
         bench_query_filtered,
-        bench_query_join
+        bench_query_join,
+        bench_query_join_large
 );
 
 criterion_group!(

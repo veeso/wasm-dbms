@@ -589,6 +589,8 @@ full type definitions and pipeline ordering.
 [`AggregateFunction`]: ../reference/query.md#aggregatefunction
 [`AggregatedRow`]: ../reference/query.md#aggregatedrow
 [`AggregatedValue`]: ../reference/query.md#aggregatedvalue
+[`JoinColumnDef`]: ../reference/query.md#join-results
+[`JoinResultSet`]: ../reference/query.md#join-results
 [`Value`]: ../reference/data-types.md
 
 ---
@@ -597,7 +599,11 @@ full type definitions and pipeline ordering.
 
 Joins combine rows from two or more tables based on a related column, producing a single result set with columns from all joined tables. Use joins when you need to correlate data across tables in a single flat result -- for example, listing posts alongside their author names.
 
-> **Note:** Joins require the `select_join` method, which returns rows with [`JoinColumnDef`] that include the source table name. Typed `select::<T>` rejects queries that contain joins with a `JoinInsideTypedSelect` error.
+> **Note:** Joins require the `select_join` method, which returns a
+> [`JoinResultSet`]: the [`JoinColumnDef`] of every selected column once, each
+> with its source table name, followed by the rows as plain `Vec<Value>`. Typed
+> `select::<T>` rejects queries that contain joins with a
+> `JoinInsideTypedSelect` error.
 
 ### Join Types
 
@@ -621,17 +627,43 @@ let query = Query::builder()
     .inner_join("posts", "id", "user_id")
     .build();
 
-// Use select_join since joins return rows with table provenance
-let rows = database.select_join("users", query)?;
+// select_join returns the column descriptions once, then the rows
+let result = database.select_join("users", query)?;
 
-// Each row contains columns from both "users" and "posts"
-for row in &rows {
-    for (col_def, value) in row {
+// Each JoinRow pairs every value with its column description
+for row in &result {
+    for (col_def, value) in row.iter() {
         // col_def.table tells you which table the column came from
-        println!("{}.{} = {:?}", col_def.table.as_deref().unwrap_or("?"), col_def.name, value);
+        let table = col_def.table.as_deref().unwrap_or("?");
+        println!("{table}.{column} = {value:?}", column = col_def.name.as_str());
     }
 }
+
+// Resolve column positions once when reading many rows
+let name_index = result
+    .column_index("users.name")
+    .expect("users.name is selected");
+let title_index = result
+    .column_index("posts.title")
+    .expect("posts.title is selected");
+for row in &result.rows {
+    println!(
+        "{user_name:?} wrote {post_title:?}",
+        user_name = &row[name_index],
+        post_title = &row[title_index]
+    );
+}
+
+// Or look up a value directly from a borrowed row
+if let Some(row) = result.row(0) {
+    let first_title = row.get("posts.title");
+    let any_id = row.get("id"); // unqualified: first column named "id"
+}
 ```
+
+A bare column name resolves to the first column with that name in row order,
+so qualify names that exist on both sides (`users.id` and `posts.id`).
+`result.columns` is the complete header even when `result.rows` is empty.
 
 ### Left, Right, and Full Joins
 
@@ -671,7 +703,7 @@ let query = Query::builder()
     .left_join("comments", "posts.id", "post_id")
     .build();
 
-let rows = database.select_join("users", query)?;
+let result = database.select_join("users", query)?;
 ```
 
 Joins are processed left-to-right. The second join operates on the result of the first.
@@ -703,13 +735,13 @@ Unqualified names default to the FROM table (the table passed to `select_join`).
 
 ### Joins vs Eager Loading
 
-|                           | Eager Loading             | Joins                                        |
-| ------------------------- | ------------------------- | -------------------------------------------- |
-| **Result type**           | Typed (`Vec<T>`)          | Untyped (`Vec<Vec<(JoinColumnDef, Value)>>`) |
-| **Result format**         | Separate related records  | Flat combined rows                           |
-| **API method**            | `select::<T>`             | `select_join`                                |
-| **Column disambiguation** | Not needed                | Use `table.column` syntax                    |
-| **Use case**              | Load parent with children | Correlate columns across tables              |
+|                           | Eager Loading             | Joins                                           |
+| ------------------------- | ------------------------- | ----------------------------------------------- |
+| **Result type**           | Typed (`Vec<T>`)          | `JoinResultSet` (columns once, rows of `Value`) |
+| **Result format**         | Separate related records  | Flat combined rows                              |
+| **API method**            | `select::<T>`             | `select_join`                                   |
+| **Column disambiguation** | Not needed                | Use `table.column` syntax                       |
+| **Use case**              | Load parent with children | Correlate columns across tables                 |
 
 Use **eager loading** when you want typed results with related records attached. Use **joins** when you need a flat, cross-table result set -- for example, for reporting, search, or when you need columns from multiple tables in a single row.
 

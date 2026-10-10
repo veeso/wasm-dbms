@@ -5,6 +5,7 @@ mod builder;
 mod delete;
 mod filter;
 mod join;
+mod join_result;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -14,6 +15,8 @@ pub use self::builder::QueryBuilder;
 pub use self::delete::DeleteBehavior;
 pub use self::filter::{Filter, JsonCmp, JsonFilter};
 pub use self::join::{Join, JoinType};
+#[doc(inline)]
+pub use self::join_result::{JoinResultSet, JoinRow, JoinRows};
 use crate::dbms::table::TableSchema;
 use crate::dbms::value::Value;
 use crate::memory::MemoryError;

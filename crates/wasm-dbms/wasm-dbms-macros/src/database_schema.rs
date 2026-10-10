@@ -58,6 +58,7 @@ fn impl_database_schema(
 
     let select_fn = impl_select(tables);
     let table_columns_fn = impl_table_columns(tables);
+    let table_indexes_fn = impl_table_indexes(tables);
     let static_table_name_fn = impl_static_table_name(tables);
     let aggregate_fn = impl_aggregate(tables);
     let referenced_tables_fn = impl_referenced_tables(tables);
@@ -78,6 +79,7 @@ fn impl_database_schema(
         impl #impl_generics ::wasm_dbms::prelude::DatabaseSchema<#memory> for #struct_ident #ty_generics #where_clause {
             #select_fn
             #table_columns_fn
+            #table_indexes_fn
             #static_table_name_fn
             #aggregate_fn
             #referenced_tables_fn
@@ -178,6 +180,34 @@ fn impl_table_columns(tables: &[TableEntry]) -> TokenStream2 {
             &self,
             table_name: &str,
         ) -> ::wasm_dbms_api::prelude::DbmsResult<&'static [::wasm_dbms_api::prelude::ColumnDef]> {
+            match table_name {
+                #(#match_arms)*
+                _ => Err(::wasm_dbms_api::prelude::DbmsError::Query(
+                    ::wasm_dbms_api::prelude::QueryError::TableNotFound(table_name.to_string()),
+                )),
+            }
+        }
+    }
+}
+
+fn impl_table_indexes(tables: &[TableEntry]) -> TokenStream2 {
+    let match_arms: Vec<_> = tables
+        .iter()
+        .map(|t| {
+            let entity = &t.table;
+            quote::quote! {
+                name if name == <#entity as ::wasm_dbms_api::prelude::TableSchema>::table_name() => {
+                    Ok(<#entity as ::wasm_dbms_api::prelude::TableSchema>::indexes())
+                }
+            }
+        })
+        .collect();
+
+    quote::quote! {
+        fn table_indexes(
+            &self,
+            table_name: &str,
+        ) -> ::wasm_dbms_api::prelude::DbmsResult<&'static [::wasm_dbms_api::prelude::IndexDef]> {
             match table_name {
                 #(#match_arms)*
                 _ => Err(::wasm_dbms_api::prelude::DbmsError::Query(

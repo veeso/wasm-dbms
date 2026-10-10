@@ -10,9 +10,11 @@ pub use crate::dbms::foreign_fetcher::{ForeignFetcher, NoForeignFetcher};
 pub use crate::dbms::migration::{
     ColumnChanges, Migrate, MigrationError, MigrationOp, MigrationPolicy,
 };
+#[doc(inline)]
 pub use crate::dbms::query::{
-    AggregateFunction, AggregatedRow, AggregatedValue, DeleteBehavior, Filter, Join, JoinType,
-    JsonCmp, JsonFilter, OrderDirection, Query, QueryBuilder, QueryError, QueryResult, Select,
+    AggregateFunction, AggregatedRow, AggregatedValue, DeleteBehavior, Filter, Join, JoinResultSet,
+    JoinRow, JoinRows, JoinType, JsonCmp, JsonFilter, OrderDirection, Query, QueryBuilder,
+    QueryError, QueryResult, Select,
 };
 pub use crate::dbms::sanitize::*;
 #[cfg(feature = "sql")]

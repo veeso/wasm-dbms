@@ -19,7 +19,7 @@ use super::index_reader::IndexScan;
 
 /// Largest number of index ranges one path may read for IN lists and OR
 /// branches. Larger requests fall back instead of being truncated.
-pub const MAX_ALTERNATIVES: usize = 64;
+pub(crate) const MAX_ALTERNATIVES: usize = 64;
 
 /// Candidate-producing access path over persistent indexes.
 #[derive(Debug, Clone, PartialEq, Eq)]

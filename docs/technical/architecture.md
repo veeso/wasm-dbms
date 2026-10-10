@@ -363,7 +363,7 @@ the engine.
 
 ### Select with Join
 
-```
+```text
 1. Caller invokes Database::select_join(table, query_with_joins)
               │
 2. Database session checks query.has_joins()
@@ -371,15 +371,16 @@ the engine.
 3. JoinEngine:
    a. Read all rows from FROM table
    b. For each JOIN clause:
-      - Read all rows from joined table
+      - Read rows from joined table (left keys pushed down when the join column
+        is indexed)
       - Resolve column references
-      - Execute nested-loop join
+      - Execute hash join over row indices
    c. Apply filter on combined rows
    d. Apply ordering
    e. Apply offset/limit
-   f. Flatten to output with JoinColumnDef
+   f. Build the column list once and materialize the rows
               │
-4. Return DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>>
+4. Return DbmsResult<JoinResultSet>
 ```
 
 See [Join Engine](./join-engine.md) for implementation details.
