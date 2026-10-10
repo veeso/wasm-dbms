@@ -1,12 +1,12 @@
 use wasm_dbms::prelude::{DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::{
     AggregatedRow, Blob, CandidDataTypeKind, Database as _, Date, DateTime, DbmsError, Decimal,
-    Encode as _, JoinColumnDef, Json, MigrationError, Query, QueryError, SqlError, SqlResult,
-    TableSchema as _, TransactionId, Uuid, Value,
+    Encode as _, JoinColumnDef, JoinResultSet, Json, MigrationError, Query, QueryError, SqlError,
+    SqlResult, TableSchema as _, TransactionId, Uuid, Value,
 };
 use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
-use super::{SqlEngine, aggregate_row, join_row, table_row};
+use super::{SqlEngine, aggregate_row, join_rows, table_row};
 use crate::planner::{AggregateOutput, AggregateSource, OutputColumn};
 use crate::test_schema::{TestSchema, User};
 
@@ -1484,13 +1484,13 @@ fn test_table_row_rejects_missing_planned_column() {
 
 #[test]
 #[should_panic(expected = "planned column must exist in the selected join row")]
-fn test_join_row_rejects_missing_planned_column() {
+fn test_join_rows_rejects_missing_planned_column() {
     let projection = [OutputColumn {
         table: Some("users".to_string()),
         column: "missing".to_string(),
         name: "missing".to_string(),
     }];
-    join_row(Vec::new(), Some(&projection));
+    join_rows(JoinResultSet::default(), Some(&projection));
 }
 
 #[test]

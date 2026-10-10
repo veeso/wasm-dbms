@@ -5,8 +5,8 @@ mod tests;
 
 use wasm_dbms::prelude::{DatabaseSchema, DbmsContext, WasmDbmsDatabase};
 use wasm_dbms_api::prelude::{
-    AggregatedRow, AggregatedValue, ColumnDef, Database as _, JoinColumnDef, SqlError, SqlResult,
-    SqlRow, TransactionId, Value,
+    AggregatedRow, AggregatedValue, ColumnDef, Database as _, JoinColumnDef, JoinResultSet,
+    SqlError, SqlResult, SqlRow, TransactionId, Value,
 };
 use wasm_dbms_memory::prelude::MemoryProvider;
 
@@ -164,11 +164,10 @@ impl<S> SqlEngine<S> {
                         .into_iter()
                         .map(|row| table_row(row, plan.projection.as_deref()))
                         .collect(),
-                    SelectPlan::Join(plan) => db
-                        .select_join(&plan.table, plan.query)?
-                        .into_iter()
-                        .map(|row| join_row(row, plan.projection.as_deref()))
-                        .collect(),
+                    SelectPlan::Join(plan) => join_rows(
+                        db.select_join(&plan.table, plan.query)?,
+                        plan.projection.as_deref(),
+                    ),
                     SelectPlan::Aggregate(plan) => self
                         .schema
                         .aggregate(db, &plan.table, plan.query, &plan.aggregates)?
@@ -235,21 +234,34 @@ fn table_row(row: Vec<(ColumnDef, Value)>, projection: Option<&[OutputColumn]>) 
         .collect()
 }
 
-/// Shapes a row of a join query, whose columns carry their table name.
-fn join_row(row: SqlRow, projection: Option<&[OutputColumn]>) -> SqlRow {
-    let Some(projection) = projection else {
-        return row;
+/// Shapes a join result into SQL rows, applying the select-list projection.
+///
+/// The projection is resolved once against the column list; every row is
+/// then built by index.
+fn join_rows(result: JoinResultSet, projection: Option<&[OutputColumn]>) -> Vec<SqlRow> {
+    let JoinResultSet { columns, rows } = result;
+    let outputs: Vec<(usize, JoinColumnDef)> = match projection {
+        None => columns.into_iter().enumerate().collect(),
+        Some(projection) => projection
+            .iter()
+            .map(|output| {
+                let index = columns
+                    .iter()
+                    .position(|def| def.table == output.table && def.name == output.column)
+                    .expect("planned column must exist in the selected join row");
+                let mut def = columns[index].clone();
+                def.name = output.name.clone();
+                (index, def)
+            })
+            .collect(),
     };
-    projection
-        .iter()
-        .map(|output| {
-            let (def, value) = row
+
+    rows.into_iter()
+        .map(|row| {
+            outputs
                 .iter()
-                .find(|(def, _)| def.table == output.table && def.name == output.column)
-                .expect("planned column must exist in the selected join row");
-            let mut def = def.clone();
-            def.name = output.name.clone();
-            (def, value.clone())
+                .map(|(index, def)| (def.clone(), row[*index].clone()))
+                .collect()
         })
         .collect()
 }

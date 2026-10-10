@@ -114,6 +114,22 @@ impl Filter {
         &self,
         table_groups: &[(&str, Vec<(ColumnDef, Value)>)],
     ) -> QueryResult<bool> {
+        let groups: Vec<(&str, &[(ColumnDef, Value)])> = table_groups
+            .iter()
+            .map(|(table, columns)| (*table, columns.as_slice()))
+            .collect();
+        self.matches_joined_row_ref(&groups)
+    }
+
+    /// Borrowing variant of [`Self::matches_joined_row`].
+    ///
+    /// Takes the columns of every table as slices, so a caller that keeps its
+    /// rows elsewhere can evaluate the filter without cloning them. Semantics
+    /// are identical to [`Self::matches_joined_row`].
+    pub fn matches_joined_row_ref(
+        &self,
+        table_groups: &[(&str, &[(ColumnDef, Value)])],
+    ) -> QueryResult<bool> {
         let res = match self {
             Filter::Eq(field, value) => {
                 let col_value = Self::resolve_joined_column(field, table_groups)?;
@@ -160,12 +176,14 @@ impl Filter {
                 col_value.is_some_and(|v| v.is_null())
             }
             Filter::And(left, right) => {
-                left.matches_joined_row(table_groups)? && right.matches_joined_row(table_groups)?
+                left.matches_joined_row_ref(table_groups)?
+                    && right.matches_joined_row_ref(table_groups)?
             }
             Filter::Or(left, right) => {
-                left.matches_joined_row(table_groups)? || right.matches_joined_row(table_groups)?
+                left.matches_joined_row_ref(table_groups)?
+                    || right.matches_joined_row_ref(table_groups)?
             }
-            Filter::Not(inner) => !inner.matches_joined_row(table_groups)?,
+            Filter::Not(inner) => !inner.matches_joined_row_ref(table_groups)?,
         };
 
         Ok(res)
@@ -259,7 +277,7 @@ impl Filter {
     /// more than one table, an ambiguity error is returned.
     fn resolve_joined_column<'a>(
         field: &str,
-        table_groups: &'a [(&str, Vec<(ColumnDef, Value)>)],
+        table_groups: &'a [(&str, &'a [(ColumnDef, Value)])],
     ) -> QueryResult<Option<&'a Value>> {
         if let Some((table, column)) = field.split_once('.') {
             // Qualified name: "table.column"
@@ -278,7 +296,7 @@ impl Filter {
             // Unqualified name: search all groups
             let mut found: Vec<&Value> = Vec::new();
             for (_, cols) in table_groups {
-                for (col, val) in cols {
+                for (col, val) in cols.iter() {
                     if col.name == field {
                         found.push(val);
                     }
@@ -2147,5 +2165,42 @@ mod tests {
                 Err(QueryError::InvalidQuery(message)) if message.contains("Invalid LIKE pattern")
             ));
         }
+    }
+
+    #[test]
+    fn test_should_match_joined_row_ref_over_borrowed_rows() {
+        let id_column = ColumnDef {
+            name: "id",
+            data_type: DataTypeKind::Int32,
+            auto_increment: false,
+            nullable: false,
+            primary_key: true,
+            unique: false,
+            foreign_key: None,
+            default: None,
+            renamed_from: &[],
+        };
+        let users_row = vec![(id_column, Value::Int32(1.into()))];
+        let posts_row = vec![(id_column, Value::Int32(7.into()))];
+        let groups: Vec<(&str, &[(ColumnDef, Value)])> = vec![
+            ("users", users_row.as_slice()),
+            ("posts", posts_row.as_slice()),
+        ];
+
+        assert!(
+            Filter::eq("posts.id", Value::Int32(7.into()))
+                .matches_joined_row_ref(&groups)
+                .unwrap()
+        );
+        assert!(
+            !Filter::eq("users.id", Value::Int32(7.into()))
+                .matches_joined_row_ref(&groups)
+                .unwrap()
+        );
+        assert!(
+            Filter::eq("id", Value::Int32(7.into()))
+                .matches_joined_row_ref(&groups)
+                .is_err()
+        );
     }
 }

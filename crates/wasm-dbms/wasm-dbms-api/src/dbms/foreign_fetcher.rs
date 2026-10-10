@@ -173,7 +173,7 @@ mod tests {
             &self,
             _table: &str,
             _query: crate::prelude::Query,
-        ) -> DbmsResult<Vec<Vec<(crate::prelude::JoinColumnDef, crate::prelude::Value)>>> {
+        ) -> DbmsResult<crate::prelude::JoinResultSet> {
             unimplemented!()
         }
 

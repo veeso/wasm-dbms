@@ -1,7 +1,7 @@
 use crate::error::DbmsResult;
 use crate::prelude::{
     AggregateFunction, AggregatedRow, ColumnDef, DeleteBehavior, Filter, InsertRecord,
-    JoinColumnDef, MigrationOp, MigrationPolicy, Query, TableSchema, UpdateRecord, Value,
+    JoinResultSet, MigrationOp, MigrationPolicy, Query, TableSchema, UpdateRecord, Value,
 };
 
 /// CRUD, aggregate, and transaction operations exposed by a wasm-dbms session.
@@ -76,8 +76,7 @@ pub trait Database {
     /// [`QueryError::UnknownColumn`]: crate::prelude::QueryError::UnknownColumn
     fn select_raw(&self, table: &str, query: Query) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>>;
 
-    /// Runs a join query starting from `table`, returning rows with
-    /// [`JoinColumnDef`] entries that carry the source table name.
+    /// Runs a join query starting from `table`.
     ///
     /// Use `table.column` syntax in [`field`](crate::prelude::QueryBuilder::field),
     /// [`and_where`](crate::prelude::QueryBuilder::and_where),
@@ -94,8 +93,10 @@ pub trait Database {
     ///
     /// # Returns
     ///
-    /// A `Vec` of rows, where each row is a `Vec<(JoinColumnDef, Value)>`
-    /// containing columns from every joined table in the query.
+    /// A [`JoinResultSet`]: the [`JoinColumnDef`](crate::prelude::JoinColumnDef)
+    /// of every selected column once, each carrying its source table name,
+    /// followed by one
+    /// `Vec<Value>` per row in the same column order.
     ///
     /// # Errors
     ///
@@ -108,11 +109,7 @@ pub trait Database {
     /// [`QueryError::TableNotFound`]: crate::prelude::QueryError::TableNotFound
     /// [`QueryError::AggregateClauseInSelect`]: crate::prelude::QueryError::AggregateClauseInSelect
     /// [`QueryError::InvalidQuery`]: crate::prelude::QueryError::InvalidQuery
-    fn select_join(
-        &self,
-        table: &str,
-        query: Query,
-    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>>;
+    fn select_join(&self, table: &str, query: Query) -> DbmsResult<JoinResultSet>;
 
     /// Runs an aggregate query for table `T`, computing the requested
     /// aggregate functions per group.

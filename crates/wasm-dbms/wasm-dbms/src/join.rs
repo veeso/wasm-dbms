@@ -1,25 +1,69 @@
-// Rust guideline compliant 2026-03-01
-// X-WHERE-CLAUSE, M-CANONICAL-DOCS
-
 //! Join execution engine for cross-table queries.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use wasm_dbms_api::prelude::{
-    ColumnDef, DbmsResult, JoinColumnDef, JoinType, OrderDirection, Query, Value,
+    ColumnDef, DbmsResult, Filter, JoinColumnDef, JoinResultSet, JoinType, OrderDirection, Query,
+    Value,
 };
 use wasm_dbms_memory::prelude::MemoryProvider;
 
-use crate::database::WasmDbmsDatabase;
+use crate::database::{MAX_ALTERNATIVES, WasmDbmsDatabase};
 use crate::schema::DatabaseSchema;
 
-/// A row in the joined result, organized by source table.
-type JoinedRow = Vec<(String, Vec<(ColumnDef, Value)>)>;
+/// A materialized row of one table: its column definitions and values.
+type TableRow = Vec<(ColumnDef, Value)>;
 
-/// Schema columns of every table in a joined row, in row order.
-type JoinedTableColumns = Vec<(String, &'static [ColumnDef])>;
+/// A joined row before materialization.
+///
+/// One entry per [`JoinSide`], in side order, holding the index of that
+/// side's row or `None` when the side is NULL-padded by an outer join.
+type RowRef = Vec<Option<usize>>;
 
-/// Engine that executes join queries using nested-loop join.
+/// Position of a join key: `(side index, column index)`.
+type KeyPosition = (usize, usize);
+
+/// The rows of one table taking part in a join.
+struct JoinSide {
+    /// Table name as referenced by the query.
+    table: String,
+    /// Compile-time column definitions, in row order.
+    columns: &'static [ColumnDef],
+    /// Rows loaded from the table.
+    rows: Vec<TableRow>,
+    /// A row of `NULL` values with the shape of `columns`, used to pad the
+    /// missing side of an outer join even when the table has no rows.
+    null_row: TableRow,
+}
+
+impl JoinSide {
+    fn new(table: &str, columns: &'static [ColumnDef], rows: Vec<TableRow>) -> Self {
+        Self {
+            table: table.to_string(),
+            columns,
+            rows,
+            null_row: columns
+                .iter()
+                .map(|column| (*column, Value::Null))
+                .collect(),
+        }
+    }
+
+    /// Returns the row at `index`, or the `NULL` row when the side is padded.
+    fn row(&self, index: Option<usize>) -> &[(ColumnDef, Value)] {
+        match index {
+            Some(index) => &self.rows[index],
+            None => &self.null_row,
+        }
+    }
+
+    /// Returns the position of `column` in this side's rows.
+    fn column_position(&self, column: &str) -> Option<usize> {
+        self.columns.iter().position(|def| def.name == column)
+    }
+}
+
+/// Engine that executes join queries using hash joins.
 pub struct JoinEngine<'a, Schema: ?Sized, M>
 where
     Schema: DatabaseSchema<M>,
@@ -47,14 +91,20 @@ where
     Schema: DatabaseSchema<M>,
     M: MemoryProvider,
 {
-    /// Executes a join query using nested-loop join.
+    /// Executes a join query.
+    ///
+    /// Every join clause is processed left to right with a hash join: a hash
+    /// table is built over the right rows keyed by the join column and probed
+    /// once per accumulated left row. Rows stay as index tuples until filter,
+    /// ordering, offset, and limit have run; the column list is built once
+    /// and values are cloned once, into [`JoinResultSet::rows`].
     pub fn join(
         &self,
         dbms: &WasmDbmsDatabase<'_, M>,
         from_table: &str,
         query: Query,
-    ) -> DbmsResult<Vec<Vec<(JoinColumnDef, Value)>>> {
-        let mut table_columns: JoinedTableColumns = vec![(
+    ) -> DbmsResult<JoinResultSet> {
+        let mut table_columns: Vec<(String, &'static [ColumnDef])> = vec![(
             from_table.to_string(),
             self.schema.table_columns(from_table)?,
         )];
@@ -73,14 +123,11 @@ where
         let from_rows = self
             .schema
             .select(dbms, from_table, Query::builder().all().build())?;
-
-        let mut joined_rows: Vec<JoinedRow> = from_rows
-            .into_iter()
-            .map(|row| vec![(from_table.to_string(), row)])
+        let mut sides: Vec<JoinSide> =
+            vec![JoinSide::new(from_table, table_columns[0].1, from_rows)];
+        let mut rows: Vec<RowRef> = (0..sides[0].rows.len())
+            .map(|index| vec![Some(index)])
             .collect();
-        // Schema columns of the tables already in `joined_rows`, used to
-        // NULL-pad outer joins even when one side has no rows.
-        let mut left_tables: JoinedTableColumns = vec![table_columns[0].clone()];
 
         for (join_index, join) in query.joins.iter().enumerate() {
             let (left_table, left_col) = self.resolve_column_ref(&join.left_column, from_table);
@@ -94,74 +141,106 @@ where
                 JoinType::Full => (true, true),
             };
 
+            // A left table or column outside the query scope never matches,
+            // which keeps the pre-existing semantics instead of erroring.
+            let left_key: Option<KeyPosition> = sides
+                .iter()
+                .position(|side| side.table == left_table)
+                .and_then(|side_index| {
+                    sides[side_index]
+                        .column_position(left_col)
+                        .map(|column_index| (side_index, column_index))
+                });
+
+            let right_columns = table_columns[join_index + 1].1;
             let right_rows = self.load_join_right_rows(
                 dbms,
-                &joined_rows,
+                &sides,
+                &rows,
+                left_key,
                 &join.table,
-                &left_table,
-                left_col,
                 right_col,
                 keep_unmatched_right,
             )?;
+            let right_side = JoinSide::new(&join.table, right_columns, right_rows);
 
-            let right_columns = table_columns[join_index + 1].1;
-
-            joined_rows = self.nested_loop_join(
-                joined_rows,
-                &right_rows,
-                &left_tables,
-                &join.table,
-                right_columns,
-                &left_table,
-                left_col,
+            rows = self.hash_join(
+                &sides,
+                &rows,
+                left_key,
+                &right_side,
                 right_col,
                 keep_unmatched_left,
                 keep_unmatched_right,
             );
-            left_tables.push((join.table.clone(), right_columns));
+            sides.push(right_side);
         }
 
         if let Some(filter) = &query.filter {
-            let mut filtered_rows = Vec::with_capacity(joined_rows.len());
-            for row in joined_rows {
-                let groups: Vec<(&str, Vec<(ColumnDef, Value)>)> = row
-                    .iter()
-                    .map(|(t, cols)| (t.as_str(), cols.clone()))
-                    .collect();
+            let mut filtered_rows = Vec::with_capacity(rows.len());
+            for row in rows {
+                let groups = self.row_groups(&sides, &row);
                 // Evaluation errors (ambiguous or out-of-scope columns, invalid
                 // operands) are query errors, not non-matching rows.
-                if filter.matches_joined_row(&groups)? {
+                if filter.matches_joined_row_ref(&groups)? {
                     filtered_rows.push(row);
                 }
             }
-            joined_rows = filtered_rows;
+            rows = filtered_rows;
         }
 
         for (column, direction) in query.order_by.iter().rev() {
-            self.sort_joined_rows(&mut joined_rows, column, *direction);
+            self.sort_joined_rows(&sides, &mut rows, column, *direction);
         }
 
         let offset = query.offset.unwrap_or_default();
         if offset > 0 {
-            if offset >= joined_rows.len() {
-                joined_rows.clear();
+            if offset >= rows.len() {
+                rows.clear();
             } else {
-                joined_rows = joined_rows.into_iter().skip(offset).collect();
+                rows.drain(..offset);
             }
         }
 
         if let Some(limit) = query.limit {
-            joined_rows.truncate(limit);
+            rows.truncate(limit);
         }
 
-        let results = joined_rows
+        let selected: Vec<Vec<bool>> = sides
+            .iter()
+            .map(|side| self.selected_columns(side, &query))
+            .collect();
+        let columns: Vec<JoinColumnDef> = sides
+            .iter()
+            .zip(&selected)
+            .flat_map(|(side, mask)| {
+                side.columns
+                    .iter()
+                    .zip(mask)
+                    .filter(|(_, is_selected)| **is_selected)
+                    .map(|(column, _)| {
+                        let mut def = JoinColumnDef::from(*column);
+                        def.table = Some(side.table.clone());
+                        def
+                    })
+            })
+            .collect();
+        let width = columns.len();
+        let rows = rows
             .into_iter()
-            .map(|row| self.flatten_joined_row(row, &query))
-            .collect::<DbmsResult<Vec<_>>>()?;
+            .map(|row| self.materialize_row(&sides, &selected, width, &row))
+            .collect();
 
-        Ok(results)
+        Ok(JoinResultSet { columns, rows })
     }
 
+    /// Loads the rows of `right_table` that can take part in the join.
+    ///
+    /// Right and full joins need every right row. For inner and left joins
+    /// the distinct left keys are pushed down as an `IN` filter when the join
+    /// column leads an index of the right table and the planner can keep the
+    /// list within its alternative limit. Other rows are loaded by physical
+    /// scan, omitting NULL keys because they cannot match.
     #[expect(
         clippy::too_many_arguments,
         reason = "arguments are necessary for loading right table rows based on join conditions"
@@ -169,31 +248,46 @@ where
     fn load_join_right_rows(
         &self,
         dbms: &WasmDbmsDatabase<'_, M>,
-        left_rows: &[JoinedRow],
+        sides: &[JoinSide],
+        rows: &[RowRef],
+        left_key: Option<KeyPosition>,
         right_table: &str,
-        left_table: &str,
-        left_col: &str,
         right_col: &str,
         keep_unmatched_right: bool,
-    ) -> DbmsResult<Vec<Vec<(ColumnDef, Value)>>> {
-        let unique_join_values: Vec<Value> = {
-            let mut seen = HashSet::new();
-            left_rows
-                .iter()
-                .filter_map(|row| self.get_column_value(row, left_table, left_col).cloned())
-                .filter(|value| !value.is_null())
-                .filter(|value| seen.insert(value.clone()))
-                .collect()
-        };
-
+    ) -> DbmsResult<Vec<TableRow>> {
         if keep_unmatched_right {
             return self
                 .schema
                 .select(dbms, right_table, Query::builder().all().build());
         }
 
+        let Some((side_index, column_index)) = left_key else {
+            return Ok(Vec::new());
+        };
+        let side = &sides[side_index];
+        let mut seen: HashSet<&Value> = HashSet::new();
+        let unique_join_values: Vec<Value> = rows
+            .iter()
+            .filter_map(|row| row[side_index])
+            .map(|row_index| &side.rows[row_index][column_index].1)
+            .filter(|value| !value.is_null())
+            .filter(|value| seen.insert(*value))
+            .cloned()
+            .collect();
+
         if unique_join_values.is_empty() {
             return Ok(Vec::new());
+        }
+
+        if !self.should_push_down_join_keys(right_table, right_col, unique_join_values.len()) {
+            return self.schema.select(
+                dbms,
+                right_table,
+                Query::builder()
+                    .all()
+                    .filter(Some(Filter::ne(right_col, Value::Null)))
+                    .build(),
+            );
         }
 
         self.schema.select(
@@ -201,80 +295,94 @@ where
             right_table,
             Query::builder()
                 .all()
-                .filter(Some(wasm_dbms_api::prelude::Filter::in_list(
-                    right_col,
-                    unique_join_values,
-                )))
+                .filter(Some(Filter::in_list(right_col, unique_join_values)))
                 .build(),
         )
     }
 
-    /// Unified nested-loop join.
+    /// Returns whether an `IN` filter can use a leading index without
+    /// exceeding the access planner's maximum number of alternatives.
+    fn should_push_down_join_keys(&self, table: &str, column: &str, key_count: usize) -> bool {
+        key_count <= MAX_ALTERNATIVES && self.is_indexed_column(table, column)
+    }
+
+    /// Returns whether `column` leads an index of `table`.
+    fn is_indexed_column(&self, table: &str, column: &str) -> bool {
+        self.schema
+            .table_indexes(table)
+            .map(|indexes| {
+                indexes
+                    .iter()
+                    .any(|index| index.columns().first() == Some(&column))
+            })
+            .unwrap_or(false)
+    }
+
+    /// Joins `rows` with `right_side` on `left_key = right_col` using a hash
+    /// table built over the right rows.
     ///
-    /// Unmatched rows kept by an outer join are padded with `NULL` values for
-    /// every schema column of the missing side, taken from `left_tables` and
-    /// `right_columns` rather than from sample rows, so the row shape stays
-    /// complete when that side is empty.
-    #[allow(clippy::too_many_arguments)]
-    fn nested_loop_join(
+    /// Matching rows are emitted in left-row order and, within one left row,
+    /// in right-row order. `NULL` keys never match. Unmatched rows kept by an
+    /// outer join get `None` for the missing side, which [`JoinSide::row`]
+    /// turns into `NULL` values.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arguments describe both join sides and the outer-join flags"
+    )]
+    fn hash_join(
         &self,
-        left_rows: Vec<JoinedRow>,
-        right_rows: &[Vec<(ColumnDef, Value)>],
-        left_tables: &[(String, &'static [ColumnDef])],
-        right_table: &str,
-        right_columns: &[ColumnDef],
-        left_table: &str,
-        left_col: &str,
+        sides: &[JoinSide],
+        rows: &[RowRef],
+        left_key: Option<KeyPosition>,
+        right_side: &JoinSide,
         right_col: &str,
         keep_unmatched_left: bool,
         keep_unmatched_right: bool,
-    ) -> Vec<JoinedRow> {
-        let mut results = Vec::new();
-        let mut right_matched = vec![false; right_rows.len()];
-
-        for left_row in &left_rows {
-            let left_value = self.get_column_value(left_row, left_table, left_col);
-            let mut matched = false;
-
-            for (i, right_row) in right_rows.iter().enumerate() {
-                let right_value = right_row
-                    .iter()
-                    .find(|(c, _)| c.name == right_col)
-                    .map(|(_, v)| v);
-
-                if let (Some(left), Some(right)) = (left_value, right_value)
-                    && !left.is_null()
-                    && !right.is_null()
-                    && left == right
-                {
-                    let mut new_row = left_row.clone();
-                    new_row.push((right_table.to_string(), right_row.clone()));
-                    results.push(new_row);
-                    right_matched[i] = true;
-                    matched = true;
+    ) -> Vec<RowRef> {
+        let mut build: HashMap<&Value, Vec<usize>> = HashMap::new();
+        if let Some(column_index) = right_side.column_position(right_col) {
+            for (row_index, row) in right_side.rows.iter().enumerate() {
+                let value = &row[column_index].1;
+                if !value.is_null() {
+                    build.entry(value).or_default().push(row_index);
                 }
             }
+        }
 
-            if keep_unmatched_left && !matched {
-                let mut new_row = left_row.clone();
-                new_row.push((
-                    right_table.to_string(),
-                    self.null_pad_columns(right_columns),
-                ));
-                results.push(new_row);
+        let mut results = Vec::with_capacity(rows.len());
+        let mut right_matched = vec![false; right_side.rows.len()];
+
+        for row in rows {
+            let left_value = left_key.and_then(|(side_index, column_index)| {
+                row[side_index].map(|row_index| &sides[side_index].rows[row_index][column_index].1)
+            });
+            let matches = left_value
+                .filter(|value| !value.is_null())
+                .and_then(|value| build.get(value));
+
+            match matches {
+                Some(right_indexes) => {
+                    for &right_index in right_indexes {
+                        let mut new_row = row.clone();
+                        new_row.push(Some(right_index));
+                        results.push(new_row);
+                        right_matched[right_index] = true;
+                    }
+                }
+                None if keep_unmatched_left => {
+                    let mut new_row = row.clone();
+                    new_row.push(None);
+                    results.push(new_row);
+                }
+                None => {}
             }
         }
 
         if keep_unmatched_right {
-            for (i, right_row) in right_rows.iter().enumerate() {
-                if !right_matched[i] {
-                    let mut new_row: JoinedRow = left_tables
-                        .iter()
-                        .map(|(table_name, columns)| {
-                            (table_name.clone(), self.null_pad_columns(columns))
-                        })
-                        .collect();
-                    new_row.push((right_table.to_string(), right_row.clone()));
+            for (right_index, matched) in right_matched.iter().enumerate() {
+                if !matched {
+                    let mut new_row: RowRef = vec![None; sides.len()];
+                    new_row.push(Some(right_index));
                     results.push(new_row);
                 }
             }
@@ -292,86 +400,99 @@ where
         }
     }
 
-    /// Finds a column value in a joined row.
-    fn get_column_value<'a>(
+    /// Returns the `(table, columns)` groups of a joined row, borrowing the
+    /// loaded rows (or the `NULL` row for a padded side).
+    fn row_groups<'a>(
         &self,
-        row: &'a JoinedRow,
-        table: &str,
-        column: &str,
-    ) -> Option<&'a Value> {
-        row.iter()
-            .find(|(t, _)| t == table)
-            .and_then(|(_, cols)| cols.iter().find(|(c, _)| c.name == column).map(|(_, v)| v))
-    }
-
-    /// Creates a NULL-padded row from a table's schema columns.
-    fn null_pad_columns(&self, columns: &[ColumnDef]) -> Vec<(ColumnDef, Value)> {
-        columns.iter().map(|col| (*col, Value::Null)).collect()
+        sides: &'a [JoinSide],
+        row: &RowRef,
+    ) -> Vec<(&'a str, &'a [(ColumnDef, Value)])> {
+        sides
+            .iter()
+            .zip(row)
+            .map(|(side, index)| (side.table.as_str(), side.row(*index)))
+            .collect()
     }
 
     /// Sorts joined rows by a column.
-    fn sort_joined_rows(&self, rows: &mut [JoinedRow], column: &str, direction: OrderDirection) {
-        let (table, col) = if let Some((t, c)) = column.split_once('.') {
-            (Some(t), c)
-        } else {
-            (None, column)
+    fn sort_joined_rows(
+        &self,
+        sides: &[JoinSide],
+        rows: &mut [RowRef],
+        column: &str,
+        direction: OrderDirection,
+    ) {
+        let (table, col) = match column.split_once('.') {
+            Some((table, col)) => (Some(table), col),
+            None => (None, column),
         };
 
         rows.sort_by(|a, b| {
-            let a_val = self.find_value_in_joined_row(a, table, col);
-            let b_val = self.find_value_in_joined_row(b, table, col);
+            let a_val = self.find_value(sides, a, table, col);
+            let b_val = self.find_value(sides, b, table, col);
 
             crate::database::sort_values_with_direction(a_val, b_val, direction)
         });
     }
 
     /// Finds a column value in a joined row, optionally scoped to a table.
-    fn find_value_in_joined_row<'a>(
+    fn find_value<'a>(
         &self,
-        row: &'a JoinedRow,
+        sides: &'a [JoinSide],
+        row: &RowRef,
         table: Option<&str>,
         column: &str,
     ) -> Option<&'a Value> {
-        if let Some(table) = table {
-            return self.get_column_value(row, table, column);
-        }
-        row.iter()
-            .flat_map(|(_, cols)| cols)
-            .find_map(|(col, value)| {
-                if col.name == column {
-                    Some(value)
-                } else {
-                    None
-                }
+        sides
+            .iter()
+            .zip(row)
+            .filter(|(side, _)| table.is_none_or(|table| side.table == table))
+            .find_map(|(side, index)| {
+                side.row(*index)
+                    .iter()
+                    .find(|(def, _)| def.name == column)
+                    .map(|(_, value)| value)
             })
     }
 
-    /// Flattens a joined row into the output format.
-    fn flatten_joined_row(
+    /// Returns, for every column of `side`, whether the query selects it.
+    ///
+    /// A column is selected when the query selects every column, its bare
+    /// name, or its `table.column` qualified name.
+    fn selected_columns(&self, side: &JoinSide, query: &Query) -> Vec<bool> {
+        let selected = query.raw_columns();
+        side.columns
+            .iter()
+            .map(|column| {
+                query.all_selected()
+                    || selected.iter().any(|field| {
+                        field.as_str() == column.name
+                            || field
+                                .strip_prefix(side.table.as_str())
+                                .and_then(|rest| rest.strip_prefix('.'))
+                                == Some(column.name)
+                    })
+            })
+            .collect()
+    }
+
+    /// Materializes one joined row, cloning each selected value exactly once.
+    fn materialize_row(
         &self,
-        row: JoinedRow,
-        query: &Query,
-    ) -> DbmsResult<Vec<(JoinColumnDef, Value)>> {
-        let mut result = Vec::new();
-
-        for (table_name, cols) in row {
-            for (col, val) in cols {
-                let mut candid_col = JoinColumnDef::from(col);
-                candid_col.table = Some(table_name.clone());
-
-                if !query.all_selected() {
-                    let selected = query.raw_columns();
-                    let qualified_name = format!("{table_name}.{col}", col = candid_col.name);
-                    if !selected.contains(&candid_col.name) && !selected.contains(&qualified_name) {
-                        continue;
-                    }
+        sides: &[JoinSide],
+        selected: &[Vec<bool>],
+        width: usize,
+        row: &RowRef,
+    ) -> Vec<Value> {
+        let mut values = Vec::with_capacity(width);
+        for ((side, mask), index) in sides.iter().zip(selected).zip(row) {
+            for ((_, value), is_selected) in side.row(*index).iter().zip(mask) {
+                if *is_selected {
+                    values.push(value.clone());
                 }
-
-                result.push((candid_col, val));
             }
         }
-
-        Ok(result)
+        values
     }
 }
 
@@ -379,12 +500,14 @@ where
 mod tests {
 
     use wasm_dbms_api::prelude::{
-        Database as _, DbmsError, Filter, InsertRecord as _, JoinColumnDef, Nullable, Query,
-        QueryError, TableSchema as _, Text, Uint32, Value,
+        Database as _, DbmsError, Filter, InsertRecord as _, JoinRow, Nullable, Query, QueryError,
+        TableSchema as _, Text, Uint32, Value,
     };
     use wasm_dbms_macros::{DatabaseSchema, Table};
     use wasm_dbms_memory::prelude::HeapMemoryProvider;
 
+    use super::JoinEngine;
+    use crate::database::MAX_ALTERNATIVES;
     use crate::prelude::{DbmsContext, WasmDbmsDatabase};
 
     // Use tables WITHOUT foreign key constraints so we can test all join
@@ -409,8 +532,20 @@ mod tests {
         pub dept_code: Nullable<Uint32>,
     }
 
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "assignments"]
+    pub struct Assignment {
+        #[primary_key]
+        pub id: Uint32,
+        pub employee_id: Uint32,
+    }
+
     #[derive(DatabaseSchema)]
-    #[tables(Department = "departments", Employee = "employees")]
+    #[tables(
+        Department = "departments",
+        Employee = "employees",
+        Assignment = "assignments"
+    )]
     pub struct TestSchema;
 
     #[derive(Debug, Table, Clone, PartialEq, Eq)]
@@ -437,6 +572,40 @@ mod tests {
         IndexedEmployee = "indexed_employees"
     )]
     pub struct IndexedJoinSchema;
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "covering_employees"]
+    pub struct CoveringEmployee {
+        #[primary_key]
+        #[index(group = "all_columns")]
+        pub id: Uint32,
+        #[index(group = "all_columns")]
+        pub name: Text,
+        #[index(group = "all_columns")]
+        pub dept_id: Uint32,
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(Department = "departments", CoveringEmployee = "covering_employees")]
+    pub struct CoveringJoinSchema;
+
+    #[derive(Debug, Table, Clone, PartialEq, Eq)]
+    #[table = "composite_indexed_employees"]
+    pub struct CompositeIndexedEmployee {
+        #[primary_key]
+        pub id: Uint32,
+        #[index(group = "department_name")]
+        pub dept_id: Uint32,
+        #[index(group = "department_name")]
+        pub name: Text,
+    }
+
+    #[derive(DatabaseSchema)]
+    #[tables(
+        Department = "departments",
+        CompositeIndexedEmployee = "composite_indexed_employees"
+    )]
+    pub struct CompositeIndexedJoinSchema;
 
     fn setup() -> DbmsContext<HeapMemoryProvider> {
         let ctx = DbmsContext::new(HeapMemoryProvider::default());
@@ -477,6 +646,15 @@ mod tests {
         db.insert::<Employee>(insert).unwrap();
     }
 
+    fn insert_assignment(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>, id: u32, employee_id: u32) {
+        let insert = AssignmentInsertRequest::from_values(&[
+            (Assignment::columns()[0], Value::Uint32(Uint32(id))),
+            (Assignment::columns()[1], Value::Uint32(Uint32(employee_id))),
+        ])
+        .unwrap();
+        db.insert::<Assignment>(insert).unwrap();
+    }
+
     fn insert_indexed_dept(db: &WasmDbmsDatabase<'_, HeapMemoryProvider>, id: u32, name: &str) {
         let insert = IndexedDepartmentInsertRequest::from_values(&[
             (IndexedDepartment::columns()[0], Value::Uint32(Uint32(id))),
@@ -508,6 +686,51 @@ mod tests {
         ])
         .unwrap();
         db.insert::<IndexedEmployee>(insert).unwrap();
+    }
+
+    fn insert_covering_emp(
+        db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+        id: u32,
+        name: &str,
+        dept_id: u32,
+    ) {
+        let insert = CoveringEmployeeInsertRequest::from_values(&[
+            (CoveringEmployee::columns()[0], Value::Uint32(Uint32(id))),
+            (
+                CoveringEmployee::columns()[1],
+                Value::Text(Text(name.to_string())),
+            ),
+            (
+                CoveringEmployee::columns()[2],
+                Value::Uint32(Uint32(dept_id)),
+            ),
+        ])
+        .unwrap();
+        db.insert::<CoveringEmployee>(insert).unwrap();
+    }
+
+    fn insert_composite_indexed_emp(
+        db: &WasmDbmsDatabase<'_, HeapMemoryProvider>,
+        id: u32,
+        dept_id: u32,
+        name: &str,
+    ) {
+        let insert = CompositeIndexedEmployeeInsertRequest::from_values(&[
+            (
+                CompositeIndexedEmployee::columns()[0],
+                Value::Uint32(Uint32(id)),
+            ),
+            (
+                CompositeIndexedEmployee::columns()[1],
+                Value::Uint32(Uint32(dept_id)),
+            ),
+            (
+                CompositeIndexedEmployee::columns()[2],
+                Value::Text(Text(name.to_string())),
+            ),
+        ])
+        .unwrap();
+        db.insert::<CompositeIndexedEmployee>(insert).unwrap();
     }
 
     #[test]
@@ -617,7 +840,7 @@ mod tests {
             .iter()
             .find(|(col, _)| col.name == "name" && col.table.as_deref() == Some("employees"))
             .expect("employee name column should exist for hr");
-        assert_eq!(emp_name.1, Value::Null);
+        assert_eq!(*emp_name.1, Value::Null);
     }
 
     #[test]
@@ -653,7 +876,7 @@ mod tests {
             .iter()
             .find(|(col, _)| col.name == "name" && col.table.as_deref() == Some("departments"))
             .expect("department name column should exist for charlie");
-        assert_eq!(dept_name.1, Value::Null);
+        assert_eq!(*dept_name.1, Value::Null);
     }
 
     #[test]
@@ -712,11 +935,13 @@ mod tests {
             .build();
         let results = db.select_join("departments", query).unwrap();
         assert_eq!(results.len(), 2);
-        let first_name = results[0]
+        let first_name = results
+            .row(0)
+            .unwrap()
             .iter()
             .find(|(col, _)| col.name == "name" && col.table.as_deref() == Some("employees"))
             .unwrap();
-        assert_eq!(first_name.1, Value::Text(Text("aaa".to_string())));
+        assert_eq!(*first_name.1, Value::Text(Text("aaa".to_string())));
     }
 
     #[test]
@@ -769,7 +994,8 @@ mod tests {
             .build();
         let results = db.select_join("departments", query).unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].len(), 2);
+        assert_eq!(results.columns.len(), 2);
+        assert_eq!(results.row(0).unwrap().len(), 2);
     }
 
     #[test]
@@ -833,19 +1059,13 @@ mod tests {
     }
 
     /// Returns the value of `table.column` in a joined row, if the column is present.
-    fn joined_value<'a>(
-        row: &'a [(JoinColumnDef, Value)],
-        table: &str,
-        column: &str,
-    ) -> Option<&'a Value> {
-        row.iter()
-            .find(|(col, _)| col.table.as_deref() == Some(table) && col.name == column)
-            .map(|(_, value)| value)
+    fn joined_value<'a>(row: &JoinRow<'a>, table: &str, column: &str) -> Option<&'a Value> {
+        row.get(&format!("{table}.{column}"))
     }
 
     /// Asserts that `row` has every department and employee column, in schema
     /// order, and that the columns of `null_table` are all `NULL`.
-    fn assert_complete_row_with_null_side(row: &[(JoinColumnDef, Value)], null_table: &str) {
+    fn assert_complete_row_with_null_side(row: &JoinRow<'_>, null_table: &str) {
         let shape: Vec<(Option<&str>, &str)> = row
             .iter()
             .map(|(col, _)| (col.table.as_deref(), col.name.as_str()))
@@ -861,7 +1081,7 @@ mod tests {
             .collect();
         assert_eq!(shape, expected_shape);
 
-        for (col, value) in row {
+        for (col, value) in row.iter() {
             if col.table.as_deref() == Some(null_table) {
                 assert_eq!(
                     *value,
@@ -886,9 +1106,9 @@ mod tests {
         let results = db.select_join("departments", query).unwrap();
 
         assert_eq!(results.len(), 1);
-        assert_complete_row_with_null_side(&results[0], "employees");
+        assert_complete_row_with_null_side(&results.row(0).unwrap(), "employees");
         assert_eq!(
-            joined_value(&results[0], "departments", "name"),
+            joined_value(&results.row(0).unwrap(), "departments", "name"),
             Some(&Value::Text(Text("eng".to_string())))
         );
     }
@@ -906,9 +1126,9 @@ mod tests {
         let results = db.select_join("departments", query).unwrap();
 
         assert_eq!(results.len(), 1);
-        assert_complete_row_with_null_side(&results[0], "departments");
+        assert_complete_row_with_null_side(&results.row(0).unwrap(), "departments");
         assert_eq!(
-            joined_value(&results[0], "employees", "name"),
+            joined_value(&results.row(0).unwrap(), "employees", "name"),
             Some(&Value::Text(Text("alice".to_string())))
         );
     }
@@ -926,7 +1146,7 @@ mod tests {
         let results = db.select_join("departments", query).unwrap();
 
         assert_eq!(results.len(), 1);
-        assert_complete_row_with_null_side(&results[0], "employees");
+        assert_complete_row_with_null_side(&results.row(0).unwrap(), "employees");
     }
 
     #[test]
@@ -942,7 +1162,7 @@ mod tests {
         let results = db.select_join("departments", query).unwrap();
 
         assert_eq!(results.len(), 1);
-        assert_complete_row_with_null_side(&results[0], "departments");
+        assert_complete_row_with_null_side(&results.row(0).unwrap(), "departments");
     }
 
     #[test]
@@ -963,12 +1183,12 @@ mod tests {
             .iter()
             .find(|row| joined_value(row, "departments", "id") == Some(&Value::Uint32(Uint32(1))))
             .expect("eng should be in results");
-        assert_complete_row_with_null_side(eng_row, "employees");
+        assert_complete_row_with_null_side(&eng_row, "employees");
         let alice_row = results
             .iter()
             .find(|row| joined_value(row, "employees", "id") == Some(&Value::Uint32(Uint32(10))))
             .expect("alice should be in results");
-        assert_complete_row_with_null_side(alice_row, "departments");
+        assert_complete_row_with_null_side(&alice_row, "departments");
     }
 
     #[test]
@@ -1126,7 +1346,7 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(
-            joined_value(&results[0], "employees", "name"),
+            joined_value(&results.row(0).unwrap(), "employees", "name"),
             Some(&Value::Text(Text("alice".to_string())))
         );
 
@@ -1139,10 +1359,10 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(
-            joined_value(&results[0], "departments", "name"),
+            joined_value(&results.row(0).unwrap(), "departments", "name"),
             Some(&Value::Text(Text("hr".to_string())))
         );
-        assert_complete_row_with_null_side(&results[0], "employees");
+        assert_complete_row_with_null_side(&results.row(0).unwrap(), "employees");
     }
 
     #[test]
@@ -1166,6 +1386,327 @@ mod tests {
                     if message.contains("Invalid LIKE pattern")
             ),
             "expected invalid LIKE pattern error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_inner_join_with_duplicate_keys_on_both_sides_emits_every_pair() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_emp(&db, 10, "alice", 1);
+        insert_emp(&db, 11, "bob", 1);
+        insert_emp(&db, 12, "carol", 2);
+        insert_assignment(&db, 100, 1);
+        insert_assignment(&db, 101, 1);
+        insert_assignment(&db, 102, 3);
+
+        let query = Query::builder()
+            .all()
+            .inner_join(
+                "assignments",
+                "employees.dept_id",
+                "assignments.employee_id",
+            )
+            .build();
+        let results = db.select_join("employees", query).unwrap();
+
+        assert_eq!(results.len(), 4);
+        let emp = results.column_index("employees.id").unwrap();
+        let assignment = results.column_index("assignments.id").unwrap();
+        let pairs: Vec<(Value, Value)> = results
+            .rows
+            .iter()
+            .map(|row| (row[emp].clone(), row[assignment].clone()))
+            .collect();
+        let pair = |e: u32, a: u32| (Value::Uint32(Uint32(e)), Value::Uint32(Uint32(a)));
+        assert_eq!(
+            pairs,
+            vec![pair(10, 100), pair(10, 101), pair(11, 100), pair(11, 101)]
+        );
+    }
+
+    #[test]
+    fn test_join_chain_resolves_key_on_previously_joined_table() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+        insert_emp(&db, 11, "bob", 1);
+        insert_assignment(&db, 100, 10);
+        insert_assignment(&db, 101, 10);
+        insert_assignment(&db, 102, 11);
+        insert_assignment(&db, 103, 999);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .inner_join("assignments", "employees.id", "employee_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 3);
+        for row in &results {
+            assert_eq!(row.get("employees.id"), row.get("assignments.employee_id"));
+            assert_eq!(row.get("departments.id"), Some(&Value::Uint32(Uint32(1))));
+        }
+    }
+
+    #[test]
+    fn test_inner_join_on_missing_right_column_returns_no_rows() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "no_such_column")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert!(results.is_empty());
+
+        let query = Query::builder()
+            .all()
+            .left_join("employees", "id", "no_such_column")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_complete_row_with_null_side(&results.row(0).unwrap(), "employees");
+    }
+
+    #[test]
+    fn test_inner_join_empty_result_keeps_columns() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+
+        let query = Query::builder()
+            .field("departments.name")
+            .field("employees.name")
+            .inner_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert!(results.is_empty());
+        let shape: Vec<(Option<&str>, &str)> = results
+            .columns
+            .iter()
+            .map(|col| (col.table.as_deref(), col.name.as_str()))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![(Some("departments"), "name"), (Some("employees"), "name")]
+        );
+    }
+
+    #[test]
+    fn test_inner_join_with_many_rows_matches_every_employee_to_its_department() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        for dept in 1..=300u32 {
+            insert_dept(&db, dept, &format!("dept_{dept}"));
+        }
+        for emp in 1..=3000u32 {
+            insert_emp(&db, emp, &format!("emp_{emp}"), ((emp - 1) % 300) + 1);
+        }
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 3000);
+        let dept_id = results.column_index("departments.id").unwrap();
+        let emp_dept = results.column_index("employees.dept_id").unwrap();
+        assert!(results.rows.iter().all(|row| row[dept_id] == row[emp_dept]));
+    }
+
+    #[test]
+    fn test_join_with_qualified_and_unqualified_column_selection() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_emp(&db, 10, "alice", 1);
+
+        let query = Query::builder()
+            .field("name")
+            .field("employees.dept_id")
+            .inner_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 1);
+        let selected: Vec<(Option<&str>, &str)> = results
+            .columns
+            .iter()
+            .map(|column| (column.table.as_deref(), column.name.as_str()))
+            .collect();
+        assert_eq!(
+            selected,
+            vec![
+                (Some("departments"), "name"),
+                (Some("employees"), "name"),
+                (Some("employees"), "dept_id"),
+            ]
+        );
+        let row = results.row(0).unwrap();
+        assert_eq!(
+            row.get("employees.name"),
+            Some(&Value::Text(Text("alice".to_string())))
+        );
+        assert_eq!(row.get("name"), Some(&Value::Text(Text("eng".to_string()))));
+    }
+
+    #[test]
+    fn test_inner_join_on_unindexed_column_with_more_keys_than_right_rows() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        for dept in 1..=50u32 {
+            insert_dept(&db, dept, &format!("dept_{dept}"));
+        }
+        insert_emp(&db, 10, "alice", 7);
+        insert_emp(&db, 11, "bob", 7);
+        insert_emp(&db, 12, "carol", 999);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "dept_id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 2);
+        for row in &results {
+            assert_eq!(row.get("departments.id"), Some(&Value::Uint32(Uint32(7))));
+        }
+    }
+
+    #[test]
+    fn test_inner_join_preserves_physical_right_order_with_covering_index_before_limit() {
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        CoveringJoinSchema::register_tables(&ctx).unwrap();
+        let db = WasmDbmsDatabase::oneshot(&ctx, CoveringJoinSchema);
+        insert_dept(&db, 1, "eng");
+        insert_covering_emp(&db, 20, "inserted first", 1);
+        insert_covering_emp(&db, 10, "inserted second", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("covering_employees", "id", "dept_id")
+            .limit(1)
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results.row(0).unwrap().get("covering_employees.id"),
+            Some(&Value::Uint32(Uint32(20)))
+        );
+    }
+
+    #[test]
+    fn test_indexed_join_key_push_down_respects_access_planner_limit() {
+        let schema = IndexedJoinSchema;
+        let engine = JoinEngine::<_, HeapMemoryProvider>::new(&schema);
+
+        assert!(engine.should_push_down_join_keys(
+            "indexed_employees",
+            "dept_id",
+            MAX_ALTERNATIVES
+        ));
+        assert!(!engine.should_push_down_join_keys(
+            "indexed_employees",
+            "dept_id",
+            MAX_ALTERNATIVES + 1
+        ));
+        assert!(!engine.should_push_down_join_keys(
+            "indexed_employees",
+            "id",
+            MAX_ALTERNATIVES + 1
+        ));
+
+        let composite_schema = CompositeIndexedJoinSchema;
+        let composite_engine = JoinEngine::<_, HeapMemoryProvider>::new(&composite_schema);
+        assert!(composite_engine.should_push_down_join_keys(
+            "composite_indexed_employees",
+            "dept_id",
+            MAX_ALTERNATIVES
+        ));
+        assert!(!composite_engine.should_push_down_join_keys(
+            "composite_indexed_employees",
+            "dept_id",
+            MAX_ALTERNATIVES + 1
+        ));
+    }
+
+    #[test]
+    fn test_oversized_indexed_join_keys_still_return_matches() {
+        let key_count = MAX_ALTERNATIVES as u32 + 1;
+
+        let ctx = setup_indexed();
+        let db = WasmDbmsDatabase::oneshot(&ctx, IndexedJoinSchema);
+        for id in 1..=key_count {
+            insert_indexed_dept(&db, id, "department");
+            insert_indexed_emp(&db, id, "employee", id);
+        }
+        ctx.reset_access_stats();
+        let results = db
+            .select_join(
+                "indexed_departments",
+                Query::builder()
+                    .all()
+                    .inner_join("indexed_employees", "id", "id")
+                    .build(),
+            )
+            .unwrap();
+        assert_eq!(results.len(), key_count as usize);
+        assert_eq!(ctx.access_stats().scanned_rows, u64::from(key_count) * 2);
+
+        let ctx = DbmsContext::new(HeapMemoryProvider::default());
+        CompositeIndexedJoinSchema::register_tables(&ctx).unwrap();
+        let db = WasmDbmsDatabase::oneshot(&ctx, CompositeIndexedJoinSchema);
+        for id in 1..=key_count {
+            insert_dept(&db, id, "department");
+            insert_composite_indexed_emp(&db, id, id, "employee");
+        }
+        ctx.reset_access_stats();
+        let results = db
+            .select_join(
+                "departments",
+                Query::builder()
+                    .all()
+                    .inner_join("composite_indexed_employees", "id", "dept_id")
+                    .build(),
+            )
+            .unwrap();
+        assert_eq!(results.len(), key_count as usize);
+        assert_eq!(ctx.access_stats().scanned_rows, u64::from(key_count) * 2);
+    }
+
+    #[test]
+    fn test_inner_join_on_primary_key_column_pushes_keys_down() {
+        let ctx = setup();
+        let db = WasmDbmsDatabase::oneshot(&ctx, TestSchema);
+        insert_dept(&db, 1, "eng");
+        insert_dept(&db, 2, "hr");
+        insert_dept(&db, 3, "ops");
+        insert_emp(&db, 1, "alice", 1);
+        insert_emp(&db, 3, "bob", 1);
+        insert_emp(&db, 9, "carol", 1);
+
+        let query = Query::builder()
+            .all()
+            .inner_join("employees", "id", "id")
+            .order_by_asc("employees.id")
+            .build();
+        let results = db.select_join("departments", query).unwrap();
+
+        let ids: Vec<Option<&Value>> = results.iter().map(|row| row.get("employees.id")).collect();
+        assert_eq!(
+            ids,
+            vec![
+                Some(&Value::Uint32(Uint32(1))),
+                Some(&Value::Uint32(Uint32(3)))
+            ]
         );
     }
 }

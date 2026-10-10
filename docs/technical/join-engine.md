@@ -3,7 +3,7 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Processing Pipeline](#processing-pipeline)
-- [Nested-Loop Join Algorithm](#nested-loop-join-algorithm)
+- [Hash Join Algorithm](#hash-join-algorithm)
 - [NULL Padding](#null-padding)
 - [Column Resolution](#column-resolution)
 - [Output Format](#output-format)
@@ -60,7 +60,7 @@ The `join()` method processes a query through these steps:
 ┌────────────▼─────────────┐
 │ 3. For each JOIN clause:  │◄──── left-to-right
 │    Read right table rows  │
-│    Nested-loop join       │
+│    Hash join              │
 └────────────┬─────────────┘
              │
 ┌────────────▼─────────────┐
@@ -80,24 +80,32 @@ The `join()` method processes a query through these steps:
 └────────────┬─────────────┘
              │
 ┌────────────▼─────────────┐
-│ 8. Flatten to output      │
+│ 8. Materialize result set │
 └──────────────────────────┘
 ```
 
 1. **Load schemas and validate**: Compile-time column definitions are loaded for every table. The filter is validated against those definitions so ambiguous references, out-of-scope tables, and invalid typed operands fail even when the join produces no rows.
 2. **Read FROM table**: All rows from the primary table are loaded using an unfiltered `Query::builder().all().build()`.
-3. **Process JOINs**: Each `Join` clause is processed left-to-right. For each clause, matching rows from the right table are loaded and the nested-loop join is executed against the accumulated result.
-4. **Filter**: The validated filter is applied to the combined rows using `filter.matches_joined_row()`, which supports qualified `table.column` references.
+3. **Process JOINs**: Each `Join` clause is processed left-to-right. For each
+   clause, the right table rows are loaded (see [Hash Join Algorithm](#hash-join-algorithm)
+   for when the left keys are pushed down) and the hash join is executed against
+   the accumulated result.
+4. **Filter**: The validated filter is applied to the combined rows using
+   `filter.matches_joined_row_ref()`, which borrows the loaded rows and supports
+   qualified `table.column` references.
 5. **Order**: Order-by clauses are applied in reverse (stable sort), so the primary sort key ends up correctly ordered.
 6. **Offset**: Rows are skipped according to the offset value.
 7. **Limit**: The result is truncated to the limit.
-8. **Flatten**: Each joined row is converted from the internal `JoinedRow` representation to the output `Vec<(JoinColumnDef, Value)>` format, applying column selection.
+8. **Materialize**: Each joined row, held until now as one row index per table,
+   is turned into a `Vec<Value>` of the selected columns. The `JoinColumnDef`
+   list is built once per query and returned next to the rows as a
+   `JoinResultSet`.
 
 ---
 
-## Nested-Loop Join Algorithm
+## Hash Join Algorithm
 
-All four join types are handled by a single `nested_loop_join` method using two boolean flags:
+All four join types are handled by a single `hash_join` method using two boolean flags:
 
 | Join Type | `keep_unmatched_left` | `keep_unmatched_right` |
 | --------- | --------------------- | ---------------------- |
@@ -106,31 +114,54 @@ All four join types are handled by a single `nested_loop_join` method using two 
 | RIGHT     | `false`               | `true`                 |
 | FULL      | `true`                | `true`                 |
 
-The algorithm:
+Every table taking part in the join is loaded once into a `JoinSide` (its
+rows, its compile-time columns, and a NULL row of the same shape). An
+intermediate joined row is a `Vec<Option<usize>>` with one entry per side: the
+index of that side's row, or `None` when the side is NULL-padded.
 
-1. For each left row, iterate over all right rows.
-2. If the left column value equals the right column value (and is not `None`), emit a combined row and mark the right row as matched.
-3. After scanning all right rows for a given left row: if `keep_unmatched_left` is true and no match was found, emit the left row with NULL-padded right columns.
-4. After all left rows are processed: if `keep_unmatched_right` is true, emit each unmatched right row with NULL-padded left columns.
+The algorithm, per join clause:
 
-This unified approach avoids code duplication across join types while keeping the logic straightforward.
+1. Build a `HashMap<&Value, Vec<usize>>` over the right rows, keyed by the join
+   column. `NULL` keys are skipped.
+2. For each accumulated left row, look up its join key in the map. Every hit
+   emits a combined row (left indices plus the right index) and marks the right
+   row as matched. Hits are emitted in right-row order, so output order equals
+   the former nested loop.
+3. If `keep_unmatched_left` is true and the key had no hit, emit the left row
+   with `None` for the right side.
+4. After all left rows: if `keep_unmatched_right` is true, emit each unmatched
+   right row with `None` for every left side.
+
+Cost is O(n + m + k) per join clause for _n_ left rows, _m_ right rows and _k_
+output rows, instead of O(n*m).
+
+### Loading the right side
+
+Right and full joins need every right row. For inner and left joins the
+distinct left keys are pushed down as an `IN` filter only when the right join
+column leads an index of the right table (`DatabaseSchema::table_indexes`).
+The planner answers that filter with index lookups. On an unindexed column an
+`IN` filter costs a list scan per row, so the table is scanned in full and the
+hash join does the matching.
 
 ---
 
 ## NULL Padding
 
-When a row has no match on the opposite side (in LEFT, RIGHT, or FULL joins), the missing columns are filled with `Value::Null`. The engine uses compile-time column definitions supplied by `DatabaseSchema::table_columns`:
+When a row has no match on the opposite side (in LEFT, RIGHT, or FULL joins),
+the missing columns are filled with `Value::Null`. Each `JoinSide` builds one
+NULL row from the compile-time column definitions supplied by
+`DatabaseSchema::table_columns`:
 
 ```rust
-fn null_pad_columns(&self, columns: &[ColumnDef]) -> Vec<(ColumnDef, Value)> {
-    columns
-        .iter()
-        .map(|column| (*column, Value::Null))
-        .collect()
-}
+null_row: columns.iter().map(|column| (*column, Value::Null)).collect()
 ```
 
-This preserves the complete row shape and column definitions even when the opposite table contains no rows. The derive-generated `DatabaseSchema` implementation supplies this metadata. Handwritten implementations remain source-compatible through the trait's default method, but must override `table_columns` to execute joins.
+This preserves the complete row shape and column definitions even when the
+opposite table contains no rows. The derive-generated `DatabaseSchema`
+implementation supplies this metadata. Handwritten implementations remain
+source-compatible through the trait's default method, but must override
+`table_columns` to execute joins.
 
 ---
 
@@ -159,32 +190,38 @@ For filters and ordering on joined results, the same qualified/unqualified patte
 
 ## Output Format
 
-Join results use `JoinColumnDef` instead of `ColumnDef`:
+Join results are returned as a `JoinResultSet`:
 
 ```rust
-pub struct JoinColumnDef {
-    pub table: Option<String>, // Source table name
-    pub name: String,
-    pub data_type: DataTypeKind,
-    pub nullable: bool,
-    pub primary_key: bool,
+pub struct JoinResultSet {
+    pub columns: Vec<JoinColumnDef>, // one per selected column, `table` set
+    pub rows: Vec<Vec<Value>>,       // rows[r][c] belongs to columns[c]
 }
 ```
 
-The `table` field is `Some(table_name)` for join results, allowing consumers to distinguish columns that share the same name across different tables.
+`JoinColumnDef` mirrors `ColumnDef` with owned strings and a `table` field
+naming the source table. Storing it once per query instead of once per cell is
+what keeps materialization cheap: a 10,000-row join with eight columns would
+otherwise allocate the strings of 80,000 column definitions.
 
-At the API layer, the generated `select` endpoint checks `query.has_joins()`:
+`JoinResultSet::column_index("table.column")` resolves a name to a position;
+`JoinRow` (from `row(i)` or `iter()`) offers `get("table.column")` and `iter()`
+over `(column, value)` pairs. A bare name resolves to the first column with
+that name in row order.
 
-- **With joins**: Routes to `select_join`, which uses `JoinEngine`.
-- **Without joins**: Routes to `select_raw`, the standard single-table path.
-
-Both paths return `Vec<Vec<(JoinColumnDef, Value)>>`, but for non-join queries the `table` field is `None`.
+The SQL engine converts a `JoinResultSet` into `SqlResult::Rows`, whose rows
+keep the `(JoinColumnDef, Value)` pair shape.
 
 ---
 
 ## Limitations
 
-- **O(n*m) nested-loop join**: Each join performs a full nested-loop comparison. For two tables of size _n_ and _m_, this is O(n*m) per join clause.
-- **Full table scans for join matching**: The join ON condition itself does not use indexes — both sides are compared via linear scan. However, if the query has a filter, the individual table reads that feed the join may use indexes (via the standard select path).
+- **Hash join on equality only**: The build side is always the right table of
+  the clause; there is no join reordering or build-side selection by table
+  size.
+- **Index use limited to the push-down**: The join itself matches rows in
+  memory. When the right join column leads an index, the left keys are pushed
+  down so the right-side read uses it; otherwise the right table is scanned in
+  full.
 - **All rows loaded into memory**: Every table involved in the join is fully materialized in memory before processing. This can be a concern for very large tables.
 - **Equality joins only**: The ON condition only supports column equality (`left_col = right_col`). Range conditions, expressions, and multi-column ON clauses are not supported.

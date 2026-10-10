@@ -7,6 +7,7 @@
     - [Field Selection](#field-selection)
     - [Filters](#filters)
     - [Joins](#joins)
+    - [Join Results](#join-results)
     - [Eager Loading](#eager-loading)
     - [Distinct](#distinct)
     - [Aggregations](#aggregations)
@@ -28,6 +29,9 @@ A `Query` describes what to retrieve from the database: which rows match,
 which columns to return, how to order and paginate them, and how to combine
 data across tables. Queries are constructed with `QueryBuilder` and consumed
 by `Database::select`, `Database::select_raw`, and `Database::select_join`.
+
+`select_join` returns a `JoinResultSet` with the selected columns once and the
+rows as `Vec<Value>`. See [Join Results](#join-results).
 
 For an introductory walkthrough, see the [Querying Guide](../guides/querying.md).
 
@@ -106,6 +110,22 @@ Queries containing joins must be executed via `Database::select_join`. Calling
 A join condition matches only equal, non-null values. A `NULL` join key never
 matches another row, including a row whose join key is also `NULL`. Outer joins
 retain such rows as unmatched and fill the missing side with `Value::Null`.
+
+### Join Results
+
+`Database::select_join` returns a `JoinResultSet`:
+
+| Field     | Type                 | Content                                                             |
+| --------- | -------------------- | ------------------------------------------------------------------- |
+| `columns` | `Vec<JoinColumnDef>` | One description per selected column, in row order, with `table` set |
+| `rows`    | `Vec<Vec<Value>>`    | One entry per row; `rows[r][c]` belongs to `columns[c]`             |
+
+Helpers: `len()`, `is_empty()`, `column_index("table.column")` resolves a
+name to a column position, `row(index)` and `iter()` give `JoinRow` views, and
+`&result` can be iterated directly. A `JoinRow` offers `get("table.column")`,
+`iter()` over `(column, value)` pairs, `columns()`, and `values()`. A bare name
+matches the first column with that name in row order. `columns` is complete even
+when `rows` is empty. With the `candid` feature the type derives `CandidType`.
 
 ### Eager Loading
 
