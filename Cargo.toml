@@ -14,7 +14,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.10.1"
+version = "0.11.0"
 authors = ["Christian Visintin <christian.visintin@veeso.dev>"]
 categories = ["database", "network-programming", "wasm"]
 edition = "2024"
@@ -41,12 +41,12 @@ syn = "3"
 thiserror = "2"
 url = "2"
 uuid = { version = "1", default-features = false, features = ["v7", "rng-getrandom"] }
-wasi-dbms-key-value-memory = { version = "0.10", path = "crates/wasi-dbms/wasi-dbms-key-value-memory" }
-wasi-dbms-memory = { version = "0.10", path = "crates/wasi-dbms/wasi-dbms-memory" }
-wasm-dbms = { version = "0.10", path = "crates/wasm-dbms/wasm-dbms" }
-wasm-dbms-api = { version = "0.10", path = "crates/wasm-dbms/wasm-dbms-api" }
-wasm-dbms-macros = { version = "0.10", path = "crates/wasm-dbms/wasm-dbms-macros" }
-wasm-dbms-memory = { version = "0.10", path = "crates/wasm-dbms/wasm-dbms-memory" }
+wasi-dbms-key-value-memory = { version = "0.11", path = "crates/wasi-dbms/wasi-dbms-key-value-memory" }
+wasi-dbms-memory = { version = "0.11", path = "crates/wasi-dbms/wasi-dbms-memory" }
+wasm-dbms = { version = "0.11", path = "crates/wasm-dbms/wasm-dbms" }
+wasm-dbms-api = { version = "0.11", path = "crates/wasm-dbms/wasm-dbms-api" }
+wasm-dbms-macros = { version = "0.11", path = "crates/wasm-dbms/wasm-dbms-macros" }
+wasm-dbms-memory = { version = "0.11", path = "crates/wasm-dbms/wasm-dbms-memory" }
 wasmtime = { version = "49", features = ["component-model"] }
 wasmtime-wasi = "49"
 wit-bindgen = { version = "0.62", default-features = false, features = ["macros", "realloc"] }
