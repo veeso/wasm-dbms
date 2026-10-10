@@ -2,14 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.11.0
+
+Released on 2026-10-10
+
+### Added
+
+- **wasi:** add key-value memory provider (#177)
+
+> Persist cached database pages through standard WASI store and batch interfaces. Publish recoverable checkpoints and support file snapshot interchange, restart tests, and storage guides.
+
+### Performance
+
+- **dbms:** plan composite, union, intersection, null, and covering index reads (#178)
+
+> Queries, updates, and deletes now use composite indexes from their leading columns, union index lookups for OR, intersect separate indexes for AND, read IS NULL and IS NOT NULL through indexes, and build covered projections from index keys without loading records. Candidate sets are bounded and fall back to a scan instead of truncating, every candidate is re-checked against the whole filter, and transaction changes are reconciled by visible row identity. LIKE and JSON filters keep the previous single-column behavior. A new index_planning Criterion suite and access counters measure the change against a baseline that already includes #175.
+
 ## 0.10.1
 
 Released on 2026-10-07
 
 ### Performance
 
-- **memory:** read table rows without copying the rest of the page
+- **memory:** speed up table scans and single-row operations (#175)
 
+> - perf(memory): read table rows without copying the rest of the page
+>
 > Reading a variable-size record went through MemoryAccess::read_at, which
 > allocates and zero-fills a buffer as large as the remainder of the page
 > (up to 64 KiB) for every row, copies the page into it and decodes only
@@ -21,10 +39,6 @@ Released on 2026-10-07
 >
 > The filtered query benchmark over 10,000 rows drops from 7.85 ms to
 > 1.35 ms and the join benchmark improves by about 36%.
-
-- **memory:** look up index keys without decoding whole B-tree nodes
-
-- **memory:** load table metadata without copying whole pages
 
 ## 0.10.0
 
