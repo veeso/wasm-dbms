@@ -1,41 +1,77 @@
 # AI Policy
 
-This policy applies to contributions to wasm-dbms that use generative AI or
-other code-generation systems.
+The maintainers of this project don't want to interact directly with bots.
+Contributions must come from a human who understands the submitted code or text,
+can explain it, and is responsible for its quality as if they wrote it
+themselves. Using AI as a tool to help you write or reason about a contribution
+is fine; submitting AI output you don't understand, or relaying messages
+between a maintainer and an AI, is not.
 
-## Human Responsibility
+If you wish to include context from an interaction with AI in your comments, it
+must be in a quote block (e.g., using `>`) and disclosed as such. It must be
+accompanied by human commentary explaining the relevance and implications of
+the context.
 
-AI may be used as a development tool, but every contributor remains
-responsible for the submitted code, documentation, tests, commit messages, and
-licenses. A human contributor must understand the contribution well enough to
-explain and maintain it.
-
-Maintainers may ask for clarification, revisions, or removal of AI-generated
-material. Contributions that cannot be responsibly reviewed may be rejected.
+If you plan to contribute to this project using AI tools, you **must** read,
+understand and follow this policy.
 
 ## Disclosure
 
-Disclose AI assistance in the pull request using the template's disclosure
-section. The disclosure is required when AI generated or substantially shaped
-code, documentation, tests, configuration, commit messages, or other submitted
-text. Ordinary autocomplete that completes a few words or symbols does not
-require disclosure.
+You **must** disclose the use of AI tools in your contributions. You
+**must** perform this disclosure through the pull request template; filing
+PRs without using the pull request template is a violation of this policy.
 
-The disclosure should identify the tool and briefly describe how it was used.
-Do not paste private prompts, credentials, proprietary source, or confidential
-user data into a public pull request.
+This applies to any AI tool that generated or substantially shaped the content
+you submit — code, prose or commit messages — including agents, chat assistants
+and AI-assisted editors. Mechanical editor autocompletion of a few characters
+does not need to be disclosed; if in doubt, disclose.
 
-## Review and Provenance
+## Authorship and responsibility
 
-- Review generated output as if it came from an untrusted contributor.
-- Run the checks required by [`CONTRIBUTING.md`](./CONTRIBUTING.md), including
-  the relevant build, test, formatting, documentation, and security checks.
-- Confirm that dependencies, snippets, examples, and translations are
-  compatible with their licenses and have appropriate attribution.
-- If AI output includes quoted context from a source, preserve the quote as a
-  block quote and explain why it is relevant; do not present generated text as
-  an original quotation.
-- Never disclose secrets or private project data to an AI system.
+You are the only author of, and the only party responsible for, everything you
+submit, no matter whether it was written by a human or by an AI tool. An AI
+tool is never an author or a contributor.
 
-AI assistance does not change the project's [Code of Conduct](./CODE_OF_CONDUCT.md),
-license, security-reporting process, or maintainer review requirements.
+Commits, pull requests and any other contribution **must not** contain
+`Co-authored-by` trailers (or equivalent attribution lines, such as
+`Generated-by` or session links) naming an LLM, an agent or any other AI tool.
+Disclose AI use through the pull request template, as described above, and
+nowhere else.
+
+## Translations
+
+AI is useful when communicating as a non-native English speaker. If you are
+using AI to edit your comments for this purpose, please take the time to ensure
+it reflects your own voice and ideas.
+
+## Provenance and licensing
+
+You are responsible for the provenance of anything you submit. AI tools can
+reproduce code or text from their training data verbatim, which may carry a
+license incompatible with this project. By contributing, you confirm the work
+is yours to submit under the project's license and does not infringe a third
+party's rights. The same standard that applies to code you write by hand.
+
+## Consequences
+
+Violating this policy may get your contribution rejected and, for repeated or
+egregious violations, get you blocked from the project without further warning.
+
+## Examples
+
+Examples of things that are not allowed:
+
+- Point an agent to a GitHub issue, ask it to solve the issue and open a PR,
+  without understanding the issue, the PR, or testing the solution yourself.
+- Copy responses from the AI when replying to questions from maintainers,
+  without understanding the question or the response.
+  In other words, you should not "play telephone" between your AI-generated code,
+  the reviewer, and the AI tool.
+- Add a `Co-authored-by` trailer (or similar attribution) naming an LLM or
+  agent to a commit or pull request.
+
+## Inspiration
+
+This AI policy was inspired by:
+
+- [release-plz](https://github.com/release-plz/.github/blob/main/AI_POLICY.md)
